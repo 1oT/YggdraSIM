@@ -198,7 +198,7 @@
   min-height: 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 8px;
   overflow: hidden;
 }
@@ -236,12 +236,8 @@
   gap: 10px;
   padding: 7px 9px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    var(--surface-hi),
-    var(--surface-alt)
-  );
+  border-radius: var(--radius-ms);
+  background: var(--surface-hi);
 }
 
 .saip-pane-title {
@@ -266,13 +262,42 @@
   background: var(--accent-soft);
 }
 
+/* A pane-head switch (the element list's Compact): sits right, by the count. */
+.saip-pane-tool {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.saip-pane-tool:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.saip-pane-tool[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.saip-pane-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .saip-drawer,
 .saip-pe-list,
 .saip-detail,
 .saip-validation {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -339,7 +364,7 @@
   width: 28px;
   height: 28px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg-muted);
   cursor: pointer;
@@ -481,7 +506,7 @@
   cursor: pointer;
   min-height: 28px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-recent-clear-all:hover {
@@ -519,7 +544,7 @@
   gap: 8px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 4px 6px;
   min-height: 34px;
   text-align: left;
@@ -559,7 +584,7 @@
   height: 28px;
   padding: 0;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-recent-drop:hover {
@@ -676,7 +701,7 @@
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   width: 28px;
   height: 28px;
   font-size: 14px;
@@ -813,7 +838,7 @@
   padding: 4px 10px;
   min-height: 30px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -910,4 +935,10 @@
   .saip-split {
     grid-template-columns: 1fr;
   }
+}
+
+/* The PE list pane already names itself and counts its elements in the
+   pane head; the list's own header repeated both. */
+.saip-pane--list .saip-pe-header {
+  display: none;
 }

@@ -74,6 +74,8 @@ the way a shipping LPA/IPA would.
 | --- | --- |
 | `DISCOVER` | contact SM-DP+ for pending events |
 | `DOWNLOAD [matchingId]` | pull a specific profile event |
+| `EIM-LISTEN [port=<n>]` | take eIM Packages an eIM injects with ESipa.TransferEimPackage: plain HTTP on the loopback, or HTTPS on `host=` with `cert=`, `key=` and `client-ca=` (a client certificate is required); `notifications=keep` leaves pending Notifications on the eUICC. In the GUI: Listen for injected eIM packages (loopback only) |
+| `EIM-LISTEN-CERT <name>...` | make the self-signed certificate and key an HTTPS `EIM-LISTEN` serves with |
 
 ### Optional extension commands
 

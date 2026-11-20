@@ -25,7 +25,7 @@
 
 local M = {}
 
-M.SOURCE_DIGEST = "20e74e3f5f5467e2a4327795d2cb3184bf7e7728bac0714319133d3f8d787345"
+M.SOURCE_DIGEST = "6532463a068fb14dd3fc9458bd60080a33287534d22a488cdbf8eae1c5b3f82e"
 
 M.INS_NAMES = {
     [0x04] = "DEACTIVATE_FILE",
@@ -457,7 +457,7 @@ M.BER_TAGS = {
     ["BF4F"] = "GET_EIM_PACKAGE (SGP.32)",
     ["BF50"] = "PROVIDE_EIM_PACKAGE_RESULT (SGP.32)",
     ["BF51"] = "EuiccPackageRequest or EuiccPackageResult (SGP.32 Annex D)",
-    ["BF52"] = "IpaEuiccDataRequest or IpaEuiccDataResponse (SGP.32 Annex D) / PACKAGE_DATA",
+    ["BF52"] = "IpaEuiccDataRequest or IpaEuiccDataResponse (SGP.32 Annex D)",
     ["BF53"] = "EIM_ACKNOWLEDGEMENTS (SGP.32)",
     ["BF54"] = "PROFILE_DOWNLOAD_TRIGGER (SGP.32)",
     ["BF55"] = "GetEimConfigurationData (SGP.32 section 5.9.18)",
@@ -591,6 +591,8 @@ M.EVENT_NAMES = {
     [0x1B] = "SECURED-PROFILE-CONTAINER",
     [0x1C] = "POLL-INTERVAL-NEGOTIATION",
     [0x1D] = "DATA-CONNECTION-STATUS-CHANGE",
+    [0x1E] = "CAG-CELL-SELECTION",
+    [0x1F] = "SLICES-STATUS-CHANGE",
 }
 
 M.REFRESH_QUALIFIERS = {

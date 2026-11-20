@@ -587,7 +587,9 @@ def run_standalone() -> int:
         DEFAULT_USB_MATCH_TERMS,
         _normalize_usb_match_terms,
         _normalize_usb_vidpids,
+        choose_card_emulation_board,
         create_usb_presence_monitor,
+        describe_usb_board,
     )
     from yggdrasim_common.process_debug import set_global_debug
 
@@ -620,7 +622,13 @@ def run_standalone() -> int:
         print("No SIMtrace2 board is attached.", file=sys.stderr)
         return 2
 
-    device = next((item for item in snapshot.devices if item.usable_for_remsim), None)
+    # The board the supervisor would hand the REMSIM client; failing that,
+    # the first one found, since the operator asked for a reset either way.
+    device = choose_card_emulation_board(snapshot.devices)
+    if device is None:
+        device = next((item for item in snapshot.devices if item.usable_for_remsim), None)
+    if device is not None:
+        print(f"Resetting {describe_usb_board(device)}.")
     outcome = reset_simtrace_device(
         config=config,
         bus=getattr(device, "bus", 0),
@@ -632,8 +640,9 @@ def run_standalone() -> int:
         return 1
     print(f"SIMtrace2 reset via {outcome.mode}: {outcome.detail}")
     if outcome.reenumerated is False:
+        recheck = f"lsusb -d {device.vidpid}" if device is not None else "lsusb"
         print(
-            "The board has not re-appeared yet; re-check with `lsusb | grep 1d50:60e3`.",
+            f"The board has not re-appeared yet; re-check with `{recheck}`.",
             file=sys.stderr,
         )
         return 1

@@ -12,6 +12,7 @@ from SCP11.eim_packages import (
     DOWNLOAD_DATA_CONTACT_DEFAULT_SMDP,
     DOWNLOAD_DATA_CONTACT_SMDS,
     ECO_CONFIGURATION_MUTATING_TAGS,
+    PSMO_ENABLED_PROFILE_TAGS,
     ParsedEimPackage,
     TAG_ACTIVATION_CODE_0C,
     TAG_ACTIVATION_CODE_1A,
@@ -38,7 +39,9 @@ from SCP11.eim_packages import (
     eco_operation_tags,
     euicc_package_choice_tag,
     package_changes_eim_configuration,
+    package_changes_enabled_profile,
     parse_eim_package,
+    psmo_operation_tags,
 )
 
 __all__ = [
@@ -46,6 +49,7 @@ __all__ = [
     "DOWNLOAD_DATA_CONTACT_DEFAULT_SMDP",
     "DOWNLOAD_DATA_CONTACT_SMDS",
     "ECO_CONFIGURATION_MUTATING_TAGS",
+    "PSMO_ENABLED_PROFILE_TAGS",
     "ParsedEimPackage",
     "TAG_ACTIVATION_CODE_0C",
     "TAG_ACTIVATION_CODE_1A",
@@ -72,5 +76,7 @@ __all__ = [
     "eco_operation_tags",
     "euicc_package_choice_tag",
     "package_changes_eim_configuration",
+    "package_changes_enabled_profile",
     "parse_eim_package",
+    "psmo_operation_tags",
 ]

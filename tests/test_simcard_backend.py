@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from SIMCARD.bsp import BspInstance
+from SIMCARD.connection import get_shared_engine
 from SIMCARD.engine import SimulatedSimCardEngine
 from SIMCARD.etsi_fs import next_generated_profile_aid
 from SIMCARD.profile_import import import_profile_artifact
@@ -417,6 +418,85 @@ def build_self_signed_cert_and_key(common_name: str) -> tuple[bytes, ec.Elliptic
     return certificate.public_bytes(serialization.Encoding.DER), private_key
 
 
+def build_test_ci(common_name: str) -> tuple[crypto_x509.Certificate, ec.EllipticCurvePrivateKey]:
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    name = crypto_x509.Name(
+        [
+            crypto_x509.NameAttribute(NameOID.COUNTRY_NAME, "XX"),
+            crypto_x509.NameAttribute(NameOID.ORGANIZATION_NAME, "YggdraSIM"),
+            crypto_x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        ]
+    )
+    now = datetime.datetime.now(datetime.timezone.utc)
+    certificate = (
+        crypto_x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(private_key.public_key())
+        .serial_number(crypto_x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=365))
+        .add_extension(crypto_x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(crypto_x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
+        .sign(private_key, hashes.SHA256())
+    )
+    return certificate, private_key
+
+
+TEST_CI = build_test_ci("YggdraSIM Test CI")
+
+
+def build_ci_issued_cert_and_key(
+    common_name: str,
+    ci: tuple[crypto_x509.Certificate, ec.EllipticCurvePrivateKey] = TEST_CI,
+) -> tuple[bytes, ec.EllipticCurvePrivateKey]:
+    """An SM-DP+ certificate issued by ``ci``; the card verifies it once hold_ci gives it ``ci``."""
+    ci_certificate, ci_key = ci
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.datetime.now(datetime.timezone.utc)
+    certificate = (
+        crypto_x509.CertificateBuilder()
+        .subject_name(
+            crypto_x509.Name(
+                [
+                    crypto_x509.NameAttribute(NameOID.COUNTRY_NAME, "XX"),
+                    crypto_x509.NameAttribute(NameOID.ORGANIZATION_NAME, "YggdraSIM"),
+                    crypto_x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+                ]
+            )
+        )
+        .issuer_name(ci_certificate.subject)
+        .public_key(private_key.public_key())
+        .serial_number(crypto_x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=365))
+        .add_extension(
+            crypto_x509.AuthorityKeyIdentifier.from_issuer_public_key(ci_certificate.public_key()),
+            critical=False,
+        )
+        .add_extension(crypto_x509.SubjectKeyIdentifier.from_public_key(private_key.public_key()), critical=False)
+        .add_extension(
+            crypto_x509.SubjectAlternativeName(
+                [crypto_x509.RegisteredID(crypto_x509.ObjectIdentifier(SMDP_TEST_OID))]
+            ),
+            critical=False,
+        )
+        .sign(ci_key, hashes.SHA256())
+    )
+    return certificate.public_bytes(serialization.Encoding.DER), private_key
+
+
+def hold_ci(*cis: tuple[crypto_x509.Certificate, ec.EllipticCurvePrivateKey]) -> None:
+    """Give the shared simulated eUICC the eSIM CA RootCAs it verifies SM-DP+ chains with.
+
+    SGP.22 v3.1 §5.7.13 (p.334): a chain is verified with a PK.CI.SIG the eUICC holds, and
+    the test runtime root carries none.
+    """
+    get_shared_engine().state.ci_certificates = [
+        certificate.public_bytes(serialization.Encoding.DER) for certificate, _ in cis or (TEST_CI,)
+    ]
+
+
 def load_local_sgp26_auth_and_pb_material() -> tuple[
     bytes,
     ec.EllipticCurvePrivateKey,
@@ -770,7 +850,12 @@ class SimulatedConnectionTests(unittest.TestCase):
             "profile_class": "operational",
             "service_provider": "Test Provider",
         }
-        engine.state.sgp_session.bpp_unprotected_profile = b"\x00"
+        engine.state.sgp_session.bpp_unprotected_profile = build_minimal_saip_upp(
+            iccid="89881111111111111177",
+            imsi="001010123456789",
+            impi="registry@example.test",
+            profile_name="Runtime Registry Profile",
+        )
 
         profile = engine.sgp._create_installed_profile_from_bpp()
 
@@ -830,7 +915,8 @@ class SimulatedConnectionTests(unittest.TestCase):
             challenge, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF2E00")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Invalid Signature DPauth")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Invalid Signature DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=bytes.fromhex("0102030405060708090A0B0C0D0E0F10"),
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -862,7 +948,8 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("00112233445566778899AABBCCDDEEFF")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Prepare Signature DPauth")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Prepare Signature DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -903,7 +990,10 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("102132435465768798A9BACBDCEDFE0F")
-            auth_cert_der, auth_private_key = build_self_signed_cert_and_key("Prepare Match DPauth")
+            # Both CIs are held, so only the change of issuer between DPauth and DPpb is wrong.
+            other_ci = build_test_ci("YggdraSIM Other CI")
+            hold_ci(TEST_CI, other_ci)
+            auth_cert_der, auth_private_key = build_ci_issued_cert_and_key("Prepare Match DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -917,7 +1007,7 @@ class SimulatedConnectionTests(unittest.TestCase):
             self.assertEqual((sw1, sw2), (0x90, 0x00))
             _, euicc_signature1, _, _ = read_tlv(find_first_tlv(auth_response, "5F37"), 0)
 
-            other_cert_der, other_private_key = build_self_signed_cert_and_key("Prepare Mismatch DPpb")
+            other_cert_der, other_private_key = build_ci_issued_cert_and_key("Prepare Mismatch DPpb", other_ci)
             prepare_payload = build_prepare_download_payload(
                 transaction_id=transaction_id,
                 euicc_signature1=euicc_signature1,
@@ -1554,7 +1644,7 @@ metadata_overrides = {{
             self.assertEqual(recreated_engine.state.eim_entries[0].supported_protocol_bits, [0, 4])
             self.assertFalse(recreated_engine.state.eim_entries[0].indirect_profile_download)
 
-    def test_simulated_connection_euicc_memory_reset_restores_sim_eim_identity_default(self) -> None:
+    def test_simulated_connection_sim_eim_identity_seeds_the_card_and_a_reset_removes_it(self) -> None:
         target_eim_id = "reset-local-eim-manager"
         target_fqdn = "reset.local.eim.identity.test"
         root_ci_pkid = "5566778899AABBCCDDEEFF001122334455667788"
@@ -1594,6 +1684,15 @@ metadata_overrides = {{
                 self.assertEqual(len(initial_entries), 1)
                 self.assertEqual(initial_entries[0]["eim_id"], target_eim_id)
                 self.assertEqual(initial_entries[0]["eim_fqdn"], target_fqdn)
+                self.assertEqual(initial_entries[0]["eim_id_type"], "eimIdTypeProprietary (3)")
+                self.assertEqual(initial_entries[0]["euicc_ci_pkid"], root_ci_pkid)
+
+                fresh = SimulatedSimCardEngine(euicc_store_root=str(Path(temp_dir) / "fresh")).state.eim_entries
+                self.assertEqual(len(fresh), 1)
+                self.assertEqual((fresh[0].eim_id, fresh[0].eim_id_type), (target_eim_id, 3))
+                self.assertEqual(fresh[0].euicc_ci_pkid.hex().upper(), root_ci_pkid)
+                self.assertEqual(bytes(fresh[0].eim_public_key_data), signer_certificate_der)
+                self.assertEqual(bytes(fresh[0].trusted_tls_public_key_data), tls_certificate_der)
 
                 delete_default_payload = wrap_tlv("BF59", wrap_tlv("80", target_eim_id.encode("utf-8")))
                 delete_response, sw1, sw2 = send_store_data_payload(connection, delete_default_payload)
@@ -1620,26 +1719,14 @@ metadata_overrides = {{
                     build_euicc_memory_reset_payload(reset_eim_config_data=True),
                 )
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
-                self.assertEqual(reset_response, bytes.fromhex("BF6400"))
+                self.assertEqual(reset_response, bytes.fromhex("BF6406800100810100"))
 
                 eim_response, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF5500")))
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
-                entries = decode_eim_configuration_entries(bytes(eim_response))
-                self.assertEqual(len(entries), 1)
-                self.assertEqual(entries[0]["eim_id"], target_eim_id)
-                self.assertEqual(entries[0]["eim_fqdn"], target_fqdn)
-                self.assertEqual(entries[0]["eim_id_type"], "eimIdTypeProprietary (3)")
-                self.assertEqual(entries[0]["euicc_ci_pkid"], root_ci_pkid)
+                self.assertEqual(bytes(eim_response), bytes.fromhex("BF5500"))
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=str(euicc_store_root))
-            self.assertEqual(len(recreated_engine.state.eim_entries), 1)
-            restored = recreated_engine.state.eim_entries[0]
-            self.assertEqual(restored.eim_id, target_eim_id)
-            self.assertEqual(restored.eim_fqdn, target_fqdn)
-            self.assertEqual(restored.eim_id_type, 3)
-            self.assertEqual(restored.euicc_ci_pkid.hex().upper(), root_ci_pkid)
-            self.assertEqual(bytes(restored.eim_public_key_data), signer_certificate_der)
-            self.assertEqual(bytes(restored.trusted_tls_public_key_data), tls_certificate_der)
+            self.assertEqual(recreated_engine.state.eim_entries, [])
 
     def test_simulated_connection_delete_eim_does_not_auto_reseed_bf55(self) -> None:
         default_eim_id = "2.25.311782205282738360923618091971140414400"
@@ -1666,7 +1753,10 @@ metadata_overrides = {{
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
             self.assertEqual(len(recreated_engine.state.eim_entries), 0)
 
-    def test_simulated_connection_euicc_memory_reset_restores_default_eim_row(self) -> None:
+    def test_simulated_connection_euicc_memory_reset_removes_every_eim(self) -> None:
+        # SGP.32 v1.3 §5.9.5 (p.130-132): resetEimConfigData removes all eIM Configuration
+        # Data, the simulator's default eIM included, and answers resetResult plus
+        # resetEimResult (ok, then nothingToDelete once nothing is left).
         default_eim_id = "2.25.311782205282738360923618091971140414400"
         custom_eim_id = "2.25.998877665544332211009988776655443322"
 
@@ -1705,19 +1795,20 @@ metadata_overrides = {{
                     build_euicc_memory_reset_payload(reset_eim_config_data=True),
                 )
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
-                self.assertEqual(reset_response, bytes.fromhex("BF6400"))
+                self.assertEqual(reset_response, bytes.fromhex("BF6406800100810100"))
 
                 eim_response, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF5500")))
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
-                entries = decode_eim_configuration_entries(bytes(eim_response))
-                self.assertEqual(len(entries), 1)
-                self.assertEqual(entries[0]["eim_id"], default_eim_id)
-                self.assertEqual(entries[0]["eim_fqdn"], "eim.example.test")
+                self.assertEqual(bytes(eim_response), bytes.fromhex("BF5500"))
+
+                again, sw1, sw2 = send_store_data_payload(
+                    connection,
+                    build_euicc_memory_reset_payload(reset_eim_config_data=True),
+                )
+                self.assertEqual(again, bytes.fromhex("BF6406800100810101"))
 
             recreated_engine = SimulatedSimCardEngine(euicc_store_root=temp_dir)
-            self.assertEqual(len(recreated_engine.state.eim_entries), 1)
-            self.assertEqual(recreated_engine.state.eim_entries[0].eim_id, default_eim_id)
-            self.assertEqual(recreated_engine.state.eim_entries[0].eim_fqdn, "eim.example.test")
+            self.assertEqual(recreated_engine.state.eim_entries, [])
 
     def test_simulated_connection_tracks_stateful_es10_session_and_install_flow(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -1743,7 +1834,8 @@ metadata_overrides = {{
             self.assertEqual(len(challenge_value), 16)
 
             transaction_id = bytes.fromhex("11223344556677889900AABBCCDDEEFF")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Simulator DPpb")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Simulator DPpb")
             ctx_params = wrap_tlv(b"\xA0", wrap_tlv(b"\x81", wrap_tlv(b"\x04", b"ctx")))
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
@@ -1863,7 +1955,8 @@ metadata_overrides = {{
             remove_request = wrap_tlv("BF30", wrap_tlv(b"\x80", seq_number.to_bytes(1, "big")))
             remove_response, sw1, sw2 = send_store_data_payload(connection, remove_request)
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(remove_response, bytes.fromhex("BF3000"))
+            # NotificationSentResponse deleteNotificationStatus ok(0) (SGP.22 v3.1 §5.7.11)
+            self.assertEqual(remove_response, bytes.fromhex("BF3003800100"))
 
     def test_simulated_connection_delete_profile_lists_queued_notification(self) -> None:
         with mock.patch.dict(os.environ, {CARD_BACKEND_ENV: "sim"}, clear=False):
@@ -1935,7 +2028,8 @@ metadata_overrides = {{
             remove_request = wrap_tlv("BF30", wrap_tlv(b"\x80", seq_value))
             remove_response, sw1, sw2 = send_store_data_payload(connection, remove_request)
             self.assertEqual((sw1, sw2), (0x90, 0x00))
-            self.assertEqual(remove_response, bytes.fromhex("BF3000"))
+            # NotificationSentResponse deleteNotificationStatus ok(0) (SGP.22 v3.1 §5.7.11)
+            self.assertEqual(remove_response, bytes.fromhex("BF3003800100"))
 
             empty_list_response, sw1, sw2 = connection.transmit(list(bytes.fromhex("80E2910003BF2800")))
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -2036,7 +2130,8 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("5566778899AABBCCDDEEFF0011223344")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Chunked Bootstrap DPpb")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Chunked Bootstrap DPpb")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -2124,7 +2219,8 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 transaction_id = bytes.fromhex("66778899AABBCCDDEEFF001122334455")
-                cert_der, cert_private_key = build_self_signed_cert_and_key("Segmented A3 DPpb")
+                hold_ci()
+                cert_der, cert_private_key = build_ci_issued_cert_and_key("Segmented A3 DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
                     euicc_challenge=extract_euicc_challenge(challenge),
@@ -2148,7 +2244,13 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 euicc_otpk_raw = find_first_tlv(prepare_response, "5F49")
-                oversized_upp = wrap_tlv("A0", wrap_tlv("80", b"\x01")) + (b"\xAA" * 1500)
+                # A SAIP Profile Package over 1000 bytes, so it travels as more than one A3 member.
+                oversized_upp = build_minimal_saip_upp(
+                    iccid="89881111111111111222",
+                    imsi="001010123456789",
+                    impi="x" * 1500 + "@example.test",
+                    profile_name="Segmented A3 Profile",
+                )
                 bpp_segments = build_signed_bpp_segments(
                     transaction_id=transaction_id,
                     euicc_otpk_raw=euicc_otpk_raw,
@@ -2208,7 +2310,8 @@ metadata_overrides = {{
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
 
                 transaction_id = bytes.fromhex("102030405060708090A0B0C0D0E0F000")
-                cert_der, cert_private_key = build_self_signed_cert_and_key("Persist DPpb")
+                hold_ci()
+                cert_der, cert_private_key = build_ci_issued_cert_and_key("Persist DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
                     euicc_challenge=extract_euicc_challenge(challenge),
@@ -2314,7 +2417,8 @@ metadata_overrides = {{
 
                 transaction_id = bytes.fromhex("2233445566778899AABBCCDDEEFF0011")
                 server_address = "dpp1.esim.example.test"
-                cert_der, cert_private_key = build_self_signed_cert_and_key("Notification Target DPpb")
+                hold_ci()
+                cert_der, cert_private_key = build_ci_issued_cert_and_key("Notification Target DPpb")
                 auth_payload = build_authenticate_server_payload(
                     transaction_id=transaction_id,
                     euicc_challenge=extract_euicc_challenge(challenge),
@@ -2346,7 +2450,6 @@ metadata_overrides = {{
                     iccid="89881111111111111167",
                     provider_name="Notification Provider",
                     profile_name="Notification Profile",
-                    upp_payload=b"\x01",
                 )
                 _, sw1, sw2 = send_store_data_payload(connection, bpp_segments["bootstrap"])
                 self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -2600,7 +2703,8 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("FFEEDDCCBBAA00998877665544332211")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Tamper DPpb")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Tamper DPpb")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -2663,7 +2767,8 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("11223344556677889900AABBCCDDEEFF")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Duplicate ICCID DPauth")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Duplicate ICCID DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -2695,7 +2800,6 @@ metadata_overrides = {{
                 iccid="89881111111111111112",
                 provider_name="Duplicate Provider",
                 profile_name="Duplicate ICCID",
-                upp_payload=b"\x01",
             )
             _, sw1, sw2 = send_store_data_payload(connection, bpp_segments["bootstrap"])
             self.assertEqual((sw1, sw2), (0x90, 0x00))
@@ -2721,7 +2825,8 @@ metadata_overrides = {{
             self.assertEqual((sw1, sw2), (0x90, 0x00))
 
             transaction_id = bytes.fromhex("99AABBCCDDEEFF001122334455667788")
-            cert_der, cert_private_key = build_self_signed_cert_and_key("Mismatch ICCID DPauth")
+            hold_ci()
+            cert_der, cert_private_key = build_ci_issued_cert_and_key("Mismatch ICCID DPauth")
             auth_payload = build_authenticate_server_payload(
                 transaction_id=transaction_id,
                 euicc_challenge=extract_euicc_challenge(challenge),
@@ -2753,7 +2858,6 @@ metadata_overrides = {{
                 iccid="89881111111111111178",
                 provider_name="Mismatch Provider",
                 profile_name="Mismatch ICCID",
-                upp_payload=b"\x01",
             )
             fake_profile = types.SimpleNamespace(
                 iccid="89881111111111111179",

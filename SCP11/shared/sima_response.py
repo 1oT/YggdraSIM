@@ -59,6 +59,119 @@ def describe_pe_status(status: int) -> str:
     return "unknown"
 
 
+def describe_pe_status_text(entry: dict[str, Any]) -> str:
+    """One PEStatus as a sentence: which PE, what status, where."""
+    status = int(entry["status"])
+    name = str(entry.get("status_name") or describe_pe_status(status))
+    if name.startswith("status-word-"):
+        # V3.4.1 section 8.11: [24576...28671] and [36864...40959] report the
+        # ISO 7816 status values '6xxx' and '9xxx' the card met.
+        what = f"ISO 7816 status word '{status:04X}'"
+    elif name == "proprietary":
+        what = f"proprietary status {status} ('{status:04X}')"
+    elif name == "unknown":
+        what = f"status {status} (not a value of V3.4.1 section 8.11)"
+    else:
+        what = f"{name} ({status})"
+    text = what
+    if entry.get("identification") is not None:
+        text = f"PE with identification {entry['identification']}: {what}"
+    if entry.get("additional_information") is not None:
+        text += f", additional information {entry['additional_information']}"
+    if entry.get("offset") is not None:
+        text += f", at offset {entry['offset']} of the PE"
+    return text
+
+
+# SGP.22 v3.1 section 2.5.6 (and the ASN.1 annex, page 439): ProfileInstallationResult
+# 'BF37' holds ProfileInstallationResultData 'BF27', whose finalResult [2] is a
+# SuccessResult ('A0': aid '4F', ppiResponse '04') or an ErrorResult ('A1':
+# bppCommandId '80', errorReason '81', the response '82').
+_TAG_PIR = b"\xBF\x37"
+_TAG_PIR_DATA = b"\xBF\x27"
+_TAG_NOTIFICATION_METADATA = b"\xBF\x2F"
+_MAX_SEARCH_DEPTH = 6
+
+
+def _children(value: bytes) -> list[tuple[bytes, bytes]]:
+    items: list[tuple[bytes, bytes]] = []
+    position = 0
+    while position < len(value):
+        try:
+            tag, inner, _raw, position = read_tlv(value, position)
+        except ValueError:
+            return []
+        items.append((tag, inner))
+    return items
+
+
+def _find_pir_data(data: bytes, depth: int = 0) -> bytes | None:
+    for tag, value in _children(data):
+        if tag == _TAG_PIR_DATA:
+            return value
+        if depth < _MAX_SEARCH_DEPTH and _is_constructed_tag(tag):
+            found = _find_pir_data(value, depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def locate_sima_response(data: bytes) -> dict[str, Any] | None:
+    """Find the EUICCResponse octets inside a ProfileInstallationResult.
+
+    ``data`` may be the result itself ('BF37'), its data ('BF27') or anything
+    that wraps one (a notification list, a LoadBoundProfilePackage answer).
+    Returns the octets with what the result says around them, or None when no
+    ProfileInstallationResultData is found.
+    """
+    raw = bytes(data or b"")
+    pir_data = _find_pir_data(raw)
+    if pir_data is None:
+        return None
+    found: dict[str, Any] = {
+        "source": "ProfileInstallationResult",
+        "result": "",
+        "sima_response": b"",
+        "bpp_command_id": None,
+        "error_reason": None,
+        "aid_hex": "",
+        "transaction_id_hex": "",
+        "seq_number": None,
+        "notification_address": "",
+        "iccid_hex": "",
+    }
+    for tag, value in _children(pir_data):
+        if tag == b"\x80":
+            found["transaction_id_hex"] = value.hex().upper()
+        elif tag == _TAG_NOTIFICATION_METADATA:
+            for inner_tag, inner in _children(value):
+                if inner_tag == b"\x80":
+                    found["seq_number"] = _decode_unsigned(inner)
+                elif inner_tag == b"\x0C":
+                    found["notification_address"] = inner.decode("utf-8", errors="replace")
+                elif inner_tag == b"\x5A":
+                    found["iccid_hex"] = inner.hex().upper()
+        elif tag == b"\xA2":
+            for choice_tag, choice in _children(value):
+                if choice_tag == b"\xA0":
+                    found["result"] = "successResult"
+                    for inner_tag, inner in _children(choice):
+                        if inner_tag == b"\x4F":
+                            found["aid_hex"] = inner.hex().upper()
+                        elif inner_tag == b"\x04":
+                            found["sima_response"] = inner
+                elif choice_tag == b"\xA1":
+                    found["result"] = "errorResult"
+                    for inner_tag, inner in _children(choice):
+                        if inner_tag == b"\x80":
+                            found["bpp_command_id"] = _decode_unsigned(inner)
+                        elif inner_tag == b"\x81":
+                            found["error_reason"] = _decode_unsigned(inner)
+                        elif inner_tag == b"\x82":
+                            found["sima_response"] = inner
+    return found
+
+
 def _is_constructed_tag(tag: bytes) -> bool:
     return len(tag) > 0 and (tag[0] & 0x20) != 0
 
@@ -227,8 +340,11 @@ def _decode_sima_semantics(sima_response: bytes) -> dict[str, Any]:
     if seen_pe_status_list is False:
         return {}
     fragments = [_format_pe_status(index, entry) for index, entry in enumerate(pe_status)]
+    failing = [describe_pe_status_text(entry) for entry in pe_status if int(entry["status"]) != 0]
+    failure_cause = "; ".join(failing)
     if aborted:
         fragments.append("profileInstallationAborted")
+        failure_cause += ("; " if failure_cause else "") + "the profile installation was aborted"
     if len(status_message) > 0:
         fragments.append(f"statusMessage={status_message!r}")
     ok = aborted is False and len(pe_status) > 0 and all(int(entry["status"]) == 0 for entry in pe_status)
@@ -237,13 +353,68 @@ def _decode_sima_semantics(sima_response: bytes) -> dict[str, Any]:
         "profile_installation_aborted": aborted,
         "status_message": status_message,
         "ok": ok,
+        "failure_cause": "" if ok else failure_cause,
         "summary": ", ".join(fragments),
     }
 
 
+def is_euicc_response(data: bytes) -> bool:
+    """True when ``data`` is one EUICCResponse and every octet of it fits the type.
+
+    ``decode_sima_response`` reads what it can of a damaged response. A reader
+    that has only a bare SEQUENCE to go by needs the strict form: one '30' over
+    the whole input, a peStatus list of PEStatus entries that each open with a
+    status, then at most the abort flag and the status message.
+    """
+    root = _children(bytes(data or b""))
+    if len(root) != 1 or root[0][0] != b"\x30":
+        return False
+    members = _children(root[0][1])
+    if len(members) == 0 or members[0][0] != b"\xA0":
+        return False
+    if [tag for tag, _value in members[1:]] not in ([], [b"\x81"], [b"\x82"], [b"\x81", b"\x82"]):
+        return False
+    if any(tag == b"\x81" and len(value) != 0 for tag, value in members[1:]):
+        return False
+    entries = _children(members[0][1])
+    if len(entries) == 0:
+        return False
+    for tag, value in entries:
+        fields = _children(value)
+        tags = [field_tag for field_tag, _field_value in fields]
+        if tag != b"\x30" or tags[:1] != [b"\x80"] or len(fields[0][1]) == 0:
+            return False
+        if tags != sorted(set(tags)) or not set(tags) <= set(_PE_STATUS_FIELDS):
+            return False
+    return True
+
+
 def decode_sima_response(sima_response: bytes) -> dict[str, Any]:
-    """Decode an ``EUICCResponse`` TLV into GUI-friendly fields."""
-    raw = bytes(sima_response or b"")
+    """Decode an ``EUICCResponse`` TLV into GUI-friendly fields.
+
+    A ProfileInstallationResult (or anything wrapping one) is accepted too:
+    the response inside it is the one decoded, and ``container`` says where
+    it was found and what the result reports beside it.
+    """
+    given = bytes(sima_response or b"")
+    container: dict[str, Any] | None = None
+    raw = given
+    if len(given) > 0 and given[:1] != b"\x30":
+        located = locate_sima_response(given)
+        if located is not None:
+            raw = bytes(located.pop("sima_response"))
+            container = located
+            container["given_hex"] = given.hex().upper()
+            container["given_length"] = len(given)
+    decoded = _decode_euicc_response(raw)
+    if container is not None:
+        decoded["container"] = container
+        if len(raw) == 0:
+            decoded["error"] = f"the {container['result'] or 'result'} carries no EUICCResponse"
+    return decoded
+
+
+def _decode_euicc_response(raw: bytes) -> dict[str, Any]:
     nodes, consumed, error_text = _parse_sima_nodes(raw)
     translation = _translation_from_nodes(nodes)
     semantic = _decode_sima_semantics(raw)

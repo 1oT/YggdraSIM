@@ -3,7 +3,7 @@
 
 """PE-CDMAParameter structured edit helpers.
 
-PE-CDMAParameter (TCA SAIP §6.6.6 / 3GPP2 C.S0023 §3.4) groups the
+PE-CDMAParameter (TCA SAIP v3.4.1 §8.4.3 / 3GPP2 C.S0023 §3.4) groups the
 A-Key (CAVE), SSD, HRPD authentication data, Simple-IP CHAP shared
 secret, and Mobile-IP shared secret into a single profile element.
 This module gives the GUI / TUI a spec-aware mutator surface for each

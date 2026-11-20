@@ -15,7 +15,7 @@
   transform: translateY(-50%);
   border-radius: var(--radius-pill);
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
+  box-shadow: 0 0 8px var(--glow);
   animation: ygg-busy-pulse 1.2s ease-in-out infinite;
 }
 

@@ -3499,7 +3499,7 @@ def run_saip_transcode_tui(bridge: SaipToolBridge) -> None:
             self._decoded_pane_dirty = False
             self._outline_visible = True
             # Fold consecutive-duplicate ``filePath`` rows in the
-            # ``fileManagementCMD`` outline. Vendors (notably Telna)
+            # ``fileManagementCMD`` outline. Some vendors
             # encode an explicit SELECT ahead of every single EF even
             # when the selected DF has not changed, which makes the
             # outline visually alternate 1:1 between "(File path)" and

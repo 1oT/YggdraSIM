@@ -41,22 +41,9 @@
   --tree-ef-fg: color-mix(in oklab, var(--ok) 64%, var(--fg-dim));
   --tree-ef-edge: color-mix(in oklab, var(--ok) 36%, transparent);
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --radius-pill: 999px;
-
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
-    Consolas, "Liberation Mono", monospace;
-
-  --transition-fast: 140ms cubic-bezier(0.25, 0.8, 0.4, 1);
-  --transition-mid: 220ms cubic-bezier(0.25, 0.8, 0.4, 1);
-  --transition-slow: 340ms cubic-bezier(0.25, 0.8, 0.4, 1);
-
-  --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* Radii, typefaces, type scale, motion and the chrome treatment belong
+     to the skin (`skins/<name>.css`, chosen by `data-skin`), not to the
+     theme: every skin renders in every palette. */
 
   /*
    * Semantic compatibility layer.
@@ -965,13 +952,491 @@ html[data-theme="graphite-light"] {
   --theme-tint:
     radial-gradient(circle at 50% -10%, rgba(23, 24, 26, 0.035), transparent 55%);
 }
+/*
+ * Bench · dark -- the palette the Bench skin was drawn in: near-black
+ * panels, recessed wells (`--surface` sits below `--bg`) and an achromatic
+ * accent, light keys with dark legends, so the only chroma on screen is
+ * ok / warn / fail and the decoded data itself. A theme like any other: it
+ * pairs with both skins, and Bench does not require it.
+ */
 
-/* -- Matrix font override: use mono everywhere for the terminal look. */
-html[data-theme="matrix"] body,
-html[data-theme="matrix"] input,
-html[data-theme="matrix"] button,
-html[data-theme="matrix"] select {
-  font-family: var(--font-mono);
+html[data-theme="bench-dark"] {
+  --bg: #121416;
+  --bg-elev: #181b1e;
+  --bg-elev-2: #202428;
+  --surface: #0e1012;
+  --surface-alt: rgba(228, 231, 234, 0.04);
+  --bg-hover: rgba(228, 231, 234, 0.06);
+  --border: #2b3035;
+  --border-strong: #3d454d;
+  --fg: #e4e7ea;
+  --fg-dim: #9ba4ad;
+  --fg-muted: var(--fg-dim);
+  --accent: #eef1f3;
+  --accent-strong: #ffffff;
+  --accent-soft: rgba(238, 241, 243, 0.10);
+  --accent-fg: #121416;
+  --accent-glow: rgba(238, 241, 243, 0.20);
+  --gradient-accent: linear-gradient(135deg, #eef1f3 0%, #d9dee2 100%);
+  --gradient-brand: linear-gradient(135deg, #eef1f3 0%, #9ba4ad 100%);
+  --ok: #62d394;
+  --ok-soft: rgba(98, 211, 148, 0.14);
+  --warn: #f0c75e;
+  --warn-soft: rgba(240, 199, 94, 0.14);
+  --fail: #ff7a6e;
+  --fail-soft: rgba(255, 122, 110, 0.14);
+  --code-bg: #0e1012;
+  --kbd-bg: rgba(14, 16, 18, 0.96);
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.40), 0 8px 22px -10px rgba(0, 0, 0, 0.55);
+  --shadow-card-hover: 0 1px 0 rgba(0, 0, 0, 0.45), 0 14px 34px -12px rgba(0, 0, 0, 0.65);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 10px 26px -12px var(--accent-glow);
+  --topbar-bg: rgba(24, 27, 30, 0.94);
+  --theme-tint:
+    radial-gradient(circle at 50% -10%, rgba(228, 231, 234, 0.03), transparent 55%);
+}
+/*
+ * Bench · light -- the light half of the Bench palette: a grey field, white
+ * wells and panels, and an achromatic accent (near-black keys with white
+ * legends), so the only chroma on screen is ok / warn / fail and the
+ * decoded data itself. A theme like any other: it pairs with both skins.
+ */
+
+html[data-theme="bench-light"] {
+  --bg: #e7e9eb;
+  --bg-elev: #f5f6f7;
+  --bg-elev-2: #dde1e4;
+  --surface: #ffffff;
+  --surface-alt: rgba(20, 23, 26, 0.04);
+  --bg-hover: rgba(20, 23, 26, 0.06);
+  --border: #c5cbd1;
+  --border-strong: #8f98a2;
+  --fg: #14171a;
+  --fg-dim: #4c555e;
+  --fg-muted: var(--fg-dim);
+  --accent: #14171a;
+  --accent-strong: #000000;
+  --accent-soft: rgba(20, 23, 26, 0.08);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(20, 23, 26, 0.18);
+  --gradient-accent: linear-gradient(135deg, #14171a 0%, #2b3035 100%);
+  --gradient-brand: linear-gradient(135deg, #14171a 0%, #4c555e 100%);
+  --ok: #17733f;
+  --ok-soft: rgba(23, 115, 63, 0.12);
+  --warn: #7d5900;
+  --warn-soft: rgba(125, 89, 0, 0.12);
+  --fail: #b8322a;
+  --fail-soft: rgba(184, 50, 42, 0.12);
+  --code-bg: #ffffff;
+  --kbd-bg: rgba(255, 255, 255, 0.96);
+  --shadow-card: 0 1px 2px rgba(20, 23, 26, 0.06), 0 6px 16px -6px rgba(20, 23, 26, 0.12);
+  --shadow-card-hover: 0 2px 4px rgba(20, 23, 26, 0.08), 0 12px 28px -8px rgba(20, 23, 26, 0.18);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 10px 26px -12px var(--accent-glow);
+  --topbar-bg: rgba(245, 246, 247, 0.94);
+  --theme-tint:
+    radial-gradient(circle at 50% -10%, rgba(20, 23, 26, 0.03), transparent 55%);
+}
+
+/* -- Typefaces the skins name ------------------------------------------------
+ *
+ * Vendored under vendor/plex-sans-condensed/ and vendor/plex-mono/ (SIL OFL
+ * 1.1, Latin-1 subsets; see each NOTICE.md). A locally installed Plex wins
+ * through local(); a face is only fetched when a skin's stack uses it. The
+ * URLs resolve against /static/app.css. */
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed"), local("IBMPlexSansCondensed"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed Medium"), local("IBMPlexSansCondensed-Medium"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-Medium-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed SemiBold"), local("IBMPlexSansCondensed-SemiBold"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-SemiBold-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: local("IBM Plex Mono"), local("IBMPlexMono"),
+    url("vendor/plex-mono/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: local("IBM Plex Mono SemiBold"), local("IBMPlexMono-SemiBold"),
+    url("vendor/plex-mono/IBMPlexMono-SemiBold-Latin1.woff2") format("woff2");
+}
+
+/* -- Skin: Bench (default) -------------------------------------------------
+ *
+ * A skin is the non-colour half of the design: typefaces, type scale,
+ * shape, separation and the chrome treatment. Colour stays with the theme
+ * (`data-theme`), so every skin renders in every palette. A skin file
+ * declares custom properties only; the layout, component and view rules
+ * read them, and `theme-init.js` sets `data-skin` before first paint.
+ *
+ * Bench is the lab-instrument skin: a condensed sans for the interface and
+ * monospace for data, square keys, flat panels separated by rules, chrome
+ * on the code surface, the current selection lit like a pressed key, and
+ * capitals for UI legends only -- names (eSIM, eUICC, LPA-d, ASN.1 types)
+ * keep their case. Status lamps are square. */
+:root,
+html[data-skin="bench"] {
+  /* Type */
+  --font-sans: "IBM Plex Sans Condensed", "Roboto Condensed", "Arial Narrow",
+    "Liberation Sans Narrow", "DejaVu Sans Condensed", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-head: var(--font-sans);
+  --font-size-base: 13px;
+  --line-height-base: 1.45;
+  --heading-weight: 600;
+  --heading-track: 0.01em;
+  --legend-size: 10.5px;
+  --legend-weight: 600;
+  --legend-track: 0.08em;
+  --group-case: none;
+  --group-size: 11.5px;
+  --group-track: 0.01em;
+
+  /* Shape */
+  --radius-xs: 1px;
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-pill: 2px;
+  --radius-dot: 1px;
+
+  /* Motion: short and linear, no overshoot. */
+  --transition-fast: 90ms linear;
+  --transition-mid: 140ms linear;
+  --transition-slow: 200ms linear;
+  --ease-out-bounce: cubic-bezier(0.25, 0.8, 0.4, 1);
+  --hover-shift: 0;
+
+  /* Separation: rules instead of shadows, no glow, no page tint. */
+  --page-tint: none;
+  --surface-shadow: none;
+  --surface-shadow-hover: none;
+  --overlay-shadow: 0 0 0 1px var(--border-strong);
+  --glow: transparent;
+  --accent-fill: var(--accent);
+  --brand-fill: linear-gradient(var(--fg), var(--fg));
+
+  /* Chrome: top bar, sidebar, event log and status line. */
+  --bar-h: 46px;
+  --bar-bg: var(--code-bg);
+  --bar-blur: none;
+  --bar-rule: var(--border-strong);
+  --bar-underline: transparent;
+  --bar-gap: 12px;
+  --bar-pad: 0 10px;
+  --chrome-pill-bg: transparent;
+  --chrome-pill-border: var(--border-strong);
+  --chrome-pill-h: 28px;
+  --nav-bg: var(--bg);
+  --nav-rule: var(--border-strong);
+  --nav-item-h: 30px;
+  --nav-item-size: 13px;
+  --dock-bg: var(--code-bg);
+  --dock-tabs-bg: var(--code-bg);
+  --dock-rule: var(--border-strong);
+  --status-h: 26px;
+  --status-bg: var(--code-bg);
+  --status-font: var(--font-mono);
+  --main-pad: 16px 18px 28px;
+
+  /* Extra chrome tokens */
+  --glow-size: 0px;
+  --brand-hover-transform: none;
+  --nav-item-pad: 5px 10px 5px 14px;
+  --title-rule: var(--border);
+  --nav-count-bg: transparent;
+  --nav-count-fg: var(--fg-dim);
+  --nav-count-font: var(--font-mono);
+  --nav-count-on-bg: transparent;
+  --nav-count-on-fg: var(--accent-fg);
+
+  --dock-tab-on-bg: transparent;
+
+  /* Components */
+  --radius-ms: 2px;
+  --surface-glow: none;
+  --hover-lift: 0;
+  --btn-h: 28px;
+  --btn-pad: 4px 12px;
+  --title-size: 22px;
+  --title-weight: 600;
+  --title-track: 0.01em;
+
+  --rail-w: 62px;
+
+  --card-stripe: transparent;
+
+  --spot-tint: 0%;
+
+  /* Module workbench: action list | output | inspector. */
+  --module-areas: "actions main side";
+  --module-areas-mid: "actions main" "side main";
+  --module-col-actions: minmax(200px, 236px);
+  --module-col-main: minmax(0, 1fr);
+  --module-col-side: minmax(250px, 320px);
+  --module-rows-mid: minmax(0, 1.25fr) minmax(0, 1fr);
+  --module-col-actions-strip: 34px;
+  --module-col-side-strip: 34px;
+  --module-pane-display: contents;
+  --module-inspector-display: flex;
+  --module-pane-head-display: flex;
+  --module-legacy-label-display: none;
+  --module-side-pad: 8px 8px 10px;
+  --module-side-rule: var(--border);
+  --module-side-bg: var(--bg);
+  --strip-writing: vertical-rl;
+  --actlist-flow: column nowrap;
+  --actlist-gap: 1px;
+  --actlist-tabs-direction: column;
+  --actlist-tab-justify: space-between;
+  --actlist-item-justify: flex-start;
+  --actlist-item-width: 100%;
+  --actlist-item-min-w: 0;
+  --actlist-item-pad: 4px 8px;
+  --actlist-item-h: 26px;
+  --actlist-item-bg: transparent;
+  --actlist-item-border: transparent;
+  --actlist-label-size: 12.5px;
+  --actlist-label-max: none;
+  --actlist-label-wrap: normal;
+  --actlist-on-bg: var(--accent);
+  --actlist-on-fg: var(--accent-fg);
+  --actlist-on-border: var(--accent);
+
+  --module-col-actions-none: 0px;
+
+  --module-col-side-wide: minmax(420px, 0.85fr);
+
+  --chip-case: none;
+
+  /* Selection: the current entry is a lit key. */
+  --nav-current-bg: var(--accent);
+  --nav-current-fg: var(--accent-fg);
+  --nav-current-mark: 0;
+  --seg-on-bg: var(--accent);
+  --seg-on-fg: var(--accent-fg);
+  --seg-on-border: var(--accent);
+
+  /* Keys: the module ribbons are rows of legended keys. */
+  --key-direction: row;
+  --key-gap: 6px;
+  --key-pad: 0 10px;
+  --key-h: 28px;
+  --key-bg: var(--bg-elev-2);
+  --key-border: var(--border-strong);
+  --key-label-size: 12px;
+  --key-label-weight: 500;
+  --key-label-max: none;
+  --key-tile-h: 28px;
+  --key-justify: center;
+  --key-danger-fg: var(--fail);
+  --key-danger-bg: var(--bg-elev);
+  --key-icon-display: none;
+}
+
+/* -- Skin: Classic ---------------------------------------------------------
+ *
+ * The look the GUI had before Bench: system sans, rounded panels and pill
+ * badges, card shadows, the theme's accent gradients and page tint, and the
+ * glass top bar. Same token set as `bench.css`; see that file for what a
+ * skin may declare. */
+html[data-skin="classic"] {
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --font-head: var(--font-sans);
+  --font-size-base: 14px;
+  --line-height-base: 1.5;
+  --heading-weight: 600;
+  --heading-track: 0.01em;
+  --legend-size: 10px;
+  --legend-weight: 700;
+  --legend-track: 0.08em;
+  --group-case: uppercase;
+  --group-size: 11px;
+  --group-track: 0.08em;
+
+  /* Shape */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+  --radius-dot: 50%;
+
+  /* Motion */
+  --transition-fast: 140ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-mid: 220ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-slow: 340ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --hover-shift: 2px;
+
+  /* Separation */
+  --page-tint: var(--theme-tint);
+  --surface-shadow: var(--shadow-card);
+  --surface-shadow-hover: var(--shadow-card-hover);
+  --overlay-shadow: var(--shadow-card-hover);
+  --glow: var(--accent-glow);
+  --accent-fill: var(--gradient-accent);
+  --brand-fill: var(--gradient-brand);
+
+  /* Chrome */
+  --bar-h: 52px;
+  --bar-bg: var(--topbar-bg);
+  --bar-blur: saturate(180%) blur(14px);
+  --bar-rule: var(--border);
+  --bar-underline: linear-gradient(90deg, transparent 0%, var(--accent-soft) 50%, transparent 100%);
+  --bar-gap: 18px;
+  --bar-pad: 0 20px;
+  --chrome-pill-bg: var(--bg-elev-2);
+  --chrome-pill-border: var(--border);
+  --chrome-pill-h: 30px;
+  --nav-bg: var(--bg-elev);
+  --nav-rule: var(--border);
+  --nav-item-h: 38px;
+  --nav-item-size: 13px;
+  --dock-bg: var(--bg-elev);
+  --dock-tabs-bg: var(--bg);
+  --dock-rule: var(--border);
+  --status-h: 28px;
+  --status-bg: var(--bg-elev);
+  --status-font: var(--font-sans);
+  --main-pad: 28px 36px 44px;
+
+  /* Extra chrome tokens */
+  --glow-size: 10px;
+  --brand-hover-transform: rotate(-6deg) scale(1.05);
+  --nav-item-pad: 9px 12px 9px 16px;
+  --title-rule: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+  --nav-count-bg: var(--accent-soft);
+  --nav-count-fg: var(--accent);
+  --nav-count-font: var(--font-sans);
+  --nav-count-on-bg: var(--accent-soft);
+  --nav-count-on-fg: var(--accent);
+
+  --dock-tab-on-bg: var(--bg-elev);
+
+  /* Components */
+  --radius-ms: 8px;
+  --surface-glow: var(--shadow-glow-accent);
+  --hover-lift: -1px;
+  --btn-h: 34px;
+  --btn-pad: 7px 14px;
+  --title-size: 26px;
+  --title-weight: 700;
+  --title-track: -0.015em;
+
+  --rail-w: 62px;
+
+  --card-stripe: linear-gradient(90deg, transparent 0%, var(--accent) 40%, var(--accent-strong) 60%, transparent 100%);
+
+  --spot-tint: 9%;
+
+  /* Module workbench */
+  --module-areas: "actions main side";
+  --module-areas-mid: "actions main side";
+  --module-col-actions: minmax(340px, 0.92fr);
+  --module-col-main: minmax(420px, 1.08fr);
+  --module-col-side: 0px;
+  --module-rows-mid: minmax(0, 1fr);
+  --module-col-actions-strip: minmax(340px, 0.92fr);
+  --module-col-side-strip: 0px;
+  --module-pane-display: flex;
+  --module-inspector-display: contents;
+  --module-pane-head-display: none;
+  --module-legacy-label-display: block;
+  --module-side-pad: 0;
+  --module-side-rule: transparent;
+  --module-side-bg: transparent;
+  --strip-writing: horizontal-tb;
+  --actlist-flow: row wrap;
+  --actlist-gap: 5px;
+  --actlist-tabs-direction: row;
+  --actlist-tab-justify: flex-start;
+  --actlist-item-justify: center;
+  --actlist-item-width: auto;
+  --actlist-item-min-w: 64px;
+  --actlist-item-pad: var(--key-pad);
+  --actlist-item-h: var(--key-h);
+  --actlist-item-bg: var(--key-bg);
+  --actlist-item-border: var(--key-border);
+  --actlist-label-size: var(--key-label-size);
+  --actlist-label-max: var(--key-label-max);
+  --actlist-label-wrap: nowrap;
+  --actlist-on-bg: var(--accent-soft);
+  --actlist-on-fg: var(--accent);
+  --actlist-on-border: color-mix(in oklab, var(--accent), transparent 42%);
+
+  --module-col-actions-none: minmax(340px, 0.92fr);
+
+  --module-col-side-wide: 0px;
+
+  --chip-case: lowercase;
+
+  /* Selection */
+  --nav-current-bg: var(--accent-soft);
+  --nav-current-fg: var(--fg);
+  --nav-current-mark: 1;
+  --seg-on-bg: var(--accent-soft);
+  --seg-on-fg: var(--fg);
+  --seg-on-border: color-mix(in oklab, var(--accent) 48%, var(--border));
+
+  /* Keys */
+  --key-direction: column;
+  --key-gap: 3px;
+  --key-pad: 5px 7px 4px;
+  --key-h: auto;
+  --key-bg: transparent;
+  --key-border: transparent;
+  --key-label-size: 10px;
+  --key-label-weight: 600;
+  --key-label-max: 82px;
+  --key-tile-h: 52px;
+  --key-justify: flex-start;
+  --key-danger-fg: var(--fg);
+  --key-danger-bg: transparent;
+  --key-icon-display: inline-flex;
+}
+
+/* -- Matrix font override: monospace everywhere for the terminal look, under
+   every skin. Ordered after skins/ so it wins over the skin's typefaces. */
+html[data-theme="matrix"] {
+  --font-sans: var(--font-mono);
+  --font-head: var(--font-mono);
+}
+
+html[data-theme="matrix"] body {
   letter-spacing: 0.01em;
 }
 
@@ -990,15 +1455,18 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans);
+  /* The root keeps 14px so rem-sized rules read the same under every skin;
+     the skin's base size applies from body down. */
   font-size: 14px;
-  line-height: 1.5;
+  line-height: var(--line-height-base);
   height: 100%;
   transition: background-color var(--transition-mid), color var(--transition-mid);
 }
 
 body {
   overflow: hidden;
-  background-image: var(--theme-tint);
+  font-size: var(--font-size-base);
+  background-image: var(--page-tint);
   background-attachment: fixed;
 }
 
@@ -1016,7 +1484,8 @@ html[data-theme="catppuccin-macchiato"],
 html[data-theme="catppuccin-frappe"],
 html[data-theme="dracula"],
 html[data-theme="github-dark"],
-html[data-theme="matrix"] {
+html[data-theme="matrix"],
+html[data-theme="bench-dark"] {
   color-scheme: dark;
 }
 
@@ -1052,7 +1521,7 @@ pre {
 code {
   background: var(--code-bg);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
 }
 
@@ -1202,7 +1671,7 @@ select option:hover {
 
 .app-shell {
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: var(--bar-h) minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   grid-template-areas:
     "topbar    topbar"
@@ -1221,7 +1690,7 @@ select option:hover {
 }
 
 .app-shell[data-log-collapsed="true"] {
-  grid-template-rows: 52px minmax(0, 1fr) 28px 28px;
+  grid-template-rows: var(--bar-h) minmax(0, 1fr) 28px var(--status-h);
 }
 
 /* SA-G8: collapsible Command Center sidebar. The 260px column folds
@@ -1250,11 +1719,11 @@ select option:hover {
    bar must NOT also remove the operator's only handle to the
    sidebar. */
 .app-shell[data-topbar-collapsed="true"] {
-  grid-template-rows: 30px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: 30px minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
 }
 
 .app-shell[data-topbar-collapsed="true"][data-log-collapsed="true"] {
-  grid-template-rows: 30px minmax(0, 1fr) 28px 28px;
+  grid-template-rows: 30px minmax(0, 1fr) 28px var(--status-h);
 }
 
 .app-shell[data-topbar-collapsed="true"] .topbar {
@@ -1375,7 +1844,7 @@ select option:hover {
   inset: 0 auto 0 0;
   width: min(260px, 88vw);
   z-index: 6;
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--overlay-shadow);
   transform: translateX(calc(-100% - 48px));
   will-change: transform, opacity;
 }
@@ -1402,11 +1871,11 @@ select option:hover {
 }
 
 .app-shell[data-topbar-mode="auto"] {
-  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
 }
 
 .app-shell[data-topbar-mode="auto"][data-log-collapsed="true"] {
-  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px 28px;
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px var(--status-h);
 }
 
 /* Opaque while it moves: the glass blur of the resting bar would have
@@ -1414,12 +1883,12 @@ select option:hover {
 .app-shell[data-topbar-mode="auto"] .topbar {
   position: absolute;
   inset: 0 0 auto 0;
-  height: 52px;
+  height: var(--bar-h);
   z-index: 7;
   background: var(--bg-elev);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--overlay-shadow);
   transform: translateY(calc(-100% - 48px));
   will-change: transform, opacity;
 }
@@ -1461,9 +1930,9 @@ select option:hover {
   bottom: 3px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--accent);
-  box-shadow: 0 0 6px 0 var(--accent-glow);
+  box-shadow: 0 0 6px 0 var(--glow);
 }
 
 .topbar-collapse-toggle,
@@ -1555,14 +2024,14 @@ select option:hover {
 .topbar {
   grid-area: topbar;
   position: relative;
-  background: var(--topbar-bg);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-bottom: 1px solid var(--border);
+  background: var(--bar-bg);
+  backdrop-filter: var(--bar-blur);
+  -webkit-backdrop-filter: var(--bar-blur);
+  border-bottom: 1px solid var(--bar-rule);
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 20px;
+  gap: var(--bar-gap);
+  padding: var(--bar-pad);
   min-width: 0;
   min-height: 0;
   z-index: 3;
@@ -1573,10 +2042,7 @@ select option:hover {
   position: absolute;
   inset: auto 0 -1px 0;
   height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    var(--accent-soft) 50%,
-    transparent 100%);
+  background: var(--bar-underline);
   pointer-events: none;
 }
 
@@ -1600,8 +2066,10 @@ select option:hover {
   overflow: hidden;
   background: color-mix(in oklab, var(--bg-elev), var(--bg) 28%);
   border: 1px solid color-mix(in oklab, var(--accent), var(--border) 48%);
+  /* The mark is round under every skin: it is the logo's geometry, not a
+     control radius. */
   border-radius: 50%;
-  box-shadow: 0 4px 14px -6px var(--accent-glow);
+  box-shadow: 0 4px 14px -6px var(--glow);
   transition: transform var(--transition-mid) var(--ease-out-bounce),
     box-shadow var(--transition-mid);
 }
@@ -1613,13 +2081,13 @@ select option:hover {
 }
 
 .brand:hover .brand-mark {
-  transform: rotate(-6deg) scale(1.05);
-  box-shadow: 0 6px 18px -4px var(--accent-glow);
+  transform: var(--brand-hover-transform);
+  box-shadow: 0 6px 18px -4px var(--glow);
 }
 
 .brand-name {
   font-size: 15px;
-  background: var(--gradient-brand);
+  background: var(--brand-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -1655,11 +2123,11 @@ select option:hover {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  min-height: 30px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
   color: var(--fg-dim);
   font-size: 11px;
   line-height: 1;
@@ -1686,11 +2154,11 @@ select option:hover {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  min-height: 30px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
   color: var(--fg-dim);
   cursor: pointer;
   font: inherit;
@@ -1722,7 +2190,7 @@ select option:hover {
 .topbar-card-bridge-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: currentColor;
   opacity: 0.72;
 }
@@ -1740,6 +2208,11 @@ select option:hover {
   font-weight: 700;
 }
 
+/* A name inside a pill legend keeps its case: LOCAL eIM, never LOCAL EIM. */
+.topbar-card-bridge-name {
+  text-transform: none;
+}
+
 .topbar-card-bridge[data-state="configured"] {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
   background: var(--accent-soft);
@@ -1754,7 +2227,7 @@ select option:hover {
 
 .topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
   opacity: 1;
-  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px color-mix(in oklab, var(--ok) 38%, transparent);
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 var(--glow-size) color-mix(in oklab, var(--ok) 38%, transparent);
 }
 
 .topbar-card-bridge[data-state="error"] {
@@ -1786,7 +2259,10 @@ select option:hover {
 }
 
 /* Then a console's further pills, then the suite chip (the version is in
-   About) and, while a plugin pill shows, the crumb the page title repeats. */
+   About) and the crumb the page title repeats: beside HIL bridge and Remote
+   the bar always carries the Local eIM pill, which put Classic over the
+   crumbs at 1280 px. Last, that pill drops the word Local (its title still
+   names the service). */
 @media (max-width: 1400px) {
   .topbar-plugin-pill--more {
     display: none;
@@ -1798,7 +2274,13 @@ select option:hover {
     display: none;
   }
 
-  .topbar:has(.topbar-plugin-pills:not([hidden])) > .breadcrumbs {
+  .topbar > .breadcrumbs {
+    display: none;
+  }
+}
+
+@media (max-width: 1240px) {
+  .topbar-local-eim-qualifier {
     display: none;
   }
 }
@@ -1817,16 +2299,16 @@ select option:hover {
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  min-height: 34px;
-  padding: 3px 5px 3px 9px;
-  border: 1px solid var(--border);
+  min-height: var(--chrome-pill-h);
+  padding: 2px 3px 2px 9px;
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
 }
 
 .topbar-backend-option {
-  min-height: 28px;
-  padding: 4px 9px;
+  min-height: calc(var(--chrome-pill-h) - 6px);
+  padding: 3px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -1851,19 +2333,20 @@ select option:hover {
 }
 
 .topbar-backend-option.is-active {
-  background: var(--accent-soft);
-  border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
-  color: var(--fg);
+  background: var(--seg-on-bg);
+  border-color: var(--seg-on-border);
+  color: var(--seg-on-fg);
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
+  background: var(--chrome-pill-bg);
+  border: 1px solid var(--chrome-pill-border);
   font-size: 11px;
   color: var(--fg-dim);
   text-transform: lowercase;
@@ -1884,7 +2367,7 @@ select option:hover {
 .badge-api .dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--fg-dim);
   position: relative;
 }
@@ -1946,9 +2429,9 @@ select option:hover {
   .sidebar {
     position: fixed;
     z-index: 6;
-    inset: 52px auto 28px 0;
+    inset: var(--bar-h) auto var(--status-h) 0;
     width: min(260px, 88vw);
-    box-shadow: var(--shadow-card-hover);
+    box-shadow: var(--overlay-shadow);
   }
 
   .app-shell[data-topbar-collapsed="true"] .sidebar {
@@ -1988,11 +2471,11 @@ select option:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 2px 8px 2px 10px;
+  min-height: var(--chrome-pill-h);
+  padding: 0 8px 0 10px;
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
+  background: var(--chrome-pill-bg);
+  border: 1px solid var(--chrome-pill-border);
   color: var(--fg-dim);
   font-size: 11px;
   transition: border-color var(--transition-fast);
@@ -2015,7 +2498,7 @@ select option:hover {
 }
 
 .theme-picker select {
-  min-height: 28px;
+  min-height: calc(var(--chrome-pill-h) - 4px);
   background-color: transparent;
   color: var(--fg);
   border: 0;
@@ -2023,6 +2506,13 @@ select option:hover {
   font-size: 11px;
   cursor: pointer;
   font-weight: 500;
+  /* Capped so the 20-entry picker never pushes the reader strip into
+     its scroll range; a long theme name clips inside the control. */
+  max-width: 150px;
+}
+
+.theme-picker .skin-select {
+  max-width: 92px;
 }
 
 .theme-picker select:focus-visible {
@@ -2044,8 +2534,8 @@ select option:hover {
 
 .sidebar {
   grid-area: sidebar;
-  background: var(--bg-elev);
-  border-right: 1px solid var(--border);
+  background: var(--nav-bg);
+  border-right: 1px solid var(--nav-rule);
   overflow-y: auto;
   overscroll-behavior: contain;
   min-width: 0;
@@ -2069,7 +2559,7 @@ select option:hover {
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+  background: var(--title-rule);
 }
 
 .subsystem-list {
@@ -2085,14 +2575,14 @@ select option:hover {
   position: relative;
   display: block;
   width: 100%;
-  min-height: 38px;
-  padding: 9px 12px 9px 16px;
+  min-height: var(--nav-item-h);
+  padding: var(--nav-item-pad);
   border: 0;
   background: transparent;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--nav-item-size);
   color: var(--fg);
   border-radius: var(--radius-md);
   transition: background-color var(--transition-fast),
@@ -2109,8 +2599,8 @@ select option:hover {
   width: 3px;
   height: 60%;
   border-radius: var(--radius-pill);
-  background: var(--gradient-accent);
-  box-shadow: 0 0 10px 0 var(--accent-glow);
+  background: var(--accent-fill);
+  box-shadow: 0 0 var(--glow-size) 0 var(--glow);
   transition: transform var(--transition-mid) var(--ease-out-bounce),
     opacity var(--transition-fast);
   opacity: 0;
@@ -2118,7 +2608,7 @@ select option:hover {
 
 .subsystem-entry:hover {
   background: var(--bg-hover);
-  transform: translateX(2px);
+  transform: translateX(var(--hover-shift));
 }
 
 .subsystem-entry:focus-visible {
@@ -2128,14 +2618,14 @@ select option:hover {
 }
 
 .subsystem-entry.active {
-  background: var(--accent-soft);
-  color: var(--fg);
+  background: var(--nav-current-bg);
+  color: var(--nav-current-fg);
   font-weight: 600;
 }
 
 .subsystem-entry.active::before {
   transform: translateY(-50%) scaleY(1);
-  opacity: 1;
+  opacity: var(--nav-current-mark);
 }
 
 .subsystem-entry .subsystem-name {
@@ -2152,13 +2642,181 @@ select option:hover {
   white-space: nowrap;
 }
 
+/* Rail: the sidebar collapsed to a column of short-legend keys
+   (`data-sidebar-mode="rail"`, trailing.js). Every leaf keeps its
+   button; the label is hidden visually but stays the accessible name,
+   and the key shows the leaf's `data-cc-rail` legend. Group headers
+   become rules, and every group's keys show whatever its open state. */
+.app-shell[data-sidebar-mode="rail"] {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar {
+  padding: 6px 5px 16px;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-title {
+  height: 1px;
+  padding: 0;
+  margin: 8px 4px;
+  overflow: hidden;
+  color: transparent;
+  background: var(--border-strong);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-title::after {
+  content: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .subsystem-list {
+  padding: 0;
+  gap: 3px;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-group-header {
+  height: 1px;
+  min-height: 0;
+  margin: 6px 4px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-group-header > * {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-children {
+  display: flex;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border-left: 0;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-subchildren,
+.app-shell[data-sidebar-mode="rail"] .cc-nav-subtoggle {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry,
+.app-shell[data-sidebar-mode="rail"] #command-center-nav .cc-nav-leaf {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry::before {
+  content: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry > :not(.cc-nav-name) {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry > .cc-nav-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry::after {
+  content: attr(data-cc-rail) / "";
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+}
+
+@media (max-width: 760px) {
+  .app-shell[data-sidebar-mode="rail"] .sidebar {
+    width: var(--rail-w);
+  }
+}
+
+/* Pane keys in the status line, lit while their pane is open. */
+.status-panekeys {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.status-panekey {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: var(--font-sans);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.status-panekey:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.status-panekey[aria-pressed="true"] {
+  background: var(--seg-on-bg);
+  border-color: var(--seg-on-border);
+  color: var(--seg-on-fg);
+}
+
+.status-panekey:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-dim);
+}
+
+/* The card readout: what the last overview of the active reader read. */
+.status-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.status-card-value {
+  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.status-panekey-n {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  opacity: 0.8;
+}
+
 .main {
   grid-area: main;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 28px 36px 44px;
+  padding: var(--main-pad);
   position: relative;
 }
 
@@ -2168,8 +2826,9 @@ select option:hover {
 
 .statusbar {
   grid-area: statusbar;
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
+  background: var(--status-bg);
+  border-top: 1px solid var(--bar-rule);
+  font-family: var(--status-font);
   padding: 0 20px;
   display: flex;
   align-items: center;
@@ -2432,8 +3091,8 @@ select option:hover {
 
 .log-dock {
   grid-area: logdock;
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
+  background: var(--dock-bg);
+  border-top: 1px solid var(--dock-rule);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2505,7 +3164,7 @@ body.log-dock-resizing * {
   align-items: stretch;
   gap: 0;
   flex: 0 0 28px;
-  background: var(--bg);
+  background: var(--dock-tabs-bg);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -2537,7 +3196,7 @@ body.log-dock-resizing * {
 .log-dock-tab.is-active {
   color: var(--fg);
   border-bottom-color: var(--accent);
-  background: var(--bg-elev);
+  background: var(--dock-tab-on-bg);
 }
 
 .log-dock-tab:focus-visible,
@@ -2603,11 +3262,65 @@ body.log-dock-resizing * {
 .log-dock-tab-dot--apdu  { background: var(--fg-dim); }
 .log-dock-tab-dot--validation { background: var(--accent); }
 
+/* A collapsed log keeps one line: the latest row of any bucket, beside
+   the counters and tools. The full rows come back with the dock. */
+.log-dock-last {
+  display: none;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-dim);
+  align-self: center;
+}
+
+.app-shell[data-log-collapsed="true"] .log-dock-last:not(:empty) {
+  display: flex;
+}
+
+.app-shell[data-log-collapsed="true"] .log-dock-last:not(:empty) ~ .log-dock-spacer {
+  display: none;
+}
+
+.log-dock-last-ts {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-dock-last-src {
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.log-dock-last-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+}
+
+.log-dock-last[data-level="warn"] .log-dock-last-msg,
+.log-dock-last[data-level="warning"] .log-dock-last-msg {
+  color: var(--warn);
+}
+
+.log-dock-last[data-level="error"] .log-dock-last-msg {
+  color: var(--fail);
+}
+
 .log-dock-spacer {
   flex: 1 1 auto;
 }
 
 .log-dock-action {
+  flex: 0 0 auto;
+  white-space: nowrap;
   border: none;
   background: transparent;
   color: var(--fg-dim);
@@ -2736,7 +3449,7 @@ body.log-dock-resizing * {
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -2875,12 +3588,13 @@ body.log-dock-resizing * {
 }
 
 .view h1 {
-  font-size: 26px;
+  font-size: var(--title-size);
   line-height: 1.2;
   margin: 0 0 8px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  background: var(--gradient-brand);
+  font-family: var(--font-head);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-track);
+  background: var(--brand-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -2917,7 +3631,7 @@ body.log-dock-resizing * {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   transition: transform var(--transition-mid),
     box-shadow var(--transition-mid),
     border-color var(--transition-fast);
@@ -2929,14 +3643,14 @@ body.log-dock-resizing * {
   position: absolute;
   inset: 0 0 auto 0;
   height: 2px;
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   opacity: 0;
   transition: opacity var(--transition-mid);
   pointer-events: none;
 }
 
 .card:hover {
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--surface-shadow-hover);
   border-color: var(--border-strong);
 }
 
@@ -2980,7 +3694,7 @@ dd {
   margin: 8px 0 4px;
   line-height: 1;
   letter-spacing: -0.02em;
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -3002,8 +3716,8 @@ dd {
   background: var(--bg-elev-2);
   border: 1px solid var(--border-strong);
   color: var(--fg);
-  padding: 7px 14px;
-  min-height: 34px;
+  padding: var(--btn-pad);
+  min-height: var(--btn-h);
   border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 12px;
@@ -3018,7 +3732,7 @@ dd {
 .btn:hover {
   border-color: var(--accent);
   background: var(--bg-hover);
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
 }
 
 .btn:active {
@@ -3037,18 +3751,18 @@ dd {
 }
 
 .btn-primary {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
   font-weight: 600;
-  box-shadow: 0 4px 14px -4px var(--accent-glow);
+  box-shadow: 0 4px 14px -4px var(--glow);
 }
 
 .btn-primary:hover {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
-  box-shadow: 0 8px 22px -6px var(--accent-glow);
+  box-shadow: 0 8px 22px -6px var(--glow);
   filter: brightness(1.08);
 }
 
@@ -3146,7 +3860,7 @@ dd {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .data-table th,
@@ -3543,6 +4257,52 @@ dd {
   color: var(--fg-muted);
 }
 
+/* The confirmation of a sensitive flag, a line of its own under the row. */
+.env-flag-confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--warn) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.env-flag-confirm-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The question a button that writes to the card asks, a line under it. */
+.cc-write-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--warn) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cc-write-confirm-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1180px) {
   .env-flag {
     grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
@@ -3916,7 +4676,7 @@ dd {
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   font-size: 13px;
   line-height: 1;
   color: var(--fg-muted);
@@ -3942,7 +4702,7 @@ dd {
 
 .cc-wb-frame--canvas:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-glow-accent);
+  box-shadow: var(--surface-glow);
 }
 
 .terminal-controls {
@@ -4096,7 +4856,12 @@ dd {
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 12px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
+}
+
+/* Lines an action prints while it runs; its answer replaces them. */
+.cc-live-trace {
+  max-height: 260px;
 }
 
 .flow-row {
@@ -4238,8 +5003,9 @@ kbd {
 }
 
 #command-center-nav .cc-nav-count {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--nav-count-bg);
+  color: var(--nav-count-fg);
+  font-family: var(--nav-count-font);
   border-radius: var(--radius-pill);
   padding: 1px 10px;
   font-size: 11px;
@@ -4247,6 +5013,11 @@ kbd {
   letter-spacing: 0.02em;
   min-width: 20px;
   text-align: center;
+}
+
+#command-center-nav .subsystem-entry.active .cc-nav-count {
+  background: var(--nav-count-on-bg);
+  color: var(--nav-count-on-fg);
 }
 
 #command-center-nav .cc-nav-name {
@@ -4277,7 +5048,7 @@ kbd {
   content: "";
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: currentColor;
   box-shadow: 0 0 0 2px var(--ok-soft);
 }
@@ -4360,10 +5131,10 @@ kbd {
 .overview-module-group-header h3 {
   margin: 0 0 3px;
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--group-size);
   font-weight: 700;
   letter-spacing: 0;
-  text-transform: uppercase;
+  text-transform: var(--group-case);
 }
 
 .overview-module-group-header .hint {
@@ -4400,7 +5171,7 @@ kbd {
 .overview-module-card:focus-visible {
   border-color: var(--accent);
   background: var(--bg-hover);
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
   outline: none;
 }
 
@@ -4439,6 +5210,31 @@ kbd {
   line-height: 1.4;
 }
 
+/* Live state: open sessions or packages, the last card read, the module's
+   last action and its errors; hidden while there is none. */
+.overview-module-card-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.overview-module-card-state[hidden] {
+  display: none;
+}
+
+.overview-module-card-fact {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.overview-module-card-fact[data-state="error"] {
+  color: var(--fail);
+}
+
 .overview-status-grid {
   margin-top: 18px;
 }
@@ -4474,7 +5270,7 @@ kbd {
 }
 
 .cc-action-card.card:hover:not(.is-busy) {
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   border-color: var(--border);
 }
 
@@ -4482,14 +5278,14 @@ kbd {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent-soft),
-    0 0 18px -4px var(--accent-glow);
+    0 0 18px -4px var(--glow);
 }
 
 .cc-action-card.is-busy {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent-soft),
-    0 0 18px -4px var(--accent-glow);
+    0 0 18px -4px var(--glow);
 }
 
 .cc-action-card.is-busy::before {
@@ -4499,12 +5295,7 @@ kbd {
   height: 2px;
   border-top-left-radius: var(--radius-md);
   border-top-right-radius: var(--radius-md);
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--accent) 40%,
-    var(--accent-strong) 60%,
-    transparent 100%);
+  background: var(--card-stripe);
   background-size: 200% 100%;
   animation: ygg-busy-sweep 1.4s linear infinite;
   pointer-events: none;
@@ -4526,7 +5317,7 @@ kbd {
   transform: translateY(-50%);
   border-radius: var(--radius-pill);
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
+  box-shadow: 0 0 8px var(--glow);
   animation: ygg-busy-pulse 1.2s ease-in-out infinite;
 }
 
@@ -4561,10 +5352,10 @@ kbd {
   border: none;
   border-radius: var(--radius-md);
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--group-size);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: var(--group-case);
+  letter-spacing: var(--group-track);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast);
@@ -4638,6 +5429,64 @@ kbd {
   opacity: 0.85;
 }
 
+/* Offline Tools lists each tool one level below its leaf. */
+.cc-nav-subchildren {
+  list-style: none;
+  margin: 0 0 2px 22px;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 1px dashed var(--border);
+}
+
+.cc-nav-subchildren[hidden] {
+  display: none;
+}
+
+/* The caret beside a leaf with a tool list: opens the list in place. */
+.cc-nav-leaf-item--expandable {
+  position: relative;
+}
+
+.cc-nav-subtoggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cc-nav-subtoggle:hover {
+  background: var(--bg-hover);
+}
+
+.cc-nav-subtoggle:hover .cc-nav-caret,
+.cc-nav-subtoggle:focus-visible .cc-nav-caret {
+  color: var(--fg);
+}
+
+.cc-nav-subtoggle[aria-expanded="true"] .cc-nav-caret {
+  transform: rotate(90deg);
+}
+
+#command-center-nav .cc-nav-subleaf {
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+#command-center-nav .cc-nav-subleaf::before {
+  left: 5px;
+}
+
 /* Scope chip in the SCP03 session header. Neutral accent so the
    ATR / session / auth chips retain their semantic colours. */
 .cc-chip-scope {
@@ -4645,7 +5494,9 @@ kbd {
   border: 1px solid var(--border);
   color: var(--fg-dim);
   letter-spacing: 0.02em;
-  text-transform: lowercase;
+  /* Classic set the scope chip in lowercase; Bench keeps the words as
+     written ("Scope: File system"). */
+  text-transform: var(--chip-case);
 }
 
 .cc-apps-hint {
@@ -4817,7 +5668,7 @@ kbd {
   gap: 16px;
   padding: 16px 20px 14px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--bg-elev), var(--bg-elev-2));
+  background: var(--bg-elev);
   flex-wrap: wrap;
 }
 
@@ -4833,6 +5684,47 @@ kbd {
   color: var(--fg-dim);
   font-size: 12.5px;
   max-width: 64ch;
+}
+
+/* Module head: group eyebrow above the title, readouts beside it. The
+   eyebrow is a name, so it keeps its case under every skin. */
+.cc-module-eyebrow {
+  margin: 0 0 1px;
+  color: var(--fg-dim);
+  font-size: var(--group-size);
+  letter-spacing: var(--group-track);
+  text-transform: var(--group-case);
+}
+
+.cc-module-state {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-content: center;
+  gap: 1px 8px;
+  margin: 0 auto 0 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.cc-module-state dt {
+  color: var(--fg-dim);
+  font-family: var(--font-sans);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  text-align: right;
+}
+
+.cc-module-state dd {
+  margin: 0;
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg);
 }
 
 .cc-compact-search {
@@ -4963,7 +5855,7 @@ kbd {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   margin-bottom: -1px;
   transition: color var(--transition-fast),
               background var(--transition-fast);
@@ -5016,7 +5908,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-elev);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .cc-reader-session-copy,
@@ -5132,8 +6024,8 @@ kbd {
   align-self: center;
   padding: 0 4px 0 2px;
   color: var(--fg-dim);
-  font-size: 9.5px;
-  font-weight: 700;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   user-select: none;
@@ -5172,7 +6064,7 @@ kbd {
   border-radius: var(--radius-pill);
   background: color-mix(in oklab, currentColor, transparent 88%);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   line-height: 1.5;
 }
 
@@ -5192,7 +6084,7 @@ kbd {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--bg-elev);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .cc-hil-more-item {
@@ -5317,7 +6209,7 @@ kbd {
 .cc-hil-tab {
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   margin-bottom: -1px;
   padding: 7px 16px 8px;
   background: transparent;
@@ -5710,7 +6602,7 @@ kbd {
 
 .cc-hil-decoded-range {
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .cc-hil-decoded-range.is-highlighted {
@@ -5986,7 +6878,7 @@ kbd {
 }
 
 .cc-compact-group-label {
-  font-size: 9px;
+  font-size: var(--legend-size);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -6003,13 +6895,15 @@ kbd {
 
 .cc-compact-rbtn {
   display: flex;
-  flex-direction: column;
+  flex-direction: var(--key-direction);
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: var(--key-gap);
   min-width: 72px;
-  padding: 8px 10px 6px;
-  background: transparent;
-  border: 1px solid transparent;
+  min-height: var(--key-h);
+  padding: var(--key-pad);
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
   border-radius: var(--radius-md);
   color: var(--fg);
   cursor: pointer;
@@ -6034,7 +6928,7 @@ kbd {
 }
 
 .cc-compact-rbtn-icon {
-  display: inline-flex;
+  display: var(--key-icon-display);
   align-items: center;
   justify-content: center;
   width: 23px;
@@ -6066,11 +6960,11 @@ kbd {
 }
 
 .cc-compact-rbtn-label {
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: var(--key-label-size);
+  font-weight: var(--key-label-weight);
   text-align: center;
   line-height: 1.25;
-  max-width: 90px;
+  max-width: var(--key-label-max);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6085,7 +6979,7 @@ kbd {
 .cc-compact-rbtn-dot {
   width: 4px;
   height: 4px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
 }
 
 .cc-compact-rbtn-dot--stream { background: var(--warn); }
@@ -6110,8 +7004,8 @@ kbd {
 
 .main--module-workbench .cc-compact-rbtn {
   min-width: 64px;
-  padding: 5px 7px 4px;
-  gap: 3px;
+  padding: var(--key-pad);
+  gap: var(--key-gap);
   border-radius: var(--radius-sm);
 }
 
@@ -6127,8 +7021,8 @@ kbd {
 }
 
 .main--module-workbench .cc-compact-rbtn-label {
-  max-width: 82px;
-  font-size: 10px;
+  max-width: var(--key-label-max);
+  font-size: var(--key-label-size);
 }
 
 .main--module-workbench .cc-workbench--offline-tools .cc-compact-action-grid {
@@ -6163,7 +7057,7 @@ kbd {
   gap: 5px 10px;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev);
   text-align: left;
   transition: background-color var(--transition-fast),
@@ -6176,7 +7070,7 @@ kbd {
   background: var(--bg-hover);
   border-color: var(--accent);
   outline: none;
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
 }
 
 .main--module-workbench .cc-workbench--offline-tools .cc-compact-rbtn-icon {
@@ -6249,7 +7143,7 @@ kbd {
   min-height: 220px;
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: color-mix(in oklab, var(--bg-elev), var(--bg) 12%);
 }
 
@@ -6343,15 +7237,105 @@ kbd {
   margin-top: 2px;
 }
 
+/* Offline Tools: an entry of several tools carries a tab per tool over one
+   pane each (_buildOfflineToolTabs in command-center.js). */
+.cc-tool-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cc-tool-tabstrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cc-tool-tab {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.cc-tool-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.cc-tool-tab.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+.cc-tool-tabpanel[hidden],
+.cc-tool-state[hidden] {
+  display: none;
+}
+
+/* What the tools of an entry share (the SUCI key file in use), over the tabs' panes. */
+.cc-tool-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.cc-tool-state-fact {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cc-tool-state-key {
+  font-weight: 700;
+  /* The value wraps, a long path or command; the name beside it stays whole. */
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.cc-tool-state-value {
+  color: var(--fg);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 .cc-compact-rbtn.is-active {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 42%);
 }
 
+/* An action whose stream is running: its form is kept and comes back on a click. */
+.cc-compact-rbtn.is-running .cc-compact-rbtn-label::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-inline-start: 8px;
+  border-radius: var(--radius-pill);
+  /* The label's own colour: the dot shows on the selected button as on the others. */
+  background: currentColor;
+  vertical-align: middle;
+}
+
 .cc-esim-split-grid {
   display: grid;
-  grid-template-columns: minmax(340px, 0.92fr) minmax(420px, 1.08fr);
+  /* Skin tokens: Classic stacks the action list over the module's overview
+     in one left pane (the side column is 0px); Bench lays out three panes,
+     action list | output | inspector. */
+  grid-template-columns: var(--module-col-actions) var(--module-col-main) var(--module-col-side);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: var(--module-areas);
   gap: 0;
   height: 100%;
   min-height: 0;
@@ -6371,7 +7355,7 @@ kbd {
 }
 
 .cc-esim-left-pane {
-  display: flex;
+  display: var(--module-pane-display);
   flex-direction: column;
   gap: 10px;
   padding: 8px 10px 10px;
@@ -6380,6 +7364,7 @@ kbd {
 }
 
 .cc-esim-flow-pane {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -6486,6 +7471,8 @@ kbd {
   .main--module-workbench .cc-esim-split-grid {
     display: grid;
     grid-template-columns: 1fr;
+    grid-template-rows: none;
+    grid-template-areas: none;
     height: auto;
     overflow: visible;
     padding: 0;
@@ -6513,6 +7500,13 @@ kbd {
   font-style: italic;
   padding: 16px 0;
   margin: 0;
+}
+
+.cc-dash-stamp {
+  margin: 0;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .cc-dash-placeholder {
@@ -6578,7 +7572,7 @@ kbd {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   overflow: hidden;
 }
 
@@ -6586,7 +7580,9 @@ kbd {
   padding: 8px 14px;
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
+  /* Names from the card or the package (eUICCConfigurationData, a
+     certificate, an ASN.1 path) keep their case under Bench. */
+  text-transform: var(--group-case);
   letter-spacing: 0.06em;
   color: var(--accent);
   background: var(--accent-soft);
@@ -6776,6 +7772,40 @@ kbd {
 
 .cc-esim-profile-state.is-disabled {
   color: var(--fg-muted);
+}
+
+/* Fallback and Fallback allowed (SGP.32 fallbackAttribute / fallbackAllowed)
+   on a line of their own under the profile name. */
+.cc-esim-profile-flags {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.cc-esim-profile-flag::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: var(--radius-dot);
+  background: var(--border-strong);
+  vertical-align: 1px;
+}
+
+.cc-esim-profile-flag[data-state="on"] {
+  color: var(--ok);
+}
+
+.cc-esim-profile-flag[data-state="on"]::before {
+  background: var(--ok);
+}
+
+.cc-esim-profile-flag[data-state="unknown"] {
+  font-style: italic;
 }
 
 .cc-esim-profile-name {
@@ -8167,6 +9197,344 @@ kbd {
     grid-column: 1;
   }
 }
+
+/* -- Module side panes ----------------------------------------------------
+ * The action list (`.cc-dash-actions` in the left pane) and the inspector
+ * (`.cc-module-inspector`: overview panels and the card dashboard). Under
+ * Bench the left pane is `display: contents`, so both join the split grid as
+ * panes of their own beside the output pane; under Classic they stack in the
+ * left pane as before, ordered overview, actions, dashboard. Either pane
+ * collapses to a labelled strip (`data-actions` / `data-inspector` on the
+ * shell, trailing.js) and its strip brings it back. */
+.cc-esim-left-pane > .cc-dash-actions {
+  grid-area: actions;
+  order: 1;
+  /* In Classic's flex column the overflow would let the list shrink to a
+     sliver under a long overview; the left pane is the scroller there. */
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--module-side-pad);
+  border-right: 1px solid var(--module-side-rule);
+  background: var(--module-side-bg);
+}
+
+.cc-module-inspector {
+  grid-area: side;
+  display: var(--module-inspector-display);
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--module-side-pad);
+  border-left: 1px solid var(--module-side-rule);
+  background: var(--module-side-bg);
+}
+
+.cc-module-inspector > .cc-dashboard {
+  order: 2;
+}
+
+.cc-module-pane-head {
+  display: var(--module-pane-head-display);
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
+
+.cc-module-pane-head ~ .cc-compact-group-label {
+  display: var(--module-legacy-label-display);
+}
+
+.cc-module-pane-title {
+  color: var(--fg-dim);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.cc-module-pane-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cc-module-pane-key:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.cc-module-pane-head[data-pane="actions"] .cc-module-pane-key::before {
+  content: "\25C2";
+}
+
+.cc-module-pane-head[data-pane="inspector"] .cc-module-pane-key::before {
+  content: "\25B8";
+}
+
+.cc-module-strip {
+  display: none;
+  flex: 1 1 auto;
+  /* Row follows the inline axis, which runs down the strip under a
+     vertical writing mode and across it under a horizontal one. */
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-elev);
+  color: var(--fg);
+  cursor: pointer;
+  writing-mode: var(--strip-writing);
+}
+
+.cc-module-strip:hover {
+  background: var(--bg-elev-2);
+}
+
+.cc-module-strip-glyph {
+  color: var(--fg-dim);
+  font-size: 10px;
+  line-height: 1;
+  writing-mode: horizontal-tb;
+}
+
+.cc-module-strip[data-pane="actions"] .cc-module-strip-glyph::before {
+  content: "\25B8";
+}
+
+.cc-module-strip[data-pane="inspector"] .cc-module-strip-glyph::before {
+  content: "\25C2";
+}
+
+.cc-module-strip-label {
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.cc-module-strip-meta {
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.app-shell[data-actions="strip"] {
+  --module-col-actions: var(--module-col-actions-strip);
+}
+
+.cc-esim-split-grid--no-actions {
+  --module-col-actions: var(--module-col-actions-none);
+}
+
+/* Without an action list the inspector holds the module's controls (the
+   OTA profile form), so it takes a wide column unless it is collapsed. */
+.app-shell:not([data-inspector="strip"]) .cc-esim-split-grid--no-actions {
+  --module-col-side: var(--module-col-side-wide);
+}
+
+.app-shell[data-inspector="strip"] {
+  --module-col-side: var(--module-col-side-strip);
+}
+
+.app-shell[data-actions="strip"] .cc-esim-left-pane > .cc-dash-actions,
+.app-shell[data-inspector="strip"] .cc-module-inspector {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.app-shell[data-actions="strip"] .cc-esim-left-pane > .cc-dash-actions > :not(.cc-module-strip),
+.app-shell[data-inspector="strip"] .cc-module-inspector > :not(.cc-module-strip) {
+  display: none;
+}
+
+.app-shell[data-actions="strip"] .cc-esim-left-pane > .cc-dash-actions > .cc-module-strip,
+.app-shell[data-inspector="strip"] .cc-module-inspector > .cc-module-strip {
+  display: flex;
+}
+
+.app-shell[data-actions="strip"] .cc-esim-left-pane > .cc-dash-actions {
+  display: flex;
+}
+
+/* The action list: one action per row in Bench, keys in a wrapping strip in
+   Classic. The open action is lit. */
+.cc-dash-actions .cc-compact-group-inner {
+  flex-flow: var(--actlist-flow);
+  gap: var(--actlist-gap);
+}
+
+.cc-dash-actions .cc-esim-action-tabs {
+  flex-direction: var(--actlist-tabs-direction);
+}
+
+.cc-dash-actions .cc-esim-action-tab {
+  justify-content: var(--actlist-tab-justify);
+}
+
+.cc-dash-actions .cc-compact-rbtn {
+  justify-content: var(--actlist-item-justify);
+  width: var(--actlist-item-width);
+  min-width: var(--actlist-item-min-w);
+  min-height: var(--actlist-item-h);
+  padding: var(--actlist-item-pad);
+  background: var(--actlist-item-bg);
+  border-color: var(--actlist-item-border);
+  text-align: left;
+}
+
+.cc-dash-actions .cc-compact-rbtn:hover {
+  background: var(--bg-hover);
+}
+
+.cc-dash-actions .cc-compact-rbtn-label {
+  max-width: var(--actlist-label-max);
+  font-size: var(--actlist-label-size);
+  white-space: var(--actlist-label-wrap);
+  text-align: inherit;
+}
+
+.cc-dash-actions .cc-compact-rbtn.is-active {
+  background: var(--actlist-on-bg);
+  border-color: var(--actlist-on-border);
+  color: var(--actlist-on-fg);
+}
+
+/* Below 1280 px the inspector moves under the action list (Bench); the
+   output pane keeps the full height. Below 900 px every skin stacks the
+   panes in one column again. */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .cc-esim-split-grid {
+    grid-template-columns: var(--module-col-actions) var(--module-col-main);
+    grid-template-rows: var(--module-rows-mid);
+    grid-template-areas: var(--module-areas-mid);
+  }
+}
+
+/* The inspector is a narrow pane under Bench: the overview components take
+   their narrow layout from the pane's width, not the window's. */
+.cc-module-inspector {
+  container-type: inline-size;
+  container-name: module-inspector;
+}
+
+/* Below 300 px (the inspector under the action list, 901-1280 px) a
+   label and its value stack, so an EID keeps its full line. */
+@container module-inspector (max-width: 300px) {
+  .cc-dash-kv {
+    flex-direction: column;
+    gap: 1px;
+  }
+}
+
+@container module-inspector (max-width: 460px) {
+  .cc-esim-profile-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cc-esim-profile-main {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .cc-esim-profile-ident {
+    grid-column: 1 / -1;
+    padding-left: 18px;
+  }
+
+  .cc-esim-profile-controls {
+    justify-content: flex-start;
+    padding-left: 18px;
+  }
+
+  .cc-local-eim-inputs,
+  .cc-local-smdp-inputs,
+  .cc-local-eim-summary,
+  .cc-local-smdp-summary,
+  .cc-local-eim-queue-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .cc-esim-left-pane {
+    display: flex;
+  }
+
+  .cc-module-inspector {
+    display: contents;
+  }
+
+  .cc-esim-flow-pane,
+  .cc-esim-left-pane > .cc-dash-actions,
+  .cc-module-inspector {
+    grid-area: auto;
+  }
+}
+
+/* A grouped module's category tabs (Local eIM) sit at the top of its action
+   list and filter it: stacked under Bench, a wrapping strip under Classic. */
+.cc-dash-actions > .cc-compact-ribbon {
+  margin-bottom: 8px;
+}
+
+.cc-dash-actions .cc-compact-tabstrip {
+  flex-direction: var(--actlist-tabs-direction);
+  padding: 0 0 4px;
+  background: transparent;
+}
+
+.cc-dash-actions .cc-compact-tab {
+  justify-content: var(--actlist-tab-justify);
+  padding: 5px 8px;
+  border-bottom: 1px solid transparent;
+}
+
+.cc-dash-actions .cc-compact-tab.active {
+  border-bottom-color: var(--border);
+}
+
+/* The File system tree is the module's index pane: it collapses to a
+   labelled strip beside the preview (status-line key 2). */
+.cc-scan-layout > .cc-module-strip {
+  display: none;
+}
+
+@media (min-width: 901px) {
+  .app-shell[data-actions="strip"] .cc-scan-layout {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .app-shell[data-actions="strip"] .cc-scan-layout > [data-module-pane="index"] {
+    display: none;
+  }
+
+  .app-shell[data-actions="strip"] .cc-scan-layout > .cc-module-strip {
+    display: flex;
+    min-height: 0;
+    writing-mode: vertical-rl;
+  }
+}
 /* Drag-and-drop visual state for path inputs.
    Applied to the ``.cc-path-row`` wrapper (or the raw input when no
    wrapper is present) while a file is being dragged over the surface.
@@ -8196,6 +9564,23 @@ kbd {
   pointer-events: none;
   text-align: right;
   font-weight: 600;
+}
+
+/* A whole panel that takes a dropped file (Local SM-DP+: drop a profile
+   package to load it). The hint line names what a drop does. */
+.cc-path-drop-target.cc-panel-drop-hover {
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.cc-local-smdp-drop-hint {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.cc-panel-drop-hover .cc-local-smdp-drop-hint {
+  color: var(--accent);
 }
 
 .cc-path-input.cc-path-drop-hover {
@@ -8546,7 +9931,10 @@ kbd {
   flex-wrap: wrap;
 }
 
-.cc-fcp-block dl {
+/* Plain key/value lists only: the decoded FCP object is a dl too
+   (.cc-pv-object), and as a two-column grid it paired whole fields side
+   by side, leaving the raw hex a 73px column (one byte per line). */
+.cc-fcp-block dl:not(.cc-pv-object) {
   display: grid;
   grid-template-columns: minmax(100px, auto) 1fr;
   gap: 4px 12px;
@@ -8584,6 +9972,17 @@ kbd {
   display: flex;
   justify-content: flex-end;
   margin: 6px 0;
+}
+
+/* Under a terminal-style output the controls sit below it and hold to the
+   bottom edge of the scrolling pane, so Cancel needs no scrolling back. */
+.cc-action-stream-controls--foot {
+  position: sticky;
+  bottom: 0;
+  margin: 0;
+  padding: 6px 0;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border-soft);
 }
 
 .cc-action-stream-cancel {
@@ -8765,7 +10164,7 @@ kbd {
   align-items: baseline;
   gap: 10px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .cc-tlv-row:hover {
@@ -8848,7 +10247,7 @@ kbd {
   word-break: break-all;
   background: var(--surface-alt);
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .cc-tlv-value-secondary {
@@ -8898,57 +10297,6 @@ kbd {
 }
 
 .cc-asn1-raw-json .cc-json {
-  max-height: min(42vh, 480px);
-}
-
-.cc-sima-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-}
-
-.cc-sima-result-chip {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.cc-sima-result-chip--success {
-  border-color: color-mix(in oklab, var(--ok), transparent 42%);
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.cc-sima-result-chip--failure {
-  border-color: color-mix(in oklab, var(--fail), transparent 42%);
-  background: var(--fail-soft);
-  color: var(--fail);
-}
-
-.cc-sima-code {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--bg), var(--bg-elev) 40%);
-  color: var(--fg);
-  font-size: 12px;
-}
-
-.cc-sima-tlv-tree {
-  max-height: min(48vh, 520px);
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-}
-
-.cc-sima-formatted .cc-json,
-.cc-sima-raw-json .cc-json {
   max-height: min(42vh, 480px);
 }
 /* -- Command Center: SAIP findings --------------------------------------- */
@@ -9137,6 +10485,46 @@ kbd {
   word-break: break-all;
 }
 
+/* -- Command Center: APDU script in a key/value result ------------------ */
+
+.cc-apdu-script-head {
+  align-items: center;
+}
+
+.cc-apdu-script-head .cc-apdu-script-copy {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.cc-apdu-script {
+  list-style: none;
+  margin: 0;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.cc-apdu-script-step {
+  display: grid;
+  gap: 2px;
+  padding: 5px 0;
+}
+
+.cc-apdu-script-step:not(:last-child) {
+  border-bottom: 1px dashed var(--border);
+}
+
+.cc-apdu-script-label {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+
+.cc-apdu-script-apdu {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
 /* -- Command Center: SCP03 Workbench (reader-scoped internal tabs) ------- */
 
 .cc-workbench {
@@ -9144,7 +10532,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -9222,7 +10610,7 @@ kbd {
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .cc-wb-tab-close:hover {
@@ -9322,12 +10710,10 @@ kbd {
   gap: 6px;
   padding: 8px 6px;
   margin: 8px 0 12px;
-  background: linear-gradient(180deg,
-    color-mix(in oklab, var(--bg-elev), transparent 8%) 0%,
-    var(--bg-elev) 100%);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 14px -10px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--surface-shadow);
 }
 
 .ribbon-group {
@@ -9361,15 +10747,16 @@ kbd {
 
 .ribbon-btn {
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: var(--key-direction);
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--key-gap);
   min-width: 60px;
-  padding: 6px 10px 4px;
+  min-height: var(--key-h);
+  padding: var(--key-pad);
   border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--key-border);
+  background: var(--key-bg);
   color: var(--fg);
   font-family: inherit;
   font-size: 11px;
@@ -9395,6 +10782,7 @@ kbd {
 }
 
 .ribbon-btn-icon {
+  display: var(--key-icon-display);
   font-size: 18px;
   line-height: 1;
   color: var(--accent);
@@ -9406,9 +10794,15 @@ kbd {
 }
 
 .ribbon-btn-label {
-  font-weight: 600;
+  font-size: var(--key-label-size);
+  font-weight: var(--key-label-weight);
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+.ribbon-btn--danger {
+  color: var(--key-danger-fg);
+  background: var(--key-danger-bg);
 }
 
 .ribbon-btn--danger .ribbon-btn-icon {
@@ -9496,7 +10890,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 14px 16px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -9824,11 +11218,7 @@ kbd {
 .cc-action-datasheet-meta {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: linear-gradient(
-    135deg,
-    color-mix(in oklab, var(--accent) 10%, var(--bg-elev)) 0%,
-    var(--bg-elev) 60%
-  );
+  background: var(--bg-elev);
   padding: 2px 0;
 }
 
@@ -9973,10 +11363,7 @@ kbd {
   margin: 0;
   border: 0;
   border-radius: 0;
-  background: linear-gradient(
-    165deg,
-    color-mix(in oklab, var(--bg-deep), transparent 8%) 0%,
-    var(--code-bg) 100%);
+  background: var(--code-bg);
   padding: 12px 14px;
   font-size: 11.5px;
   line-height: 1.5;
@@ -10074,7 +11461,9 @@ kbd {
 .cc-getcerts-cert-title {
   margin: 0;
   font-size: 12px;
-  text-transform: uppercase;
+  /* Names from the card or the package (eUICCConfigurationData, a
+     certificate, an ASN.1 path) keep their case under Bench. */
+  text-transform: var(--group-case);
   letter-spacing: 0.05em;
   color: var(--fg-dim);
 }
@@ -10131,7 +11520,7 @@ kbd {
 .cc-action-datasheet-raw .cc-hex {
   margin: 0;
   border: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -10286,7 +11675,17 @@ kbd {
   margin: 0;
 }
 
-.cc-payload-update-btn {
+/* Copy body / Copy record sit beside Update body / Update record and
+   share their look; a copied key flashes in --ok. */
+.cc-payload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.cc-payload-update-btn,
+.cc-payload-copy-btn {
   min-height: 28px;
   padding: 4px 10px;
   border: 1px solid var(--border);
@@ -10299,19 +11698,28 @@ kbd {
   white-space: nowrap;
 }
 
-.cc-payload-update-btn:hover:not(:disabled) {
+.cc-payload-update-btn:hover:not(:disabled),
+.cc-payload-copy-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--accent-soft);
 }
 
-.cc-payload-update-btn:focus-visible {
+.cc-payload-update-btn:focus-visible,
+.cc-payload-copy-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-.cc-payload-update-btn:disabled {
+.cc-payload-update-btn:disabled,
+.cc-payload-copy-btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.cc-payload-copy-btn.is-copied {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
 }
 
 .cc-records-meta {
@@ -10417,7 +11825,9 @@ kbd {
 
 .cc-record-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px;
   margin: 0 12px 8px;
 }
 
@@ -10481,14 +11891,15 @@ kbd {
   margin: 0;
   padding: 6px 8px;
   background: var(--code-bg);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-all;
 }
 
 @media (max-width: 560px) {
-  .cc-payload-update-btn {
+  .cc-payload-update-btn,
+  .cc-payload-copy-btn {
     flex: 1 1 160px;
   }
 
@@ -10637,7 +12048,7 @@ kbd {
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--remote-lab-status-color);
 }
 
@@ -10794,6 +12205,755 @@ kbd {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+/* Terminal output of a stream action (js: ccCliOutputAppend): the lines a
+   shell command prints, in the mono face, each span in the colour of its
+   CLI palette role. A role reads the token the terminal palettes are
+   transcribed from (scripts/generate_cli_palettes.py), so the block follows
+   every theme. */
+
+.cc-cli-output {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+.cc-cli-line {
+  white-space: pre;
+}
+
+.cc-cli-role--cyan {
+  color: var(--accent);
+}
+
+.cc-cli-role--header,
+.cc-cli-role--blue,
+.cc-cli-role--deep_blue {
+  color: var(--accent-strong);
+}
+
+.cc-cli-role--green {
+  color: var(--ok);
+}
+
+.cc-cli-role--yellow,
+.cc-cli-role--orange {
+  color: var(--warn);
+}
+
+.cc-cli-role--red {
+  color: var(--fail);
+}
+
+.cc-cli-role--purple {
+  color: var(--tree-df-fg);
+}
+
+.cc-cli-role--text_dim,
+.cc-cli-role--guide {
+  color: var(--fg-dim);
+}
+
+.cc-cli-role--white,
+.cc-cli-role--surface {
+  color: var(--fg);
+}
+
+.cc-cli-bold {
+  font-weight: 700;
+}
+
+.cc-cli-dim {
+  opacity: 0.75;
+}
+
+.cc-cli-italic {
+  font-style: italic;
+}
+
+.cc-cli-underline {
+  text-decoration: underline;
+}
+/* Local eIM page (js/local-eim-page.js): the eUICC list, one eUICC and the
+   eIM configuration, rendered in the module's output pane. Reads tokens
+   only; status colour goes through --ok / --warn / --fail. */
+
+.lep-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 2px 24px;
+}
+
+.lep-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 8px;
+}
+
+.lep-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.lep-tab {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.lep-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.lep-tab.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.lep-topbar-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lep-topbar-fact,
+.lep-mono,
+.lep-eid {
+  font-family: var(--font-mono);
+}
+
+.lep-topbar-fact {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.lep-notice {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.lep-notice--ok {
+  border-left-color: var(--ok);
+}
+
+.lep-notice--warn {
+  border-left-color: var(--warn);
+}
+
+.lep-notice--fail {
+  border-left-color: var(--fail);
+}
+
+.lep-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lep-callout-text {
+  max-width: 110ch;
+}
+
+.lep-back {
+  align-self: flex-start;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lep-back:hover {
+  color: var(--accent);
+}
+
+.lep-euicc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 32px;
+}
+
+.lep-eid {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.lep-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lep-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+
+.lep-euicc-tools {
+  margin-left: auto;
+}
+
+.lep-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lep-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lep-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.lep-section-tools,
+.lep-row-actions,
+.lep-inline-form-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lep-row-actions {
+  justify-content: flex-end;
+}
+
+.lep-btn {
+  white-space: nowrap;
+}
+
+.lep-btn--danger {
+  border-color: var(--fail);
+  color: var(--fail);
+}
+
+.lep-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  overflow-x: auto;
+}
+
+.lep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.lep-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.lep-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--fg);
+  vertical-align: middle;
+}
+
+.lep-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.lep-table-empty td {
+  padding: 16px 10px;
+  color: var(--fg-dim);
+  text-align: center;
+}
+
+.lep-row-link {
+  cursor: pointer;
+}
+
+.lep-row-link:hover td,
+.lep-row-link:focus-visible td {
+  background: var(--bg-hover);
+}
+
+.lep-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+
+.lep-badge--ok {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.lep-badge--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.lep-badge--fail {
+  border-color: var(--fail);
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
+.lep-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.lep-status-note {
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* A status whose note is a sentence: the cell keeps room for it instead of wrapping word by word. */
+.lep-status--wide {
+  min-width: 12em;
+}
+
+.lep-eim-id {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lep-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+}
+
+.lep-fact {
+  min-width: 0;
+}
+
+.lep-fact-label {
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+
+.lep-fact-value {
+  color: var(--fg);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.lep-stamp,
+.lep-help,
+.lep-empty {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+
+.lep-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+}
+
+.lep-empty-state p,
+.lep-empty-title {
+  margin: 0;
+}
+
+.lep-inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+}
+
+.lep-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lep-field-label {
+  color: var(--fg-dim);
+  font-size: 11.5px;
+}
+
+.lep-input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.lep-input--narrow {
+  width: auto;
+}
+
+.lep-field-help {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.lep-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px 16px;
+  align-items: start;
+}
+
+.lep-form-grid .lep-check {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.lep-fact-edit {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lep-decoded {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lep-decoded-view {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.lep-euicc-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lep-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.lep-fold {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.lep-fold-summary {
+  padding: 6px 10px;
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lep-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.lep-sub-title {
+  color: var(--fg-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.lep-stored-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lep-page .lep-hex {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.lep-cert {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.lep-cert-row {
+  display: flex;
+  gap: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.lep-cert-row[data-depth="1"] {
+  padding-left: 24px;
+}
+
+.lep-cert-row[data-depth="2"] {
+  padding-left: 38px;
+}
+
+.lep-cert-row[data-depth="3"] {
+  padding-left: 52px;
+}
+
+.lep-cert-label {
+  flex: 0 0 190px;
+  color: var(--fg-dim);
+}
+
+.lep-cert-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.lep-cert-row--ok .lep-cert-value {
+  color: var(--ok);
+}
+
+.lep-cert-row--warn .lep-cert-value {
+  color: var(--warn);
+}
+
+.lep-cert-row--fail .lep-cert-value {
+  color: var(--fail);
+}
+
+/* Chrome of the module around the page. */
+.cc-esim-flow-back {
+  flex: 0 0 auto;
+}
+
+.cc-local-eim-legacy > summary {
+  padding: 6px 2px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+/* Local eIM leaf editor (js/local-eim-leaf-editor.js): attribute rows and
+   extension blocks inside the Local eIM page. Reads tokens only and reuses
+   the page's field, button and notice classes. */
+
+.lle-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* An attribute that shares its relative distinguished name with the row above. */
+.lle-row--joined {
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* Widths for the controls of a row. They are flex bases, so they are set on the children of a row
+   only: under a column (a labelled field, an extension's title) the same basis would be a height. */
+.lle-row > .lle-type {
+  flex: 0 1 150px;
+  min-width: 100px;
+}
+
+.lle-row > .lle-string {
+  flex: 0 1 140px;
+  min-width: 100px;
+}
+
+.lle-row > .lle-oid {
+  flex: 0 1 160px;
+  min-width: 120px;
+}
+
+.lle-row > .lle-keyid,
+.lep-inline-form-bar > .lle-keyid {
+  flex: 0 1 280px;
+  min-width: 200px;
+}
+
+.lle-row > .lle-value {
+  flex: 1 1 150px;
+  min-width: 120px;
+}
+
+.lle-ext-title > .lle-oid {
+  max-width: 280px;
+}
+
+.lle-row-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.lle-tool {
+  min-width: 28px;
+  padding: 4px 6px;
+  line-height: 1;
+}
+
+.lle-check {
+  flex: 0 0 auto;
+}
+
+.lle-ext {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.lle-ext + .lle-ext {
+  margin-top: 8px;
+}
+
+.lle-ext-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lle-ext-title {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lle-ext-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.lle-ext-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lle-ext-body.lle-row {
+  flex-direction: row;
+}
+
+.lle-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.lle-textarea {
+  width: 100%;
+  min-height: 3.2em;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.lle-textarea--tall {
+  min-height: 12em;
+}
+
+.lep-page .lle-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* An issued leaf answers with several lines. */
+.lle-notice {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 /* -- Plugin consoles ---------------------------------------------------- */
 
@@ -11049,7 +13209,7 @@ kbd {
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--pc-status-color);
 }
 
@@ -12176,7 +14336,7 @@ kbd {
 
 .cc-pv--hex code {
   background: var(--code-bg);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   font-size: 11.5px;
   color: var(--accent);
@@ -12184,10 +14344,12 @@ kbd {
 }
 
 .cc-pv-meta {
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   padding: 0 6px;
@@ -12277,7 +14439,7 @@ kbd {
   color: var(--fg-muted);
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
 }
@@ -12377,7 +14539,7 @@ kbd {
   color: var(--danger);
   font-size: 11px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--danger);
   background: var(--fail-soft);
 }
@@ -12441,7 +14603,7 @@ kbd {
   white-space: pre-wrap;
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
 }
 
@@ -12467,7 +14629,7 @@ kbd {
   color: var(--fg-muted);
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-deep);
   border: 1px dashed var(--border-soft);
 }
@@ -12587,7 +14749,7 @@ kbd {
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
   color: var(--fg);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: inherit;
   font-size: 12px;
 }
@@ -12620,7 +14782,7 @@ kbd {
   overflow-y: auto;
   padding: 4px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
 }
 
@@ -12630,7 +14792,7 @@ kbd {
   gap: 6px;
   align-items: center;
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -12796,12 +14958,8 @@ kbd {
   transform: rotate(90deg);
 }
 
-/* FCP block specifically -- share the depth-0 grid with the decoded
-   body so visual rhythm is consistent across FCP + decoded. */
-
-.cc-fcp-block .cc-fcp-fields {
-  font-size: 12px;
-}
+/* FCP block and transparent body share the tighter row; the open FCP card
+   then lays its parameters out in cells (after the Copy key rules). */
 
 .cc-payload-transparent .cc-pv-field,
 .cc-fcp-block .cc-pv-field {
@@ -12824,6 +14982,242 @@ kbd {
 
 .cc-fcp-block .cc-decoded-tools {
   margin-bottom: 4px;
+}
+
+/* FCP card: folded in the File system preview, its summary carrying the
+   glance parameters. Chrome follows the record cards (.cc-record) so the
+   FCP and the records below it read as one family. */
+
+.cc-fcp-card {
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-elev), transparent 44%);
+  overflow: hidden;
+}
+
+.cc-fcp-card[open] {
+  background: var(--bg-elev);
+}
+
+.cc-fcp-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background-color var(--transition-fast);
+}
+
+.cc-fcp-card-head::-webkit-details-marker {
+  display: none;
+}
+
+.cc-fcp-card-head::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  transition: transform var(--transition-fast);
+}
+
+.cc-fcp-card[open] > .cc-fcp-card-head::before {
+  transform: rotate(90deg);
+}
+
+.cc-fcp-card-head:hover {
+  background: var(--bg-hover);
+}
+
+.cc-fcp-card-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg-hover);
+}
+
+.cc-fcp-card-title {
+  flex: 0 0 auto;
+  color: var(--fg);
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-track);
+}
+
+.cc-fcp-card-facts {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-fcp-card > .cc-fcp-block {
+  padding: 2px 12px 12px;
+}
+
+/* One Copy key per top-level parameter of an FCP or a decoded File system
+   body, in a column of its own so the value keeps its width; it shows on
+   the row under the pointer or in focus, the reveal the log dock rows
+   use. The key column of the FCP and the transparent body is the
+   narrower one those lists already use. */
+
+.cc-pv-object--depth-0 > .cc-pv-field--copy {
+  grid-template-columns: minmax(96px, 200px) minmax(0, 1fr) auto;
+  transition: border-color var(--transition-fast);
+}
+
+.cc-fcp-block .cc-pv-object--depth-0 > .cc-pv-field--copy,
+.cc-payload-transparent .cc-pv-object--depth-0 > .cc-pv-field--copy {
+  grid-template-columns: minmax(76px, 148px) minmax(0, 1fr) auto;
+}
+
+.cc-pv-object--depth-0 > .cc-pv-field--copy:hover {
+  border-color: var(--border-strong);
+}
+
+.cc-pv-copy {
+  align-self: start;
+  min-width: 56px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  user-select: none;
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.cc-pv-field--copy:hover > .cc-pv-copy,
+.cc-pv-field--copy:focus-within > .cc-pv-copy,
+.cc-pv-copy.is-copied {
+  opacity: 1;
+}
+
+.cc-pv-copy:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.cc-pv-copy:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cc-pv-copy.is-copied {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
+}
+
+/* Open FCP card: the short parameters fill a grid of cells, as many across
+   as the pane holds; a parameter that needs a line of its own (raw bytes,
+   rules, a nested template) follows them across the card, and the
+   parameters without a value are named once on the toolbar line. A cell
+   gives no column to its Copy key: the key lies over the cell's right
+   end while the pointer or focus is on it, the reveal the log dock rows
+   use, on an opaque face so the value under it does not show through. */
+
+.cc-fcp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.cc-fcp-meta > .cc-decoded-tools {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.cc-fcp-novalue {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cc-fcp-novalue-label {
+  margin-right: 8px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cc-fcp-block .cc-fcp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(272px, 100%), 1fr));
+  gap: 4px;
+  font-size: 12px;
+}
+
+.cc-fcp-block .cc-fcp-fields > .cc-pv-field--copy {
+  position: relative;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 8px;
+  min-height: 30px;
+  padding: 3px 8px;
+}
+
+.cc-fcp-block .cc-fcp-fields > .cc-fcp-field--wide {
+  grid-column: 1 / -1;
+  align-items: start;
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  background: var(--bg-elev);
+}
+
+.cc-fcp-fields > .cc-fcp-field--wide > .cc-pv-copy {
+  top: 5px;
+  transform: none;
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy:hover {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-elev);
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy.is-copied {
+  background: var(--ok);
+}
+
+.cc-fcp-fields .cc-pv-array-line {
+  padding: 3px 8px;
+}
+
+/* Resolved access rules arrive as one string, a rule per line. */
+.cc-fcp-fields .cc-pv--str {
+  white-space: pre-line;
 }
 
 .cc-decoded-json-full {
@@ -13102,7 +15496,7 @@ kbd {
   min-height: 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 8px;
   overflow: hidden;
 }
@@ -13140,12 +15534,8 @@ kbd {
   gap: 10px;
   padding: 7px 9px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    var(--surface-hi),
-    var(--surface-alt)
-  );
+  border-radius: var(--radius-ms);
+  background: var(--surface-hi);
 }
 
 .saip-pane-title {
@@ -13170,13 +15560,42 @@ kbd {
   background: var(--accent-soft);
 }
 
+/* A pane-head switch (the element list's Compact): sits right, by the count. */
+.saip-pane-tool {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.saip-pane-tool:hover {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.saip-pane-tool[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.saip-pane-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .saip-drawer,
 .saip-pe-list,
 .saip-detail,
 .saip-validation {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -13243,7 +15662,7 @@ kbd {
   width: 28px;
   height: 28px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg-muted);
   cursor: pointer;
@@ -13385,7 +15804,7 @@ kbd {
   cursor: pointer;
   min-height: 28px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-recent-clear-all:hover {
@@ -13423,7 +15842,7 @@ kbd {
   gap: 8px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 4px 6px;
   min-height: 34px;
   text-align: left;
@@ -13463,7 +15882,7 @@ kbd {
   height: 28px;
   padding: 0;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-recent-drop:hover {
@@ -13580,7 +15999,7 @@ kbd {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg-muted);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   width: 28px;
   height: 28px;
   font-size: 14px;
@@ -13717,7 +16136,7 @@ kbd {
   padding: 4px 10px;
   min-height: 30px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -13815,6 +16234,12 @@ kbd {
     grid-template-columns: 1fr;
   }
 }
+
+/* The PE list pane already names itself and counts its elements in the
+   pane head; the list's own header repeated both. */
+.saip-pane--list .saip-pe-header {
+  display: none;
+}
 /* ---- SA-G1: ribbon command bar ------------------------------------- */
 /*
  * The ribbon is a horizontal grouped command bar above the workbench.
@@ -13825,6 +16250,7 @@ kbd {
  */
 .saip-ribbon {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 10px;
   padding: 8px 10px 6px;
@@ -13889,15 +16315,15 @@ kbd {
 
 .saip-ribbon-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: var(--key-direction);
   align-items: center;
-  justify-content: flex-start;
-  gap: 2px;
+  justify-content: var(--key-justify);
+  gap: var(--key-gap);
   min-width: 54px;
-  min-height: 52px;
-  padding: 5px 7px 4px;
-  background: transparent;
-  border: 1px solid transparent;
+  min-height: var(--key-tile-h);
+  padding: var(--key-pad);
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
   border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
@@ -13948,7 +16374,7 @@ kbd {
 }
 
 .saip-ribbon-btn-icon {
-  display: inline-flex;
+  display: var(--key-icon-display);
   align-items: center;
   justify-content: center;
   width: 25px;
@@ -13970,9 +16396,62 @@ kbd {
 }
 
 .saip-ribbon-btn-label {
-  font-size: 11px;
+  font-size: var(--key-label-size);
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+/* Tabbed ribbon: one command group at a time behind a tab per group
+   (saipRibbonApplyTabs), so every key keeps its full legend in one row. */
+.saip-ribbon--tabbed {
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.saip-ribbon-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-ribbon-tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.saip-ribbon-tab:hover {
+  color: var(--fg);
+}
+
+.saip-ribbon-tab.is-active {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.saip-ribbon-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.saip-ribbon--tabbed > .saip-ribbon-group {
+  padding: 8px 10px;
+  border-right: none;
+}
+
+.saip-ribbon--tabbed .saip-ribbon-group-label {
+  display: none;
 }
 
 /* ---- SA-G1: top-level tab strip ------------------------------------ */
@@ -13992,7 +16471,7 @@ kbd {
   background: transparent;
   border: 1px solid var(--border);
   border-bottom-color: transparent;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--fg-muted);
   padding: 6px 14px;
   font-size: 12px;
@@ -14185,7 +16664,7 @@ kbd {
   height: 30px;
   border: 1px solid var(--border);
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   font-size: 16px;
   line-height: 1;
@@ -14253,7 +16732,7 @@ kbd {
   min-width: 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   padding: 6px 8px;
   font-family: var(--mono);
@@ -14324,7 +16803,7 @@ kbd {
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   color: var(--fg);
   text-align: left;
@@ -14515,7 +16994,7 @@ kbd {
   width: min(420px, 92vw);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
@@ -14535,7 +17014,7 @@ kbd {
   flex: 1 1 auto;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   padding: 5px 7px;
   font-family: var(--mono);
@@ -14557,7 +17036,7 @@ kbd {
   cursor: pointer;
   border: 1px solid transparent;
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-find-toggle input[type=checkbox] {
@@ -14654,7 +17133,7 @@ kbd {
 .saip-form-sd-tlv {
   margin-top: 6px;
   border: 1px dashed var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 4px 8px;
   background: var(--surface-alt);
 }
@@ -14724,7 +17203,7 @@ kbd {
   min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   overflow: hidden;
 }
 
@@ -14852,7 +17331,7 @@ kbd {
   height: 30px;
   border: 1px solid var(--border);
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   font-size: 16px;
   line-height: 1;
@@ -15055,7 +17534,7 @@ kbd {
 
 .saip-token-bind-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 14px;
   background: var(--surface-alt);
   display: flex;
@@ -15276,12 +17755,12 @@ kbd {
   text-align: center;
   padding: 32px 24px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   margin: 0;
   background:
     radial-gradient(
       circle at 50% 0,
-      color-mix(in srgb, var(--accent) 9%, transparent),
+      color-mix(in srgb, var(--accent) var(--spot-tint), transparent),
       transparent 54%
     ),
     var(--surface);
@@ -15295,7 +17774,7 @@ kbd {
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--accent);
   background: var(--accent-soft);
 }
@@ -15348,7 +17827,7 @@ kbd {
 .saip-placeholder-shortcut kbd {
   padding: 1px 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   background: var(--bg-elev-2);
   box-shadow: 0 1px 0 var(--border);
@@ -15379,7 +17858,7 @@ kbd {
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   cursor: pointer;
   background: var(--surface);
   transition: border-color 0.12s ease, background-color 0.12s ease;
@@ -15569,6 +18048,53 @@ kbd {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+
+/* Compact density: one line per element -- glyph, name, label, chips,
+   index -- so a whole package fits the pane. Same DOM as the cards, so
+   selection, keyboard and drag-and-drop work unchanged. */
+.saip-pe-cards--compact {
+  gap: 1px;
+}
+
+.saip-pe-cards--compact .saip-pe-card {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  padding: 2px 8px;
+}
+
+.saip-pe-cards--compact .saip-pe-card.is-dirty {
+  padding-left: 5px;
+}
+
+.saip-pe-cards--compact .saip-pe-icon {
+  width: 28px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.saip-pe-cards--compact .saip-pe-card-body {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-pe-cards--compact .saip-pe-card-name {
+  flex: 0 1 auto;
+}
+
+.saip-pe-cards--compact .saip-pe-card-sub {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.saip-pe-cards--compact .saip-pe-card-chips {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.saip-pe-cards--compact .saip-pe-card-id {
+  padding: 0 6px;
+}
 /* ---- SA-G2: detail head adjustments -------------------------------- */
 
 .saip-detail-head-chips {
@@ -15586,7 +18112,7 @@ kbd {
 .saip-detail-head-chips .cc-chip {
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   padding: 3px 8px;
   font-size: 11px;
@@ -15608,7 +18134,7 @@ kbd {
   gap: 6px;
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg-muted);
   font-size: 11px;
@@ -15641,7 +18167,7 @@ kbd {
 
 .saip-edit-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   padding: 10px 12px;
   display: flex;
@@ -15805,7 +18331,9 @@ kbd {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  overscroll-behavior: contain;
+  /* No scroll containment: at the end of the pane the wheel moves the PE
+     view, so the box at the top of a security domain does not hold the
+     reader. */
   padding: 10px;
 }
 
@@ -15815,6 +18343,9 @@ kbd {
 
 .saip-sd-param-tree-row {
   display: grid;
+  /* A row in the tree's fixed-height column: without this it shrinks to
+     its 30px floor and a wrapped name runs into the next row. */
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
@@ -15853,9 +18384,10 @@ kbd {
 
 .saip-sd-param-tree-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Parameter names are long ("Volatile memory quota", "Cumulative
+     granted non-volatile memory"); they wrap rather than lose their end. */
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .saip-sd-param-dot {
@@ -16016,7 +18548,7 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 
@@ -16189,7 +18721,7 @@ button.saip-chip:focus-visible {
   align-items: baseline;
   gap: 8px;
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -16255,7 +18787,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -16286,7 +18818,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   vertical-align: middle;
 }
 
@@ -16705,7 +19237,7 @@ button.saip-chip:focus-visible {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--border-strong);
 }
 
@@ -16913,7 +19445,7 @@ button.saip-chip:focus-visible {
   min-width: 0;
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg);
   padding: 3px 7px;
@@ -16930,7 +19462,7 @@ button.saip-chip:focus-visible {
   height: 30px;
   max-width: 98px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg-muted);
   font-size: 11px;
@@ -16971,7 +19503,7 @@ button.saip-chip:focus-visible {
   align-items: center;
   gap: 6px;
   padding: 3px 8px 3px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background-color 0.12s ease;
   user-select: none;
 }
@@ -17051,7 +19583,7 @@ button.saip-chip:focus-visible {
    change alone. */
 .saip-file-caret--toggle:hover {
   background: var(--surface-alt);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-file-caret--leaf {
@@ -17099,7 +19631,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.04em;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   color: var(--fg-muted);
   flex-shrink: 0;
@@ -17119,7 +19651,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.06em;
   background: var(--accent-soft);
   border: 1px solid var(--accent-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   color: var(--accent);
   flex-shrink: 0;
@@ -17163,7 +19695,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   margin-left: auto;
   letter-spacing: 0.02em;
@@ -17237,7 +19769,7 @@ button.saip-chip:focus-visible {
 
 .saip-inline-placeholder-chip {
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--accent-soft);
   color: var(--accent);
   border: 1px solid var(--accent);
@@ -17324,7 +19856,7 @@ button.saip-chip:focus-visible {
   padding: 2px;
   margin: 0 0 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--surface-alt);
 }
 
@@ -17332,7 +19864,7 @@ button.saip-chip:focus-visible {
   min-width: 58px;
   padding: 3px 8px;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--fg-muted);
   font: inherit;
@@ -17488,7 +20020,7 @@ button.saip-chip:focus-visible {
 
 .saip-app-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   padding: 12px;
   display: flex;
@@ -17658,7 +20190,7 @@ button.saip-chip:focus-visible {
   font-size: 10px;
   letter-spacing: 0.02em;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
@@ -17690,7 +20222,7 @@ button.saip-chip:focus-visible {
 .saip-app-foot-chip {
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -17705,7 +20237,7 @@ button.saip-chip:focus-visible {
 .saip-file-card {
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -17910,7 +20442,7 @@ button.saip-chip:focus-visible {
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   border: 1px solid var(--border);
   background: var(--surface-alt);
 }
@@ -17948,7 +20480,7 @@ button.saip-chip:focus-visible {
   margin: 0 0 6px 0;
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   font-size: 0.82rem;
 }
@@ -18001,7 +20533,7 @@ button.saip-chip:focus-visible {
   gap: 6px;
   padding: 1px 7px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg);
   font: inherit;
@@ -18092,7 +20624,7 @@ button.saip-chip:focus-visible {
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-gfm-addbar-submit {
@@ -18101,7 +20633,7 @@ button.saip-chip:focus-visible {
   background: var(--accent);
   color: var(--bg);
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 0.82rem;
   cursor: pointer;
 }
@@ -18303,7 +20835,7 @@ button.saip-chip:focus-visible {
   gap: 8px;
   padding: 8px 10px;
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   border: 1px solid var(--border);
   background: var(--surface-alt);
 }
@@ -18356,7 +20888,7 @@ button.saip-chip:focus-visible {
 
 .saip-form-section {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev1);
   margin: 1px 0;
 }
@@ -18373,7 +20905,7 @@ button.saip-chip:focus-visible {
 .saip-form-section-summary {
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -18408,7 +20940,7 @@ button.saip-chip:focus-visible {
 .saip-form-section-chip {
   font-size: 9px;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   letter-spacing: 0.05em;
@@ -18477,7 +21009,7 @@ button.saip-chip:focus-visible {
   background: var(--bg-input);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 3px 5px;
   flex: 1 1 auto;
   min-width: 0;
@@ -18506,7 +21038,7 @@ button.saip-chip:focus-visible {
   background: var(--bg-input);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 3px 6px;
   flex: 1 1 auto;
   min-width: 160px;
@@ -18540,7 +21072,7 @@ button.saip-chip:focus-visible {
 .saip-form-hex-chip {
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   letter-spacing: 0.04em;
@@ -18589,7 +21121,7 @@ button.saip-chip:focus-visible {
   font-size: 12px;
   padding: 2px 6px;
   border: 1px dashed var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg-elev2);
   color: var(--fg);
   user-select: text;
@@ -18605,7 +21137,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -18630,7 +21162,7 @@ button.saip-chip:focus-visible {
   padding: 5px 6px;
   margin: 0 0 6px 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-elev2);
 }
 
@@ -18823,7 +21355,7 @@ button.saip-chip:focus-visible {
 
 .saip-val-dock {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   display: flex;
   flex-direction: column;
@@ -18973,7 +21505,7 @@ button.saip-chip:focus-visible {
 .saip-val-sev {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -19024,7 +21556,7 @@ button.saip-chip:focus-visible {
   padding: 0 5px;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   font-size: 11px;
   cursor: pointer;
@@ -19163,7 +21695,7 @@ button.saip-chip:focus-visible {
 .saip-val-domain-chip {
   font-size: 9px;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   vertical-align: middle;
 }
 
@@ -19326,7 +21858,7 @@ button.saip-chip:focus-visible {
   background: var(--surface-alt);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 3px 6px;
   font-family: var(--mono);
   font-size: 11px;
@@ -19431,7 +21963,7 @@ button.saip-chip:focus-visible {
   padding: 8px;
   background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* ARR record summary line -- distinct from the rule list. */
@@ -19504,7 +22036,7 @@ button.saip-chip:focus-visible {
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   font-weight: 700;
   font-family: var(--mono);
@@ -19542,7 +22074,7 @@ button.saip-chip:focus-visible {
   justify-content: center;
   height: 18px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
   font-size: 9px;
   font-weight: 700;
@@ -19621,7 +22153,7 @@ button.saip-chip:focus-visible {
   min-width: 12ch;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--fg);
   font: inherit;
@@ -19848,7 +22380,7 @@ button.saip-chip:focus-visible {
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
   font-size: 11px;
 }
@@ -19888,7 +22420,7 @@ button.saip-chip:focus-visible {
   padding: 3px 8px;
   background: var(--surface-alt);
   border: 1px dashed var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg-muted);
@@ -19905,7 +22437,7 @@ button.saip-chip:focus-visible {
   padding: 0;
   border-left: 2px solid var(--accent-soft);
   background: var(--surface-alt);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   box-sizing: border-box;
   max-width: 100%;
   overflow: hidden;
@@ -19989,7 +22521,7 @@ button.saip-chip:focus-visible {
   margin-top: 8px;
   padding: 8px;
   border: 1px dashed var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
 }
 
@@ -19999,7 +22531,7 @@ button.saip-chip:focus-visible {
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
   font-size: 11px;
   resize: vertical;
@@ -20066,7 +22598,7 @@ button.saip-chip:focus-visible {
 .saip-wizard-text {
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 5px 8px;
   font-size: 12px;
   color: var(--fg);
@@ -20092,7 +22624,7 @@ button.saip-chip:focus-visible {
   font-size: 12px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 4px 8px;
   color: var(--fg);
   word-break: break-all;
@@ -20129,7 +22661,7 @@ button.saip-chip:focus-visible {
   padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-wizard-ust-cell {
@@ -20171,7 +22703,7 @@ button.saip-chip:focus-visible {
   margin-bottom: 6px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* Bit grids list one bit per row (flag-rows.css). */
@@ -20179,7 +22711,7 @@ button.saip-chip:focus-visible {
   padding: 2px 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-wizard-bit-cell {
@@ -20205,7 +22737,7 @@ button.saip-chip:focus-visible {
   padding: 8px 10px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   box-sizing: border-box;
   max-width: 100%;
   overflow: hidden;
@@ -20279,7 +22811,7 @@ button.saip-chip:focus-visible {
   box-sizing: border-box;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 6px 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -20305,7 +22837,7 @@ button.saip-chip:focus-visible {
   box-sizing: border-box;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 6px 8px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -20332,7 +22864,7 @@ button.saip-chip:focus-visible {
 
 .saip-arr-wizard-rule {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 6px 8px;
   background: var(--surface-alt);
   display: flex;
@@ -20386,7 +22918,7 @@ button.saip-chip:focus-visible {
   font-size: 12px;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg);
 }
@@ -20719,7 +23251,7 @@ button.saip-chip:focus-visible {
   box-sizing: border-box;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   padding: 5px 7px;
   font: inherit;
@@ -20911,7 +23443,9 @@ button.saip-chip:focus-visible {
 .saip-decoded-tree-subgroup-heading {
   font-size: 10px;
   color: var(--fg-muted);
-  text-transform: uppercase;
+  /* Names from the card or the package (eUICCConfigurationData, a
+     certificate, an ASN.1 path) keep their case under Bench. */
+  text-transform: var(--group-case);
   letter-spacing: 0.06em;
   padding: 2px 0;
 }
@@ -20963,7 +23497,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 3px;
   text-transform: uppercase;
 }
@@ -21044,7 +23578,7 @@ button.saip-chip:focus-visible {
 .saip-decoded-row-head[role="button"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-decoded-row-label {
@@ -21131,7 +23665,7 @@ button.saip-chip:focus-visible {
   font-size: 12px;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg);
   box-sizing: border-box;
@@ -21199,15 +23733,15 @@ button.saip-chip:focus-visible {
 }
 
 .cc-btn-primary {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
   font-weight: 600;
-  box-shadow: 0 4px 14px -5px var(--accent-glow);
+  box-shadow: 0 4px 14px -5px var(--glow);
 }
 
 .cc-btn-primary:hover:not(:disabled) {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
   filter: brightness(1.08);
@@ -21282,7 +23816,7 @@ button.saip-chip:focus-visible {
   font-family: var(--font-mono);
   padding: 2px 6px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-decoded-form-hint {
@@ -21302,7 +23836,7 @@ button.saip-chip:focus-visible {
   max-height: min(480px, 60vh);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 0;
 }
 
@@ -21396,7 +23930,7 @@ button.saip-chip:focus-visible {
   border: 1px solid var(--border);
   color: var(--fg);
   padding: 5px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--mono);
   font-size: 11px;
   width: 100%;
@@ -21659,7 +24193,7 @@ button.saip-chip:focus-visible {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: lowercase;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid transparent;
 }
 
@@ -21747,7 +24281,7 @@ button.saip-chip:focus-visible {
 .saip-cmp-sem-group {
   margin: 6px 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
@@ -21878,16 +24412,14 @@ button.saip-chip:focus-visible {
   align-items: center;
   gap: 4px;
   padding: 8px 12px 0;
-  background: linear-gradient(180deg,
-    color-mix(in oklab, var(--bg-elev), transparent 20%) 0%,
-    var(--bg) 100%);
+  background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: thin;
 }
 
 .scp03-topbar .cc-wb-tab {
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-ms) var(--radius-ms) 0 0;
   border-bottom: 1px solid transparent;
   background: transparent;
   padding: 8px 14px 9px;
@@ -21928,7 +24460,7 @@ button.saip-chip:focus-visible {
 }
 
 .scp03-topbar .cc-wb-tab-add {
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-ms) var(--radius-ms) 0 0;
   border: 1px dashed var(--border);
   border-bottom: none;
   margin-bottom: -1px;
@@ -22046,7 +24578,7 @@ button.saip-chip:focus-visible {
 .scp03-reader-dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   margin-top: 4px;
   background: var(--border);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--fg) 20%, transparent);
@@ -22191,15 +24723,23 @@ button.saip-chip:focus-visible {
     overflow-y: auto;
   }
 
+  /* The session grows into the room the panel stack leaves and gives it
+     back down to its own floor, never below: the chrome at its content
+     height and the panes at 220px. With min-height: 0 here it shrank to
+     nothing once the stack outgrew the column, and the stack was laid out
+     over the ribbon and console the session still painted (Applications:
+     Apps, Sec. domains and AIDs, then the APDU tab). Size containment
+     keeps the panes' content out of that floor; without it the tree and
+     the preview count every row in it and stop scrolling themselves. */
   .main--module-workbench .cc-wb-session {
     flex: 1 1 auto;
-    min-height: 0;
   }
 
   .main--module-workbench .cc-wb-session > .cc-scan-layout {
     flex: 1 1 auto;
     min-height: 220px;
     grid-auto-rows: minmax(0, 1fr);
+    contain: size;
   }
 
   .main--module-workbench .cc-wb-session .cc-tree,
@@ -22294,7 +24834,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   margin-bottom: -1px;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
@@ -22569,7 +25109,7 @@ button.saip-chip:focus-visible {
   max-width: 640px;
   margin: 20px auto;
   text-align: center;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .scp03-session-welcome h3 {
@@ -22599,7 +25139,7 @@ button.saip-chip:focus-visible {
   padding: 14px 16px;
   border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--border));
   background: var(--warn-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   color: var(--fg);
   font-size: 13px;
   line-height: 1.4;
@@ -22670,7 +25210,7 @@ button.saip-chip:focus-visible {
   padding: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
@@ -22705,7 +25245,7 @@ button.saip-chip:focus-visible {
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cc-fs-wizard-row {
@@ -22811,7 +25351,7 @@ button.saip-chip:focus-visible {
   padding: 8px 10px;
   border-left: 3px solid var(--accent);
   background: var(--bg-elev);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   color: var(--fg);
 }
@@ -22896,7 +25436,7 @@ button.saip-chip:focus-visible {
   padding: 8px 10px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   min-width: 0;
 }
 
@@ -23022,8 +25562,76 @@ button.saip-chip:focus-visible {
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-left: 4px;
+}
+
+/* One APDU per line: the row number, the data cut to its start (the
+   whole hex is the cell's title), the context decoder's reading of the
+   command, and a row for a line that is not an APDU. */
+
+.scp03-apdu-breakdown-table td.scp03-apdu-idx {
+  width: 1%;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-data {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd {
+  min-width: 24ch;
+  font-family: var(--font-sans);
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd.is-pending {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd.is-error,
+.scp03-apdu-row--issue td {
+  color: var(--warn);
+}
+
+.scp03-apdu-decoded {
+  margin-top: 8px;
+}
+
+.scp03-apdu-decoded > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-decoded-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.scp03-apdu-result-index {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+
+.scp03-apdu-result-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .scp03-apdu-actions {
@@ -23074,7 +25682,7 @@ button.saip-chip:focus-visible {
   font-size: 12.5px;
   font-weight: 600;
   padding: 3px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
   border: 1px solid var(--border);
   color: var(--fg);
@@ -23122,7 +25730,7 @@ button.saip-chip:focus-visible {
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .scp03-apdu-chain-head {
@@ -23142,7 +25750,7 @@ button.saip-chip:focus-visible {
   padding: 4px 8px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-family: var(--font-mono);
 }
@@ -23191,7 +25799,7 @@ button.saip-chip:focus-visible {
   padding: 10px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .scp03-apdu-history-head {
@@ -23234,7 +25842,7 @@ button.saip-chip:focus-visible {
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
 }
 
@@ -23258,7 +25866,7 @@ button.saip-chip:focus-visible {
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   word-break: break-all;
 }
 
@@ -23333,12 +25941,15 @@ button.saip-chip:focus-visible {
   flex: 1 1 280px;
   align-items: center;
   gap: 6px;
-  min-width: 180px;
+  /* The strip gives way before the cluster spills over the crumbs: the
+     right-aligned cluster overflows leftwards once its floors add up past
+     the bar (Classic with Matrix's monospace at 1600 px). */
+  min-width: 150px;
   max-width: min(36vw, 440px);
-  min-height: 38px;
-  padding: 2px 6px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  min-height: calc(var(--chrome-pill-h) + 4px);
+  padding: 1px 3px;
+  background: var(--chrome-pill-bg);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
@@ -23362,7 +25973,7 @@ button.saip-chip:focus-visible {
 
 .topbar-readers-scroll::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .topbar-readers-hint {
@@ -23376,14 +25987,14 @@ button.saip-chip:focus-visible {
 
 .topbar-readers-refresh {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: var(--chrome-pill-h);
+  height: var(--chrome-pill-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: var(--radius-dot);
+  border: 1px solid var(--chrome-pill-border);
+  background: var(--chrome-pill-bg);
   color: var(--fg);
   cursor: pointer;
   font-size: 14px;
@@ -23441,8 +26052,8 @@ button.saip-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 32px;
-  padding: 4px 10px 4px 8px;
+  min-height: var(--chrome-pill-h);
+  padding: 3px 10px 3px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -23473,14 +26084,14 @@ button.saip-chip:focus-visible {
   background: var(--bg-selected);
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset,
-              0 2px 8px -3px var(--accent-glow);
+              0 2px 8px -3px var(--glow);
 }
 
 .topbar-reader-pill-dot {
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--fg-dim);
   box-shadow: 0 0 0 1px var(--border) inset;
 }
@@ -23492,21 +26103,21 @@ button.saip-chip:focus-visible {
   background: var(--ok);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--ok) 35%, transparent),
-    0 0 6px 1px color-mix(in oklab, var(--ok) 55%, transparent);
+    0 0 calc(var(--glow-size) * 0.6) 1px color-mix(in oklab, var(--ok) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--yellow {
   background: var(--warn);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--warn) 35%, transparent),
-    0 0 6px 1px color-mix(in oklab, var(--warn) 55%, transparent);
+    0 0 calc(var(--glow-size) * 0.6) 1px color-mix(in oklab, var(--warn) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--red {
   background: var(--fail);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--fail) 35%, transparent),
-    0 0 5px 1px color-mix(in oklab, var(--fail) 45%, transparent);
+    0 0 calc(var(--glow-size) * 0.5) 1px color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .topbar-reader-pill-dot--gray {
@@ -23528,7 +26139,7 @@ button.saip-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   border: none;
   background: transparent;
   color: var(--fg-muted);
@@ -23583,25 +26194,27 @@ button.saip-chip:focus-visible {
 /* Progressive disclosure for the top bar. Every control keeps its
    title and aria-label; only the redundant text goes at each step, so
    a 1280 px laptop still shows the brand and every bridge pill. Below
-   1300 px the suite chip goes, and the crumb gives way while a plugin
-   console pill shows (shell.css). */
-@media (max-width: 1500px) {
+   1300 px the suite chip and the crumb go (shell.css). The first step sits
+   at 1760 px: three bridge pills (HIL bridge, Remote, Local eIM) with their
+   values put Classic over the crumbs at 1440 px, and a plugin pill drops
+   its value at the same width; the dot keeps the state, the title the text. */
+@media (max-width: 1760px) {
+  .topbar-card-bridge-value {
+    display: none;
+  }
+
+  .topbar-backend-switch .topbar-control-label {
+    display: none;
+  }
+}
+
+@media (max-width: 1700px) {
   .topbar-suite-separator,
   .topbar-suite-active {
     display: none;
   }
 
   .theme-picker label {
-    display: none;
-  }
-}
-
-@media (max-width: 1400px) {
-  .topbar-card-bridge-value {
-    display: none;
-  }
-
-  .topbar-backend-switch .topbar-control-label {
     display: none;
   }
 }
@@ -23684,8 +26297,8 @@ button.saip-chip:focus-visible {
 
 /* Action strip wrapper -- pushes itself to the right when the
    header has room (margin-left:auto), otherwise wraps under the
-   chips. Two sub-groups inside: file-scoped actions + a small
-   "Card" group for SUSPEND so it can't be confused for a file op. */
+   chips. Two sub-groups inside: the file actions, then a "Danger"
+   group (Delete, Resize, card-wide SUSPEND) at the end. */
 .cc-fs-actions {
   display: inline-flex;
   align-items: center;
@@ -23705,9 +26318,28 @@ button.saip-chip:focus-visible {
   border-radius: var(--radius-pill);
 }
 
-.cc-fs-actions-group--card {
-  background: var(--bg-danger-soft);
-  border-color: var(--err-soft);
+/* Danger keys sit on --bg-elev: --fail is guaranteed 4.5:1 there in every
+   theme, which --surface and --bg-elev-2 are not. */
+.cc-fs-actions-group--danger {
+  background: var(--bg-elev);
+  border-color: color-mix(in oklab, var(--fail) 45%, transparent);
+}
+
+.cc-fs-actions-group--danger .cc-fs-action-btn {
+  background: var(--bg-elev);
+}
+
+.cc-fs-actions-legend {
+  padding: 0 4px 0 2px;
+  color: var(--fail);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.cc-fs-action-btn--card {
+  margin-left: 4px;
 }
 
 .cc-fs-actions-hint {
@@ -23925,7 +26557,7 @@ button.saip-chip:focus-visible {
 .about-guides-card:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent-soft);
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
 }
 
 .about-guides-card:disabled {
@@ -24118,7 +26750,7 @@ button.saip-chip:focus-visible {
 
 .cc-doc-modal-body code {
   background: var(--code-bg);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -24210,7 +26842,7 @@ button.saip-chip:focus-visible {
 .cc-doc-modal-body table.cc-doc-table code {
   background: var(--code-bg);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 
@@ -24288,7 +26920,7 @@ button.saip-chip:focus-visible {
   font-family: var(--font-sans);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -24660,7 +27292,7 @@ button.saip-chip:focus-visible {
   border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
   border-radius: var(--radius-lg);
   background: var(--bg-elev);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .cc-decoder-head {
@@ -24841,6 +27473,12 @@ button.saip-chip:focus-visible {
   color: var(--warn);
 }
 
+.cc-decoder-chip--fail {
+  border-color: color-mix(in oklab, var(--fail) 45%, var(--border));
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
 .cc-decoder-chip--muted {
   text-transform: none;
   letter-spacing: 0;
@@ -25001,6 +27639,20 @@ button.saip-chip:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* What the EUICCResponse of a payload reports, over the tree it was read from. */
+.cc-decoder-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.cc-decoder-outcome-text {
+  color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .cc-decoder-sw {
@@ -25228,7 +27880,7 @@ button.saip-chip:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-deep);
   border: 1px solid var(--border);
 }
@@ -25261,7 +27913,7 @@ button.saip-chip:focus-visible {
   font-size: 11px;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   color: var(--fg);
   word-break: break-all;
@@ -25355,7 +28007,7 @@ button.saip-chip:focus-visible {
   border-radius: var(--radius-lg);
   padding: 16px 20px;
   margin-bottom: 16px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   min-width: 0;
 }
 
@@ -25432,7 +28084,7 @@ button.saip-chip:focus-visible {
 .cb-status-summary {
   margin-top: 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg);
   border: 1px dashed var(--border);
   font-size: 0.85rem;
@@ -25442,6 +28094,47 @@ button.saip-chip:focus-visible {
 
 .cb-rig-panel {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+/* Remote Bridge sections: Host, Rig, Status, one at a time. */
+.cb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cb-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cb-tab:hover {
+  color: var(--fg);
+}
+
+.cb-tab[aria-selected="true"] {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cb-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cb-tabpanel[hidden] {
+  display: none;
 }
 
 .cb-rig-grid {
@@ -25457,6 +28150,9 @@ button.saip-chip:focus-visible {
 .cb-rig-field {
   display: flex;
   flex-direction: column;
+  /* .form-row centres its items, which centred each label over its input
+     and the Add host button under the field. */
+  align-items: flex-start;
   gap: 5px;
   margin: 0;
 }
@@ -25544,9 +28240,9 @@ button.saip-chip:focus-visible {
 .cb-rig-action-group-label {
   margin-right: 2px;
   color: var(--fg-dim);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
   text-transform: uppercase;
 }
 
@@ -25618,7 +28314,7 @@ button.saip-chip:focus-visible {
   content: "";
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--cb-badge-status);
   opacity: 0.85;
 }
@@ -25663,7 +28359,7 @@ button.saip-chip:focus-visible {
   padding: 10px 14px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cb-override summary {
@@ -25713,14 +28409,14 @@ button.saip-chip:focus-visible {
 .cb-probe-card {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 10px 12px;
 }
 
 .cb-probe-label {
-  font-size: 0.72rem;
+  font-size: var(--legend-size);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--legend-track);
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
@@ -25729,6 +28425,21 @@ button.saip-chip:focus-visible {
   color: var(--fg);
   font-size: 0.92rem;
   word-break: break-all;
+}
+
+/* A URL keeps its line: shortened with an ellipsis, whole in its title.
+   Its card takes two grid tracks so a loopback URL fits whole. */
+.cb-probe-card--wide {
+  grid-column: span 2;
+}
+
+.cb-probe-value.cb-url,
+.cb-status-value.cb-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .cb-probe-value.cb-probe-bridge-fp--match {
@@ -25746,7 +28457,7 @@ button.saip-chip:focus-visible {
 .cb-probe-reason {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--fail-soft);
   border: 1px solid color-mix(in oklab, var(--fail) 34%, var(--border));
   color: var(--fail);
@@ -25764,7 +28475,7 @@ button.saip-chip:focus-visible {
   height: 140px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   display: block;
 }
 

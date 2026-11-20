@@ -24,14 +24,14 @@ serviceProviderMessage [30] 'BE', serviceDescription [31] '9F1F',
 deviceChangeConfiguration [32] 'BF20' and estimatedProfileSize [33] '9F21'.
 ``build_v3_metadata_members`` emits all ten from the document's ``v3`` block.
 
-They depend on the vendored pySim schema carrying them: ``encode_rsp_type``
-compiles ``pysim/pySim/esim/asn1/rsp/rsp.asn``, which upstream still defines at
-SGP.22 v2. The extension lives in
-``upstream_patches/osmocom-pysim-rsp-v3-metadata/``. Re-apply it after any
-pySim update, because asn1tools **silently drops** a payload key the compiled
+pySim's ``asn1/rsp/rsp.asn`` stays at SGP.22 v2, so a request carrying any of
+the ten is encoded with pySim's SGP.22 v3.1 module (``rsp.asn1_v3()``,
+``upstream_patches/osmocom-pysim-rsp-v3-module/``) and one without them with the
+v2 module, as before. asn1tools **silently drops** a payload key the compiled
 schema does not define -- the encoder returns the same bytes it would without
-the key, raising nothing, so an unpatched tree loses these fields without a
-word. ``tests/test_metadata_codec_v3_members.py`` fails closed if that happens.
+the key, raising nothing -- so the encoders read the compiled member set back
+and refuse a member it lacks. ``tests/test_metadata_codec_v3_members.py`` pins
+both.
 NotificationEvent ::= BIT STRING {
   notificationInstall(0), notificationLocalEnable(1), notificationLocalDisable(2),
   notificationLocalDelete(3), notificationRpmEnable(4), notificationRpmDisable(5),
@@ -95,6 +95,23 @@ PROFILE_POLICY_RULE_ORDER = [
 
 # ServiceDescription ::= BIT STRING { voice(0), data(1) } (SGP.22 v3.1 §5.5.3).
 SERVICE_DESCRIPTION_ORDER = ["voice", "data"]
+
+# The StoreMetadataRequest members SGP.22 v3.1 §5.5.3 adds; a request carrying one
+# is encoded with the v3.1 module.
+V31_STORE_METADATA_MEMBERS = frozenset(
+    {
+        "serviceSpecificDataStoredInEuicc",
+        "serviceSpecificDataNotStoredInEuicc",
+        "rpmConfiguration",
+        "hriServerAddress",
+        "lprConfiguration",
+        "enterpriseConfiguration",
+        "serviceProviderMessage",
+        "serviceDescription",
+        "deviceChangeConfiguration",
+        "estimatedProfileSize",
+    }
+)
 
 # RpmType ::= BIT STRING { enable(0), disable(1), delete(2), listProfileInfo(3),
 # contactPcmp(4) }. 'Update Metadata' is not a bit -- it is granted by listing
@@ -165,18 +182,16 @@ def collect_enabled_custom_metadata_tags(document: dict[str, Any]) -> list[dict[
     return matches
 
 
-def _reject_members_the_schema_lacks(type_name: str, payload: dict[str, Any]) -> None:
+def _reject_members_the_schema_lacks(type_name: str, payload: dict[str, Any], *, v3: bool = False) -> None:
     """Refuse to encode a member the compiled schema cannot represent.
 
     asn1tools drops a payload key its schema does not define and returns the
-    bytes it would have produced without it, raising nothing. An unpatched
-    pySim therefore writes a profile with the field silently missing, and a
-    caller that asked for it has no way to tell. The SGP.22 v3.1 members are
-    the ones this catches in practice -- upstream defines StoreMetadataRequest
-    at v2, and the extension lives in
-    ``upstream_patches/osmocom-pysim-rsp-v3-metadata/``.
+    bytes it would have produced without it, raising nothing. A pySim whose
+    module lacks a member therefore writes a profile with the field silently
+    missing, and a caller that asked for it has no way to tell. ``v3`` checks
+    pySim's SGP.22 v3.1 module (``upstream_patches/osmocom-pysim-rsp-v3-module/``).
     """
-    defined = rsp_type_members(type_name)
+    defined = rsp_type_members(type_name, v3=v3)
     if len(defined) == 0:
         # Codec unavailable, or the type is not a SEQUENCE. The empty-encoding
         # check below reports the unavailable codec with a clearer message.
@@ -187,9 +202,10 @@ def _reject_members_the_schema_lacks(type_name: str, payload: dict[str, Any]) ->
     raise RuntimeError(
         f"The compiled pySim schema defines no {', '.join(missing)} in "
         f"{type_name}, so encoding would drop "
-        f"{'them' if len(missing) > 1 else 'it'} without a word. Apply "
-        "upstream_patches/osmocom-pysim-rsp-v3-metadata/ to the pySim in use, "
-        "or remove the field from the document."
+        f"{'them' if len(missing) > 1 else 'it'} without a word. Install the "
+        "pySim pyproject.toml pins (hampushellsberg-dev/pysim, see "
+        "upstream_patches/osmocom-pysim-rsp-v3-module/), or remove the field "
+        "from the document."
     )
 
 
@@ -200,9 +216,20 @@ def encode_store_metadata_request_from_file(path: str) -> bytes:
 
 def encode_store_metadata_request(document: dict[str, Any]) -> bytes:
     payload = build_store_metadata_request_payload(document)
-    _reject_members_the_schema_lacks("StoreMetadataRequest", payload)
-    encoded = encode_rsp_type("StoreMetadataRequest", payload)
+    v3 = any(key in V31_STORE_METADATA_MEMBERS for key in payload)
+    if v3 and payload.get("profileClass") == PROFILE_CLASS_MAP["OPERATIONAL"]:
+        # SGP.22 v3.1 §5.5.3 makes profileClass DEFAULT operational, and DER leaves
+        # out a component equal to its default (ITU-T X.690 (02/2021) §11.5).
+        del payload["profileClass"]
+    _reject_members_the_schema_lacks("StoreMetadataRequest", payload, v3=v3)
+    encoded = encode_rsp_type("StoreMetadataRequest", payload, v3=v3)
     if len(encoded) == 0:
+        if v3:
+            raise RuntimeError(
+                "The pySim in use has no SGP.22 v3.1 module (rsp.asn1_v3) for the v3 "
+                "StoreMetadataRequest members; install the pySim pyproject.toml pins "
+                "(hampushellsberg-dev/pysim) or remove the v3 block from the document."
+            )
         raise RuntimeError("pySIM ASN.1 encoder is not available for StoreMetadataRequest.")
     return encoded
 

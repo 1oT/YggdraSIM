@@ -104,6 +104,11 @@ _CALLABLE_ENTRIES: Mapping[str, _CallableEntry] = MappingProxyType(
             "run_standalone",
             "Tools.HilBridge.device_reset",
         ),
+        "hil-modem-diag": _CallableEntry(
+            "Tools.HilBridge.modem_diag",
+            "entry",
+            "Tools.HilBridge.modem_diag",
+        ),
     }
 )
 
@@ -123,6 +128,7 @@ _MODULE_ENTRY_IDS: Mapping[str, str] = MappingProxyType(
         "Tools.HilBridge.main": "hil-bridge",
         "Tools.HilBridge.supervisor": "hil-supervisor",
         "Tools.HilBridge.device_reset": "hil-reset",
+        "Tools.HilBridge.modem_diag": "hil-modem-diag",
     }
 )
 

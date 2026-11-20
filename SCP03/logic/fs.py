@@ -2389,7 +2389,7 @@ class FileSystemController:
         if is_unknown:
             if len(str(info.get("raw") or "")) == 0:
                 print(
-                    f"    {Config.Colors.WARNING}[!] SELECT returned no FCP template; "
+                    f"    {Config.Colors.WARNING}[!] Warning: SELECT returned no FCP template; "
                     f"type and structure are unknown.{Config.Colors.ENDC}"
                 )
             else:
@@ -3166,7 +3166,7 @@ class FileSystemController:
                         )
                 else:
                     path = "/".join(parent_path_list + [node["name"]])
-                    print(f"  [-] Skipped: {path} (None of {node['fids']} found)")
+                    print(f"  [*] Skipped: {path} (None of {node['fids']} found)")
 
             for wc in wildcard_nodes:
                 template = wc["fids"][0]
@@ -3262,7 +3262,7 @@ class FileSystemController:
             print(f"{Config.Colors.GREEN}[+] Reset Successful.{Config.Colors.ENDC}")
         if not reset_ok:
             print(
-                f"{Config.Colors.WARNING}[!] Reset failed. Continuing with best effort traversal.{Config.Colors.ENDC}"
+                f"{Config.Colors.WARNING}[!] Warning: Reset failed. Continuing with best effort traversal.{Config.Colors.ENDC}"
             )
 
     def _get_live_iccid(self) -> str:

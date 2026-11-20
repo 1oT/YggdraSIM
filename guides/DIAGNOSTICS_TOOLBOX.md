@@ -259,7 +259,7 @@ yggdrasim-eum-diag store-keys \
     --shs-enc ... --shs-mac ... \
     --keys-out /tmp/session-keys.json
 
-# Offline BPP decode (requires optional pySim checkout):
+# Offline BPP decode (requires pySim, a base dependency):
 yggdrasim-eum-diag decode-bpp --bpp /path/to/bpp.bin
 ```
 

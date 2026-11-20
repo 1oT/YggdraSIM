@@ -360,7 +360,7 @@ def enumerate_serial_devices(root: Optional[Path] = None) -> list[dict]:
       vendor/product/serial; the most stable identifier and what
       operators usually paste into ``socat`` / ``tio``.
     * ``/dev/ttyUSB*`` -- USB-serial adapters (FTDI, CP210x, CH34x).
-    * ``/dev/ttyACM*`` -- CDC-ACM modems (Telit, Sierra, Quectel).
+    * ``/dev/ttyACM*`` -- CDC-ACM modems.
     * ``/dev/ttyS*`` -- built-in UART / pass-through ports.
 
     Devices that resolve to the same underlying ``/dev/ttyUSB*`` /

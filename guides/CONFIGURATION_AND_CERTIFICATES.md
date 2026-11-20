@@ -40,7 +40,7 @@ read next.
 | K / OPc / AMF / SQN / MCC / MNC / RID for a 5G AKA test subscriber | [§ YggdraCore subscription material](#yggdracore-subscription-material)                 |
 | ShS-ENC / ShS-MAC / DEK from an EUM database for a failing PCAP               | [§ EUM session-key bundles](#eum-session-key-bundles)                                   |
 | an SCP03 / SCP11c session you want re-decoded from a saved pcap               | [§ HIL pcap keybags](#hil-pcap-keybags)                                                 |
-| an `ADD-EIM` / profile-download trigger JSON package                          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
+| an eIM package document (profile-download trigger, PSMO or eCO list)          | [§ eIM packages and hotfolder](#eim-packages-and-hotfolder)                             |
 | an ICCID / IMSI you want the APDU mutation fuzzer to be allowed to touch     | [§ APDU fuzzer allow-list](#apdu-fuzzer-allow-list)                                     |
 | a custom plugin                                                               | [§ Plugins](#plugins)                                                                    |
 | a need to encrypt every persisted secret at rest                              | [§ Inventory crypto (`gpg` envelope)](#inventory-crypto-gpg-envelope)                   |
@@ -549,7 +549,10 @@ and `F6`, class 2 8-bit data, the pair a modem requires before it hands
 a short message to the UICC (3GPP TS 31.111 clause 7.1.1.1). Cards
 reached directly over a reader have processed the ENVELOPE whatever the
 TP-PID, so a wrong value only surfaces once a modem is in the path; the
-build breakdown flags any value other than `7F`. The
+build breakdown flags any value other than `7F`. `sender` is the
+ENVELOPE's source device identity (ETSI TS 102 223 v18.3 clause 8.7):
+`82`, the terminal, by default, and `83`, the network, the value a modem
+sends (3GPP TS 31.111 v19.4 clause 7.1.1.2). The
 SCP80 admin shell uses lowercase verbs (`iccid`, `set`, `show`, `quit`)
 to manage it:
 
@@ -570,10 +573,10 @@ per-ICCID record if one exists, or seeds one from current defaults
 otherwise). `set <key> <value>` writes through to the SQLite-backed
 record on `quit` / `qa` (or any `save`-triggering exit path).
 
-**Legacy starter file.** `Workspace/SCP80/ota_config.ini` (auto-seeded
-from a bundled default on first run) is consulted only when the
-inventory has no record for the active ICCID. Treat it as bootstrap
-material; the inventory is the source of truth.
+**Legacy starter file.** None ships. An `SCP80/ota_config.ini` that an
+operator keeps under the runtime root is read only while the inventory
+holds no SCP80 state, and `.gitignore` keeps it out of version control.
+Treat it as bootstrap material; the inventory is the source of truth.
 
 **Verification.**
 
@@ -963,13 +966,14 @@ their token files into `yggdrasim_common/cli_palettes.py`, so a
 terminal can be matched to the GUI:
 
 ```
-nord (default)      catppuccin-frappe   catppuccin-latte
-catppuccin-macchiato catppuccin-mocha   dracula
-github-dark         github-light        graphite-light
-gruv-dark           ink-light           islands-light
-matrix              mono                nord-light
-ocean-dark          oneot-dark          oneot-light
-solarized-dark      solarized-light     tokyo-night
+nord (default)      bench-dark          bench-light
+catppuccin-frappe   catppuccin-latte    catppuccin-macchiato
+catppuccin-mocha    dracula             github-dark
+github-light        graphite-light      gruv-dark
+ink-light           islands-light       matrix
+mono                nord-light          ocean-dark
+oneot-dark          oneot-light         solarized-dark
+solarized-light     tokyo-night
 ```
 
 `nord` is YggdraSIM's own palette and the default; `nord-dark` is

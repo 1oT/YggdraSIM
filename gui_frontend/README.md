@@ -30,9 +30,12 @@ python main/main.py --web-server --port 27853
 ```
 gui_frontend/src/
   index.html          SPA shell (static DOM)
-  theme-init.js       Pre-paint theme bootstrap (single VALID_THEMES source)
+  theme-init.js       Pre-paint theme and skin bootstrap (single VALID_THEMES
+                      and VALID_SKINS source)
   css/
-    tokens/           20 theme palettes + base tokens + keyframes
+    tokens/           20 theme palettes + base aliases + keyframes
+    skins/            Skins (bench, classic): typefaces, shape, chrome;
+                      fonts.css holds the @font-face rules they name
     layout/           Shell, sidebar, topbar, readers, log-dock
     components/       Reusable: buttons, cards, tables, modals, trees, terminal
     views/            View-specific styles grouped by feature
@@ -51,6 +54,9 @@ gui_frontend/src/
     __foot.js         DOMContentLoaded trigger + IIFE closing
   vendor/
     xterm/            xterm.js + addon-fit.js + styles (vendored, not edited)
+    mermaid/          Guide-viewer diagrams (vendored, loaded on demand)
+    plex-sans-condensed/, plex-mono/
+                      Bench typefaces, OFL 1.1 Latin-1 subsets (vendored)
 ```
 
 ## Build Pipeline
@@ -100,10 +106,36 @@ Solve the contrast numbers before writing the file: `--fg-dim`,
 every `--gradient-brand` stop 4.5:1 on `--bg`. Then run
 `./scripts/build_gui_frontend.sh` and the two tests below.
 
+## Adding a Skin
+
+A skin is the non-colour half of the design: typefaces, type scale,
+shape, separation and the chrome treatment. Colour stays with the theme,
+so every skin renders in all 22 themes. Six registration points:
+
+1. Create `css/skins/<name>.css`: one `html[data-skin="<name>"]` rule of
+   custom properties only, declaring exactly the token set `bench.css`
+   declares (the default skin also carries `:root`). Values may read
+   palette tokens, never a colour literal.
+2. Add `skins/<name>.css` to `css/.css_order`, after the theme files and
+   before `tokens/matrix-font-override.css`.
+3. Add `<name>` to `VALID_SKINS` in `theme-init.js` (exposed as
+   `window.YGG_VALID_SKINS`).
+4. Add it to the inline `VALID_SKINS` fallback in `js/core.js`.
+5. Add the `<option>` to `index.html`'s `skin-select` and the name to
+   `SKINS` in `tests/test_gui_design_system_consistency.py`.
+6. Add a row for its name to `guides/NAMING_CONVENTIONS.md`.
+
+A face a skin names is declared in `css/skins/fonts.css` and vendored
+under `vendor/` with its `NOTICE.md`, a digest in
+`tests/test_gui_vendor_integrity.py`, and entries in `pyproject.toml`,
+`MANIFEST.in` and `scripts/release/bundle-data.json`; the CSP serves
+fonts from `'self'` only. A component or view never tests the skin by
+selector: it reads a token, and the skins give that token their values.
+
 ## Design Contract
 
-One design system, 20 themes: a change is correct when it looks native
-in every theme without a palette of its own.
+One design system, 22 themes, two skins: a change is correct when it
+looks native in every theme and every skin without a palette of its own.
 `tests/test_gui_design_system_consistency.py` enforces the rules below;
 `tests/test_gui_source_manifests.py` enforces the bundle.
 
@@ -111,9 +143,13 @@ in every theme without a palette of its own.
   the palette (`--bg`, `--bg-elev`, `--bg-elev-2`, `--surface`, `--fg`,
   `--fg-dim`, `--accent*`, `--ok*`, `--warn*`, `--fail*`, `--border*`,
   `--code-bg`, `--shadow-*`, `--gradient-*`, `--topbar-bg`);
-  `tokens/base.css` adds the aliases and the non-colour tokens
-  (`--radius-*`, `--font-*`, `--transition-*`, the `--tree-*` file-kind
-  chips).
+  `tokens/base.css` adds the aliases and the `--tree-*` file-kind chips,
+  and the skin files the non-colour tokens (`--radius-*`, `--font-*`,
+  `--transition-*`, the chrome and key tokens). Theme effects a skin may
+  switch off are read through skin tokens: `--accent-fill` and
+  `--brand-fill` (the gradients), `--surface-shadow*`, `--glow`,
+  `--page-tint`, `--bar-bg`, never `--gradient-*` or `--shadow-card*`
+  directly.
 - The per-file bare-literal budget in the test is a ceiling: it may fall,
   never rise, and a file not listed may not introduce a literal. A
   literal `color:` outside `tokens/` fails outright. Categorical hues (a
@@ -135,7 +171,8 @@ in every theme without a palette of its own.
   way, cutting its tab labels in half. The panes are what a squeeze is
   meant to reach: they scroll, the chrome does not.
 - Layers: `tokens/` (palettes, keyframes, responsive and reduced-motion
-  rules), `layout/` (grid areas and chrome), `components/` (theme-agnostic
+  rules), `skins/` (custom properties only, one rule per skin),
+  `layout/` (grid areas and chrome), `components/` (theme-agnostic
   reusable pieces), `views/` and `views/saip/` (feature-specific; they
   read tokens and never redefine them).
 - Motion uses `var(--transition-*)`; reduced-motion handling lives in
@@ -160,6 +197,13 @@ in every theme without a palette of its own.
   are self-contained within their domain but may reference functions
   and state from `core.js`.
 - `trailing.js` contains init-time setup and late-binding features.
+- A poll that runs without the operator asking (health, readers, Remote
+  Lab sessions, plugin pills) asks `backgroundPollDue("<key>")` before
+  each request and runs again from a window `focus` listener: full rate
+  with focus, one per 30 s without it, none while the page is hidden.
+  `scheduleEngineCollection` calls the engine's `gc()` once a minute in
+  the desktop window (`upstream_patches/qt-qtwebengine-renderer-gc/`).
+  `tests/test_gui_background_polls.py` pins both.
 
 ## Testing
 

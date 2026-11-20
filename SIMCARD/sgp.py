@@ -7,6 +7,8 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -21,10 +23,12 @@ from SIMCARD.bsp import BspCryptoError, BspInstance
 from SIMCARD.euicc_store import sync_euicc_store
 from SIMCARD.etsi_fs import next_generated_profile_aid, rebuild_runtime_filesystem
 from SIMCARD.profile_store import sync_profiles_to_store
-from SIMCARD.saip_profile import decode_profile_image
+from SIMCARD.saip_profile import check_profile_package_framing, decode_profile_image
 from SIMCARD.sgp32_packages import (
     unwrap_eim_key_material,
     EuiccPackageDecodeError,
+    as_euicc_package_result,
+    encode_eim_key_choice,
     decode_euicc_package_request,
     encode_der_integer,
     encode_euicc_package_error_signed,
@@ -66,6 +70,75 @@ DEFAULT_SIM_EIM_IDENTITY: dict[str, str] = {
     "trusted_tls_cert_path": "",
 }
 
+# SGP.22 v3.1 §5.7.15: GetProfilesInfo without a tag list returns the data
+# objects marked (*); SGP.32 v1.3 §5.9.14 keeps the function for ES10b.
+PROFILE_INFO_DEFAULT_TAGS: tuple[bytes, ...] = tuple(
+    bytes.fromhex(tag) for tag in ("5A", "4F", "9F70", "90", "91", "92", "93", "94", "95")
+)
+# SGP.32 v1.3 §2.11.1.1.3: the default list of the listProfileInfo PSMO.
+PSMO_PROFILE_INFO_DEFAULT_TAGS: tuple[bytes, ...] = tuple(
+    bytes.fromhex(tag) for tag in ("5A", "4F", "9F70", "91", "92", "95", "9F7B", "9F26", "9F67")
+)
+# ProfileInfoListError ::= INTEGER {incorrectInputValues(1), profileChangeOngoing(11), ...}
+PROFILE_INFO_LIST_INCORRECT_INPUT = 1
+PROFILE_INFO_LIST_CHANGE_ONGOING = 11
+
+
+def split_tag_list(value: bytes) -> tuple[bytes, ...]:
+    """The tags concatenated, without delimitation, in a tagList '5C' (SGP.22 v3.1 §5.7.15)."""
+    tags: list[bytes] = []
+    offset = 0
+    while offset < len(value):
+        start = offset
+        offset += 1
+        if value[start] & 0x1F == 0x1F:
+            while True:
+                if offset >= len(value):
+                    raise ValueError("Truncated multi-byte tag in the tag list.")
+                current = value[offset]
+                offset += 1
+                if current & 0x80 == 0:
+                    break
+        tags.append(bytes(value[start:offset]))
+    return tuple(tags)
+
+
+def parse_profile_info_list_request(
+    request: bytes,
+) -> tuple[tuple[bytes, bytes] | None, tuple[bytes, ...] | None]:
+    """Search criterion and tag list of a ProfileInfoListRequest (SGP.22 v3.1 §5.7.15).
+
+    The criterion is ``(tag, value)`` of the one searchCriteria alternative --
+    isdpAid '4F', iccid '5A' or profileClass '95' -- or None for all Profiles;
+    the tag list is None when the request names none. Raises ValueError on
+    anything else, which the eUICC answers with incorrectInputValues.
+    """
+    root_tag, root_value, _raw, end = read_tlv(request, 0)
+    if root_tag != bytes.fromhex("BF2D") or end != len(request):
+        raise ValueError("Expected exactly one BF2D ProfileInfoListRequest.")
+    criterion: tuple[bytes, bytes] | None = None
+    tag_list: tuple[bytes, ...] | None = None
+    offset = 0
+    while offset < len(root_value):
+        field_tag, field_value, _raw, offset = read_tlv(root_value, offset)
+        if field_tag == b"\xA0" and criterion is None and tag_list is None:
+            choice_tag, choice_value, _raw, choice_end = read_tlv(field_value, 0)
+            if choice_end != len(field_value):
+                raise ValueError("searchCriteria carries exactly one alternative.")
+            # OctetTo16, Iccid (SIZE(10)) and an INTEGER content octet count.
+            sizes = {b"\x4F": (1, 16), b"\x5A": (10, 10), b"\x95": (1, 4)}
+            if choice_tag not in sizes:
+                raise ValueError(f"Unknown searchCriteria alternative {choice_tag.hex().upper()}.")
+            low, high = sizes[choice_tag]
+            if not low <= len(choice_value) <= high:
+                raise ValueError(f"searchCriteria {choice_tag.hex().upper()} has a bad length.")
+            criterion = (bytes(choice_tag), bytes(choice_value))
+        elif field_tag == b"\x5C" and tag_list is None:
+            tag_list = split_tag_list(field_value)
+        else:
+            raise ValueError(f"Unexpected {field_tag.hex().upper()} in ProfileInfoListRequest.")
+    return criterion, tag_list
+
 
 class BppDuplicateIccidError(ValueError):
     pass
@@ -73,6 +146,20 @@ class BppDuplicateIccidError(ValueError):
 
 class BppIccidMismatchError(ValueError):
     pass
+
+
+class BppProfileInterpretationError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class _MemoryResetOutcome:
+    """What one eUICCMemoryReset removed: the source of resetResult, resetEimResult and the ES10c answer."""
+
+    profile_data_deleted: bool
+    profile_data_reset: bool
+    eim_data_removed: bool
+    immediate_enable_cleared: bool
 
 
 class SgpLogic:
@@ -115,6 +202,12 @@ class SgpLogic:
     # encodes as 30 { A0 { 30 { 80 01 00 } } }.
     PPI_RESPONSE_OK = bytes.fromhex("3007A0053003800100")
 
+    # SGP.22 v3.1 §2.5.6.1 (p.53): an error in a ProfileElement puts the interpreter's
+    # EUICCResponse in ErrorResult.ppiResponse. SAIP V3.4.1 §8.11 (p.66) reports PEs in the
+    # wrong order or badly formatted as invalid-request-format(5); with
+    # profileInstallationAborted that is 30 { A0 { 30 { 80 01 05 } } 81 00 }.
+    PPI_RESPONSE_INVALID_REQUEST_FORMAT = bytes.fromhex("3009A00530038001058100")
+
     def __init__(self, state: SimCardState, sim_eim_identity_path: str = "") -> None:
         self.state = state
         self._store_data_extensions: list[Any] = []
@@ -131,7 +224,9 @@ class SgpLogic:
                 "SK_EUM_SIG_NIST.pem",
             )
         )
-        self._euicc_private_key = self._load_builtin_ec_private_key(
+        # The SGP.26 Variant O eUICC key when it can be read; otherwise the
+        # generated key the eUICC store keeps (the _euicc_private_key property).
+        self._builtin_euicc_private_key = self._load_builtin_ec_private_key(
             self._interop_asset_path(
                 "SCP11",
                 "SGP.26_test_Certs",
@@ -140,12 +235,87 @@ class SgpLogic:
                 "eUICC",
                 "SK_EUICC_SIG_NIST.pem",
             )
-        ) or ec.generate_private_key(ec.SECP256R1())
+        )
+        self._euicc_key_cache: tuple[bytes, ec.EllipticCurvePrivateKey] | None = None
         self._load_builtin_interop_material()
         self._ensure_metadata_defaults()
 
     def reset(self) -> None:
         self.state.sgp_session = SimSgpSession()
+
+    @property
+    def _euicc_private_key(self) -> ec.EllipticCurvePrivateKey:
+        """SK.EUICC.ECDSA: the SGP.26 key, else the generated key the eUICC store keeps.
+
+        A key generated afresh in every process, while euicc_certificate_der
+        came back from the store, signed every result with a key the eUICC's
+        own certificate (GetCerts) does not carry.
+        """
+        if self._builtin_euicc_private_key is not None:
+            return self._builtin_euicc_private_key
+        pem = bytes(self.state.euicc_private_key_pem or b"")
+        cached = self._euicc_key_cache
+        if cached is not None and len(pem) > 0 and cached[0] == pem:
+            return cached[1]
+        key: ec.EllipticCurvePrivateKey | None = None
+        if len(pem) > 0:
+            try:
+                loaded = serialization.load_pem_private_key(pem, password=None)
+            except (ValueError, TypeError):
+                loaded = None
+            if isinstance(loaded, ec.EllipticCurvePrivateKey):
+                key = loaded
+        if key is None:
+            key = ec.generate_private_key(ec.SECP256R1())
+            pem = key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            self.state.euicc_private_key_pem = pem
+            self._sync_euicc_store()
+        self._euicc_key_cache = (pem, key)
+        return key
+
+    @_euicc_private_key.setter
+    def _euicc_private_key(self, key: ec.EllipticCurvePrivateKey) -> None:
+        self._builtin_euicc_private_key = key
+
+    @staticmethod
+    def _euicc_certificate_is_generated(certificate_der: bytes) -> bool:
+        """True for the eUICC certificates the simulator builds itself.
+
+        _build_default_euicc_certificate names "Test eUICC" of "RSP Test EUM", as
+        SGP.26 does, and the self-signed fallback "Simulated eUICC". A
+        certificate an operator configured (quirks, isdr_config) is served as
+        given even when the simulator cannot sign with its key.
+        """
+        try:
+            subject = crypto_x509.load_der_x509_certificate(bytes(certificate_der)).subject
+        except ValueError:
+            return False
+        names = [attribute.value for attribute in subject.get_attributes_for_oid(NameOID.COMMON_NAME)]
+        return any(name in ("Test eUICC", "Simulated eUICC") for name in names)
+
+    def _euicc_certificate_needs_rebuild(self, certificate_der: bytes) -> bool:
+        raw = bytes(certificate_der or b"")
+        if len(raw) == 0:
+            return True
+        return self._euicc_certificate_is_generated(raw) and not self._euicc_certificate_matches_key(raw)
+
+    def _euicc_certificate_matches_key(self, certificate_der: bytes) -> bool:
+        try:
+            public_key = crypto_x509.load_der_x509_certificate(bytes(certificate_der)).public_key()
+        except ValueError:
+            return False
+        own = self._euicc_private_key.public_key()
+        point = serialization.PublicFormat.UncompressedPoint
+        try:
+            return public_key.public_bytes(serialization.Encoding.X962, point) == own.public_bytes(
+                serialization.Encoding.X962, point
+            )
+        except (AttributeError, ValueError):
+            return False
 
     def _declares_rsp_v3(self) -> bool:
         """True when EUICCInfo2 svn declares SGP.22 v3 or later, which decides the error codes
@@ -190,8 +360,8 @@ class SgpLogic:
             return self._build_euicc_info1_response(), 0x90, 0x00
         if normalized == bytes.fromhex("BF2200"):
             return self._build_euicc_info2_response(), 0x90, 0x00
-        if normalized == bytes.fromhex("BF2D00"):
-            return self._build_profiles_info_response(), 0x90, 0x00
+        if normalized.startswith(bytes.fromhex("BF2D")):
+            return self._handle_get_profiles_info(normalized, PROFILE_INFO_DEFAULT_TAGS), 0x90, 0x00
         if normalized == bytes.fromhex("BF2E00"):
             challenge = self._issue_card_challenge()
             return tlv("BF2E", tlv("80", challenge)), 0x90, 0x00
@@ -218,10 +388,10 @@ class SgpLogic:
         if normalized.startswith(bytes.fromhex("BF57")):
             return self._handle_add_initial_eim(normalized)
         if normalized.startswith(bytes.fromhex("BF58")):
-            # SGP.32 v1.2 §5.9.16 ProfileRollbackRequest is also tagged
-            # BF58, with body ``01 01 NN`` (a primitive BOOLEAN). The
-            # legacy UpdateEim path uses a constructed ``A0 30 ...``
-            # body. Sniff the inner first TLV to route correctly.
+            # BF58 is ProfileRollbackRequest (SGP.32 v1.3 §5.9.16), whose one component
+            # refreshFlag BOOLEAN gets the automatic tag [0]: ``80 01 NN`` (X.680 (02/2021)
+            # §25.3). The legacy UpdateEim path of this simulator carries a constructed
+            # ``A0 30 ...`` body, so a primitive first component is the rollback request.
             if self._is_profile_rollback_request(normalized):
                 return self._handle_profile_rollback(normalized)
             return self._handle_add_eim(normalized, "BF58")
@@ -255,7 +425,7 @@ class SgpLogic:
         if normalized.startswith(bytes.fromhex("BF64")):
             return self._handle_euicc_memory_reset(normalized)
         if normalized.startswith(bytes.fromhex("BF30")):
-            return self._remove_notification_from_list(normalized), 0x90, 0x00
+            return self._remove_notification_from_list(normalized)
         if normalized.startswith(bytes.fromhex("BF35")):
             return self._handle_load_crl(normalized)
         if normalized.startswith(bytes.fromhex("BF51")):
@@ -567,30 +737,42 @@ class SgpLogic:
 
     @staticmethod
     def _is_profile_rollback_request(payload: bytes) -> bool:
-        # BF58 ProfileRollbackRequest body: SEQUENCE { refreshFlag BOOLEAN }.
-        # Single primitive BOOLEAN (tag 01). The legacy UpdateEim wrapper
-        # always carries a constructed body so the discriminator is the
-        # very first inner TLV tag.
+        # The legacy UpdateEim body is constructed; an empty body or a primitive first component
+        # belongs to ProfileRollbackRequest, whose handler checks the refreshFlag itself.
         try:
             _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
         except ValueError:
             return False
         if len(outer_value) == 0:
-            return False
+            return True
+        return (outer_value[0] & 0x20) == 0
+
+    def _profile_rollback_refresh_flag(self, payload: bytes) -> bool | None:
+        """The refreshFlag of a ProfileRollbackRequest, None when the request is malformed.
+
+        The component is ``80 01 NN`` (automatic tag [0]). Without conformance_strict the
+        universal BOOLEAN ``01 01 NN`` that earlier tools sent is taken as well.
+        """
         try:
-            inner_tag, _value, _raw_inner, _next_inner = read_tlv(outer_value, 0)
+            _outer_tag, outer_value, _raw, _next = read_tlv(bytes(payload or b""), 0)
+            inner_tag, value, _raw_inner, next_inner = read_tlv(outer_value, 0)
         except ValueError:
-            return False
-        return inner_tag == b"\x01"
+            return None
+        accepted = (b"\x80",) if self.state.conformance_strict else (b"\x80", b"\x01")
+        if inner_tag not in accepted or len(value) != 1 or next_inner != len(outer_value):
+            return None
+        return value != b"\x00"
 
     def _handle_profile_rollback(self, payload: bytes) -> tuple[bytes, int, int]:
-        # SGP.32 §5.9.16 ProfileRollbackResponse ::= [88] SEQUENCE { -- BF58
+        # SGP.32 v1.3 §5.9.16 ProfileRollbackResponse ::= [88] SEQUENCE { -- BF58
         #     cmdResult INTEGER {ok(0), rollbackNotAllowed(1), catBusy(5),
         #                        commandError(7), undefinedError(127)},
         #     eUICCPackageResult [81] EuiccPackageResult OPTIONAL  -- BF51
         # }
-        # AUTOMATIC TAGS keeps the cmdResult INTEGER as primitive 0x80
-        # because all SEQUENCE fields are unambiguously tagged.
+        # eUICCPackageResult is textually tagged, so automatic tagging does not apply to the list
+        # (X.680 (02/2021) §25.3) and cmdResult stays a universal INTEGER, '02'.
+        if self._profile_rollback_refresh_flag(payload) is None:
+            return b"", 0x6A, 0x80
         candidate = next(
             (entry for entry in self.state.profiles if entry.rollback_armed is True),
             None,
@@ -599,7 +781,7 @@ class SgpLogic:
         previous_profile = self._lookup_profile_by_aid(previous_aid)
         if candidate is None or previous_profile is None:
             return (
-                tlv("BF58", tlv(b"\x80", encode_der_integer(1))),  # rollbackNotAllowed
+                tlv("BF58", tlv(b"\x02", encode_der_integer(1))),  # rollbackNotAllowed
                 0x90,
                 0x00,
             )
@@ -612,11 +794,67 @@ class SgpLogic:
         self._sync_profile_store()
         self._enqueue_notification(operation=self.NOTIF_DISABLE, profile=candidate)
         self._enqueue_notification(operation=self.NOTIF_ENABLE, profile=previous_profile)
+        package_result = self._rollback_package_result()
+        self._sync_euicc_store()
         return (
-            tlv("BF58", tlv(b"\x80", encode_der_integer(0))),
+            tlv("BF58", tlv(b"\x02", encode_der_integer(0)) + package_result),
             0x90,
             0x00,
         )
+
+    def _rollback_package_result(self) -> bytes:
+        """The eUICC Package Result a successful ProfileRollback returns (SGP.32 v1.3 §5.9.16).
+
+        It carries the eimId, counterValue and eimTransactionId of the last eUICC Package, a new
+        seqNumber and that package's results followed by rollbackResult [12] ok(0), and it
+        replaces the previous result in the stored list. Empty when no package result is known.
+        """
+        last = self.state.last_euicc_package_result
+        if last is None:
+            return b""
+        items: list[bytes] = []
+        try:
+            _tag, signed_body, _raw, _next = read_tlv(bytes(last.payload), 0)
+            _tag, data_value, _raw, _next = read_tlv(signed_body, 0)
+            results_value = b""
+            offset = 0
+            while offset < len(data_value):
+                tag_bytes, value, _raw, offset = read_tlv(data_value, offset)
+                if tag_bytes == b"\x30":
+                    results_value = value
+            offset = 0
+            while offset < len(results_value):
+                _tag, _value, raw, offset = read_tlv(results_value, offset)
+                items.append(raw)
+        except ValueError:
+            # a damaged stored result leaves nothing to repeat
+            return b""
+        items.append(tlv(b"\x8C", encode_der_integer(0)))  # rollbackResult [12] ok(0)
+        eim_entry = self._find_eim_entry(last.eim_id)
+        association_token = max(0, int(eim_entry.association_token or 0)) if eim_entry is not None else 0
+        seq_number = self._allocate_package_result_seq_number()
+        outer_tlv, payload_tlv = encode_euicc_package_result_signed(
+            eim_id=last.eim_id,
+            counter_value=last.counter_value,
+            seq_number=seq_number,
+            euicc_results=items,
+            eim_transaction_id=last.eim_transaction_id,
+            private_key=self._euicc_private_key,
+            association_token=association_token,
+        )
+        entry = SimEuiccPackageResultEntry(
+            seq_number=seq_number,
+            eim_id=last.eim_id,
+            counter_value=int(last.counter_value),
+            eim_transaction_id=bytes(last.eim_transaction_id),
+            payload=bytes(payload_tlv),
+        )
+        self.state.euicc_package_results = [
+            stored for stored in self.state.euicc_package_results if stored.seq_number != last.seq_number
+        ]
+        append_bounded(self.state.euicc_package_results, entry)
+        self.state.last_euicc_package_result = entry
+        return outer_tlv
 
     def _handle_execute_fallback_mechanism(self, payload: bytes) -> tuple[bytes, int, int]:
         # SGP.32 §5.9.20 ExecuteFallbackMechanismResponse ::= [93] SEQUENCE { -- BF5D
@@ -832,20 +1070,20 @@ class SgpLogic:
         #     httpParams [1] OCTET STRING OPTIONAL  -- also used for CoAP
         # } and ConnectivityParametersError ::= INTEGER {
         #     parametersNotAvailable(1), undefinedError(127) }.
-        # AUTOMATIC TAGS: SEQUENCE keeps OPTIONAL field with explicit
-        # context tag ``81``. The CHOICE branches inherit the same
-        # implicit tagging pattern; we use ``80`` for the error INTEGER.
+        # No alternative is textually tagged, so AUTOMATIC TAGS numbers them (X.680 (02/2021)
+        # §29.2): connectivityParameters [0] 'A0' (the SEQUENCE, carrying httpParams [1] '81'),
+        # connectivityParametersError [1] '81'.
         _ = payload  # request carries no useful operands
         active = self._lookup_profile_by_aid(self.state.active_profile_aid)
         params_http = bytes(active.connectivity_params_http or b"") if active is not None else b""
         if len(params_http) == 0:
             return (
-                tlv("BF5F", tlv(b"\x80", encode_der_integer(1))),
+                tlv("BF5F", tlv(b"\x81", encode_der_integer(1))),  # parametersNotAvailable
                 0x90,
                 0x00,
             )
         return (
-            tlv("BF5F", tlv(b"\x81", params_http)),
+            tlv("BF5F", tlv(b"\xA0", tlv(b"\x81", params_http))),
             0x90,
             0x00,
         )
@@ -987,21 +1225,35 @@ class SgpLogic:
                 profile.notification_address = notification_address
             if "notification_configuration" in metadata:
                 profile.notification_configuration = list(metadata["notification_configuration"])
+            if "fallback_allowed" in metadata:
+                profile.fallback_allowed = bool(metadata["fallback_allowed"])
             break
 
     def _handle_euicc_memory_reset(self, payload: bytes) -> tuple[bytes, int, int]:
-        # SGP.32 v1.2 §5.9.5 EuiccMemoryResetRequest ::= [100] SEQUENCE
+        # SGP.32 v1.3 §5.9.5 (p.130-132) EuiccMemoryResetRequest ::= [100] SEQUENCE
         #   resetOptions [2] BIT STRING { deleteOperationalProfiles(0),
         #     deleteFieldLoadedTestProfiles(1), resetDefaultSmdpAddress(2),
         #     deletePreLoadedTestProfiles(3), deleteProvisioningProfiles(4),
         #     resetEimConfigData(5), resetImmediateEnableConfig(6) }
-        # The simulator response keeps the legacy "BF64 00" empty form
-        # for backwards compatibility with the existing eim-local
-        # regression suite; the side-effects on state are the spec-
-        # mandated work that this function actually performs.
+        # EuiccMemoryResetResponse ::= [100] SEQUENCE { resetResult INTEGER,
+        #   resetEimResult INTEGER OPTIONAL, resetImmediateEnableConfigResult
+        #   INTEGER OPTIONAL }: AUTOMATIC TAGS give '80', '81', '82'. The two
+        # optional members answer for their bit only, and only after a resetResult
+        # of ok or nothingToDelete.
         bits = self._decode_reset_options(payload)
-        self._apply_memory_reset_bits(bits)
-        return tlv("BF64", b""), 0x90, 0x00
+        if len(bits) == 0:
+            return tlv("BF64", tlv(b"\x80", encode_der_integer(127))), 0x90, 0x00
+        outcome = self._reset_memory(bits)
+        profile_bits = bits & {0, 1, 2, 3, 4}
+        # With no profile or address option asked there was nothing for resetResult to
+        # fail on; a card answers ok(0) there (live card, eIM-only reset).
+        reset_result = 0 if (len(profile_bits) == 0 or outcome.profile_data_reset) else 1
+        body = tlv(b"\x80", encode_der_integer(reset_result))
+        if 5 in bits:
+            body += tlv(b"\x81", encode_der_integer(0 if outcome.eim_data_removed else 1))
+        if 6 in bits:
+            body += tlv(b"\x82", encode_der_integer(0))
+        return tlv("BF64", body), 0x90, 0x00
 
     def _handle_load_crl(self, payload: bytes) -> tuple[bytes, int, int]:
         """SGP.22 v3 §5.7.13 ES10b.LoadCRL handler.
@@ -1176,8 +1428,14 @@ class SgpLogic:
         return set(self._decode_named_bit_string(options_value))
 
     def _apply_memory_reset_bits(self, bits: set[int]) -> bool:
+        """Apply the reset options; True when anything was deleted (the ES10c resetResult)."""
+        outcome = self._reset_memory(bits)
+        return outcome.profile_data_deleted or outcome.eim_data_removed or outcome.immediate_enable_cleared
+
+    def _reset_memory(self, bits: set[int]) -> "_MemoryResetOutcome":
         deleted_any = False
         state_changed = False
+        address_reset = False
         if 0 in bits or 1 in bits or 3 in bits or 4 in bits:
             classes_to_drop: set[str] = set()
             if 0 in bits:
@@ -1210,18 +1468,24 @@ class SgpLogic:
                     )
                 rebuild_runtime_filesystem(self.state)
                 self._sync_profile_store()
+        profile_deleted = deleted_any
         if 2 in bits:
+            address_reset = len(str(self.state.default_dp_address or "").strip()) > 0
             self.state.default_dp_address = ""
             state_changed = True
+        eim_removed = False
         if 5 in bits:
-            had_entries = len(self.state.eim_entries) > 0
-            self.state.eim_entries = self._default_eim_entries()
+            # SGP.32 v1.3 §5.9.5 (p.131): remove all eIM Configuration Data of all
+            # Associated eIMs; the simulator's default eIM is one of them.
+            eim_removed = len(self.state.eim_entries) > 0
+            self.state.eim_entries = []
             self._ensure_metadata_defaults()
             state_changed = True
-            if had_entries is True:
+            if eim_removed is True:
                 deleted_any = True
+        immediate_cleared = False
         if 6 in bits:
-            had_immediate = (
+            immediate_cleared = (
                 self.state.immediate_enable_flag is True
                 or len(self.state.immediate_enable_smdp_oid) > 0
                 or len(self.state.immediate_enable_smdp_address) > 0
@@ -1229,12 +1493,16 @@ class SgpLogic:
             self.state.immediate_enable_flag = False
             self.state.immediate_enable_smdp_oid = ""
             self.state.immediate_enable_smdp_address = ""
-            if had_immediate is True:
-                deleted_any = True
+            if immediate_cleared is True:
                 state_changed = True
         if state_changed is True:
             self._sync_euicc_store()
-        return deleted_any
+        return _MemoryResetOutcome(
+            profile_data_deleted=profile_deleted,
+            profile_data_reset=profile_deleted or address_reset,
+            eim_data_removed=eim_removed,
+            immediate_enable_cleared=immediate_cleared,
+        )
 
     def _parse_add_eim_entries(self, payload: bytes) -> list[SimEimEntry]:
         try:
@@ -1347,6 +1615,10 @@ class SgpLogic:
             offset = next_offset
         if len(cert_bytes) == 0 and len(endpoint) == 0:
             return None
+        if len(cert_bytes) > 0 and cert_bytes[:1] != b"\x30":
+            # a certificate is a DER SEQUENCE; anything else (a ProfileRollbackRequest's
+            # refreshFlag '80 01 00' arrived here before 2026-11-06) stores no eIM
+            return None
         host = self._extract_endpoint_host(endpoint)
         eim_id = host
         eim_id_type = 2
@@ -1356,7 +1628,7 @@ class SgpLogic:
             digest = hashlib.sha1(cert_bytes, usedforsecurity=False).hexdigest()
             eim_id = f"legacy-eim-{digest[:16]}"
             eim_id_type = 3
-        wrapped_certificate = tlv("A1", cert_bytes) if len(cert_bytes) > 0 else b""
+        wrapped_certificate = encode_eim_key_choice(cert_bytes) if len(cert_bytes) > 0 else b""
         return SimEimEntry(
             eim_id=eim_id,
             eim_fqdn=host,
@@ -1614,42 +1886,123 @@ class SgpLogic:
                     return profile
         return None
 
-    def _build_profiles_info_response(self) -> bytes:
+    def _handle_get_profiles_info(self, request: bytes, default_tags: tuple[bytes, ...]) -> bytes:
+        try:
+            criterion, tag_list = parse_profile_info_list_request(request)
+        except ValueError:
+            return self._profile_info_list_error(PROFILE_INFO_LIST_INCORRECT_INPUT)
+        tags = default_tags if tag_list is None else tag_list
+        matching = [
+            profile for profile in self.state.profiles
+            if self._profile_matches_criterion(profile, criterion)
+        ]
+        return self._build_profiles_info_response(matching, tags)
+
+    @staticmethod
+    def _profile_info_list_error(code: int) -> bytes:
+        # ProfileInfoListResponse ::= [45] CHOICE in an AUTOMATIC TAGS module:
+        # profileInfoListError is the second alternative, [1] IMPLICIT INTEGER.
+        return tlv(bytes.fromhex("BF2D"), tlv(b"\x81", encode_der_integer(code)))
+
+    def _profile_matches_criterion(
+        self,
+        profile: SimProfileEntry,
+        criterion: tuple[bytes, bytes] | None,
+    ) -> bool:
+        if criterion is None:
+            return True
+        tag, value = criterion
+        if tag == b"\x4F":
+            return str(profile.aid or "").strip().upper() == value.hex().upper()
+        if tag == b"\x5A":
+            return str(profile.iccid or "").strip() == decode_bcd_digits(value)
+        return self._profile_class_value(profile) == int.from_bytes(value, "big", signed=True)
+
+    def _build_profiles_info_response(
+        self,
+        profiles: list[SimProfileEntry] | None = None,
+        tags: tuple[bytes, ...] = PROFILE_INFO_DEFAULT_TAGS,
+    ) -> bytes:
         # SGP.22 v3.1 ProfileInfoListResponse: profileInfoListOk is the SEQUENCE
         # OF ProfileInfo under automatic tag [0], so A0 holds the E3 entries
         # directly; the implicit tag replaces the SEQUENCE OF's own 30.
-        entries = b"".join(self._encode_profile_entry(profile) for profile in self.state.profiles)
+        targets = self.state.profiles if profiles is None else profiles
+        entries = b"".join(self._encode_profile_entry(profile, tags) for profile in targets)
         return tlv("BF2D", tlv("A0", entries))
 
-    def _encode_profile_entry(self, profile: SimProfileEntry) -> bytes:
-        state_byte = b"\x01" if str(profile.state).strip().lower() == "enabled" else b"\x00"
+    @staticmethod
+    def _profile_class_value(profile: SimProfileEntry) -> int:
+        # ProfileClass ::= INTEGER {test(0), provisioning(1), operational(2)}
         profile_class = str(profile.profile_class).strip().lower()
-        class_byte = b"\x02"
         if profile_class in ("provisioning", "prov"):
-            class_byte = b"\x01"
-        elif profile_class == "test":
-            class_byte = b"\x00"
+            return 1
+        if profile_class == "test":
+            return 0
+        return 2
+
+    def _encode_profile_entry(
+        self,
+        profile: SimProfileEntry,
+        tags: tuple[bytes, ...] = PROFILE_INFO_DEFAULT_TAGS,
+    ) -> bytes:
+        """One ProfileInfo with the requested data objects the Profile holds.
+
+        DER keeps the SEQUENCE order of SGP.32 v1.3 §4.4 whatever order the tag
+        list uses; a requested object the Profile lacks is omitted (SGP.22
+        v3.1 §5.7.15), and so is a tag the simulator keeps no data for.
+        """
+        wanted = set(tags)
         nickname = str(profile.nickname or "").strip() or f"ICCID-{profile.iccid[-4:]}"
         provider = str(profile.service_provider or "").strip() or "YggdraSIM"
         profile_name = str(profile.profile_name or "").strip() or nickname
+        fields: list[tuple[str, bytes]] = [
+            ("5A", encode_iccid_ef(profile.iccid)),
+            ("4F", bytes.fromhex(profile.aid)),
+            ("9F70", b"\x01" if str(profile.state).strip().lower() == "enabled" else b"\x00"),
+            ("90", nickname.encode("utf-8")),
+            ("91", provider.encode("utf-8")),
+            ("92", profile_name.encode("utf-8")),
+            ("95", bytes([self._profile_class_value(profile)])),
+        ]
+        notification_info = self._encode_notification_configuration_info(profile)
+        if notification_info is not None:
+            fields.append(("B6", notification_info))
+        # ecallIndication is OPTIONAL and read as FALSE when absent;
+        # fallbackAttribute is DEFAULT FALSE, which DER never encodes.
+        if bool(profile.ecall_indication):
+            fields.append(("9F7B", b"\xFF"))
+        if bool(profile.fallback_attribute):
+            fields.append(("9F26", b"\xFF"))
+        if profile.fallback_allowed is not None:
+            fields.append(("9F67", b"\xFF" if profile.fallback_allowed else b"\x00"))
         body = b"".join(
-            [
-                tlv("5A", encode_iccid_ef(profile.iccid)),
-                tlv("4F", bytes.fromhex(profile.aid)),
-                tlv("9F70", state_byte),
-                tlv("90", nickname.encode("utf-8")),
-                tlv("91", provider.encode("utf-8")),
-                tlv("92", profile_name.encode("utf-8")),
-                tlv("95", class_byte),
-            ]
+            tlv(tag, value) for tag, value in fields if bytes.fromhex(tag) in wanted
         )
         return tlv("E3", body)
 
+    def _encode_notification_configuration_info(self, profile: SimProfileEntry) -> bytes | None:
+        """notificationConfigurationInfo 'B6' content: one entry per address.
+
+        SGP.22 v3.1 §5.5.3; each entry is 30 { 80 NotificationEvent, 81 UTF8String },
+        the inverse of ``_parse_notification_configuration_info``.
+        """
+        configuration = profile.notification_configuration
+        if not configuration:
+            return None
+        bits_by_address: dict[str, list[int]] = {}
+        for bit, address in configuration:
+            bits_by_address.setdefault(str(address), []).append(int(bit))
+        return b"".join(
+            tlv(
+                "30",
+                tlv("80", self._encode_named_bit_string(bits)) + tlv("81", address.encode("utf-8")),
+            )
+            for address, bits in bits_by_address.items()
+        )
+
     def _issue_card_challenge(self) -> bytes:
-        challenge = hashlib.sha256(
-            bytes.fromhex(self.state.eid)
-            + self.state.apdu_count.to_bytes(4, "big", signed=False)
-        ).digest()[:16]
+        # SGP.22 v3.1 §5.7.7 (p.330): every RSP Session gets a new random euiccChallenge.
+        challenge = os.urandom(16)
         self.state.sgp_session.card_challenge = challenge
         return challenge
 
@@ -1714,19 +2067,58 @@ class SgpLogic:
             for address in configured.additional_root_smds_addresses
             if len(str(address).strip()) > 0
         ]
+        # SGP.22 v3.1 §5.7.3 EuiccConfiguredDataResponse, AUTOMATIC TAGS:
+        # additionalRootDsAddresses [2] is a SEQUENCE OF UTF8String, whose
+        # elements keep the universal tag '0C'; ciList [4] is a SEQUENCE OF
+        # SEQUENCE { ciPKId [0], ciName [1] }.
         if len(additional_root_smds) > 0:
             body.append(
                 tlv(
                     "A2",
-                    b"".join(tlv("82", address.encode("utf-8")) for address in additional_root_smds),
+                    b"".join(tlv("0C", address.encode("utf-8")) for address in additional_root_smds),
                 )
             )
         for pkid in self._configured_ci_pkids():
             body.append(tlv("83", pkid))
         ci_list = self._dedupe_byte_values(getattr(configured, "ci_list", []))
         if len(ci_list) > 0:
-            body.append(tlv("A4", b"".join(tlv("84", item) for item in ci_list)))
+            names = self._ci_names_by_skid()
+            body.append(
+                tlv(
+                    "A4",
+                    b"".join(
+                        tlv(
+                            "30",
+                            tlv("80", item) + tlv("81", names.get(item, item.hex().upper()).encode("utf-8")),
+                        )
+                        for item in ci_list
+                    ),
+                )
+            )
         return tlv("BF3C", b"".join(body))
+
+    def _ci_names_by_skid(self) -> dict[bytes, str]:
+        """Readable names of the eSIM CA RootCAs the eUICC holds, keyed by subjectKeyIdentifier.
+
+        The subject commonName, or the whole subject when it has none; a ciList
+        entry without a held certificate is named by its identifier in hex.
+        """
+        names: dict[bytes, str] = {}
+        for certificate_der in [*self.state.ci_certificates, self._ci_certificate_der]:
+            if len(bytes(certificate_der or b"")) == 0:
+                continue
+            try:
+                certificate = crypto_x509.load_der_x509_certificate(bytes(certificate_der))
+            except ValueError:
+                continue
+            key_identifier = self._certificate_subject_key_identifier(certificate)
+            if len(key_identifier) == 0:
+                continue
+            common_names = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+            names[key_identifier] = (
+                str(common_names[0].value) if common_names else certificate.subject.rfc4514_string()
+            )
+        return names
 
     def _build_rat_response(self) -> bytes:
         # SGP.22 §5.7.16 ES10c.GetRAT returns a RulesAuthorisationTable
@@ -1786,10 +2178,12 @@ class SgpLogic:
             body += tlv("88", bytes(entry.euicc_ci_pkid))
             if entry.indirect_profile_download:
                 body += tlv("89", b"")
+            # SGP.32 v1.3 §2.11.1.1.2: each a CHOICE of SubjectPublicKeyInfo ('A0') or
+            # Certificate ('A1'), however the entry holds it.
             if len(bytes(entry.eim_public_key_data or b"")) > 0:
-                body += tlv("A5", bytes(entry.eim_public_key_data))
+                body += tlv("A5", encode_eim_key_choice(bytes(entry.eim_public_key_data)))
             if len(bytes(entry.trusted_tls_public_key_data or b"")) > 0:
-                body += tlv("A6", bytes(entry.trusted_tls_public_key_data))
+                body += tlv("A6", encode_eim_key_choice(bytes(entry.trusted_tls_public_key_data)))
             entries += tlv("30", body)
         if len(entries) == 0:
             return tlv("BF55", b"")
@@ -1827,13 +2221,20 @@ class SgpLogic:
 
         self._ensure_default_certificate_chain()
 
+        seeded_ids = {self._normalize_eim_identifier(seeded.eim_id) for seeded in managed_default_entries}
         for index, entry in enumerate(self.state.eim_entries, start=1):
             entry.euicc_ci_pkid = bytes(entry.euicc_ci_pkid or b"") or bytes(self.state.root_ci_pkid)
             if len(bytes(entry.eim_public_key_data or b"")) == 0:
                 entry.eim_public_key_data = self._build_named_certificate(
                     f"Simulated eIM Signer {index}"
                 )
-            if len(bytes(entry.trusted_tls_public_key_data or b"")) == 0:
+            # trustedPublicKeyDataTls is OPTIONAL in EimConfigurationData (SGP.32 v1.3
+            # §2.11.1.1.2, p.33): an eIM added without one keeps it absent. Only the eIM
+            # the simulator seeds itself (built in or from its eIM identity) is given one.
+            seeded = self._normalize_eim_identifier(entry.eim_id) in seeded_ids
+            if len(bytes(entry.trusted_tls_public_key_data or b"")) == 0 and (
+                seeded or self._is_builtin_default_eim_entry(entry)
+            ):
                 entry.trusted_tls_public_key_data = self._build_named_certificate(
                     f"Simulated eIM TLS {index}"
                 )
@@ -2021,7 +2422,7 @@ class SgpLogic:
                 self.state.eum_certificate_der = generated_eum
             else:
                 self.state.eum_certificate_der = self._build_named_certificate("Simulated EUM")
-        if len(bytes(self.state.euicc_certificate_der or b"")) == 0:
+        if self._euicc_certificate_needs_rebuild(bytes(self.state.euicc_certificate_der or b"")):
             generated_euicc = self._build_default_euicc_certificate()
             if len(generated_euicc) > 0:
                 self.state.euicc_certificate_der = generated_euicc
@@ -2211,7 +2612,7 @@ class SgpLogic:
 
     def _current_euicc_certificate_der(self) -> bytes:
         raw = bytes(self.state.euicc_certificate_der or b"")
-        if len(raw) > 0:
+        if not self._euicc_certificate_needs_rebuild(raw):
             return raw
         generated = self._build_default_euicc_certificate()
         if len(generated) == 0:
@@ -2220,6 +2621,7 @@ class SgpLogic:
                 private_key=self._euicc_private_key,
             )
         self.state.euicc_certificate_der = generated
+        self._sync_euicc_store()
         return generated
 
     def _handle_authenticate_server(self, payload: bytes) -> tuple[bytes, int, int]:
@@ -2483,6 +2885,14 @@ class SgpLogic:
                     profile = self._create_installed_profile_from_bpp()
                     return self._deliver_installation_result(success=True, profile=profile), 0x90, 0x00
                 return b"", 0x90, 0x00
+        except BppProfileInterpretationError:
+            # SGP.22 v3.1 §2.5.6.1 Table 4b (p.54): invalid-request-format(5) is
+            # installFailedDueToPEProcessingError(12).
+            return self._install_failure(
+                section,
+                12,
+                ppi_response=self.PPI_RESPONSE_INVALID_REQUEST_FORMAT,
+            ), 0x90, 0x00
         except BppDuplicateIccidError:
             return self._install_failure(section, 9), 0x90, 0x00
         except BppIccidMismatchError:
@@ -2501,7 +2911,9 @@ class SgpLogic:
             return
         session.bpp_section_remaining -= sum(len(member) for member in members)
         if session.bpp_section_remaining < 0:
-            session.bpp_section_remaining = 0
+            # SGP.22 v3.1 §2.5.5 (p.50): a section's members follow its tag and length, so a
+            # member that runs past the declared length is outside the BPP structure.
+            raise ValueError("BPP members run past the declared section length.")
 
     def _is_final_a3_chunk(self, plaintext: bytes) -> bool:
         session = self.state.sgp_session
@@ -2509,8 +2921,11 @@ class SgpLogic:
             return True
         if session.bpp_section == "a3" and session.bpp_section_remaining > 0:
             return False
-        max_payload_size = int(getattr(session.bpp_bsp, "max_payload_size", 0) or 0)
-        if session.bpp_section_remaining < 0 and max_payload_size > 0 and len(plaintext) < max_payload_size:
+        # Without a declared section length a short segment ends the profile. A full segment
+        # carries 1007 bytes (SGP.22 v3.1 §2.5.3 Protected Profile Package, NOTE); a sender
+        # that fills 1008 is still read.
+        full_segment = int(getattr(session.bpp_bsp, "max_encrypted_payload_size", 0) or 0)
+        if session.bpp_section_remaining < 0 and full_segment > 0 and len(plaintext) < full_segment:
             return True
         return False
 
@@ -2724,18 +3139,17 @@ class SgpLogic:
         # so the IPA receives the matching ``A2`` body if it exists.
         for entry in self.state.euicc_package_results:
             if entry.seq_number == seq_number:
-                return tlv("BF2B", tlv("A2", bytes(entry.payload)))
+                return tlv("BF2B", tlv("A2", as_euicc_package_result(entry.payload)))
         return self._empty_notification_list()
 
     def _build_euicc_package_result_list_response(self) -> bytes:
         if len(self.state.euicc_package_results) == 0:
             return tlv("BF2B", tlv("A2", b""))
-        # SGP.32 §2.11.2 EuiccPackageResultList = SEQUENCE OF
-        # EuiccPackageResult. Each stored payload already includes the
-        # signed body wrapped in the ``A0`` (euiccPackageResultSigned)
-        # alternative, so a simple concatenation under ``A2`` is the
-        # correct list shape.
-        body = b"".join(bytes(entry.payload) for entry in self.state.euicc_package_results)
+        # SGP.32 v1.3 p.43, p.134: euiccPackageResultList 'A2' is a SEQUENCE OF
+        # EuiccPackageResult, the [81] CHOICE ('BF51', p.40). A result is stored as
+        # its alternative ('A0' euiccPackageResultSigned), so each is wrapped here,
+        # as LoadEuiccPackage answered it.
+        body = b"".join(as_euicc_package_result(entry.payload) for entry in self.state.euicc_package_results)
         return tlv("BF2B", tlv("A2", body))
 
     # ------------------------------------------------------------------
@@ -2855,18 +3269,17 @@ class SgpLogic:
         )
 
         eim_entry.counter_value = int(envelope.counter_value)
+        result_entry = SimEuiccPackageResultEntry(
+            seq_number=seq_number,
+            eim_id=envelope.eim_id,
+            counter_value=int(envelope.counter_value),
+            eim_transaction_id=bytes(envelope.eim_transaction_id),
+            payload=bytes(payload_tlv),
+        )
         # Kept until ES10b.RemoveNotificationFromList ('BF30') acknowledges them; bounded because
         # an IPA that never acknowledges would otherwise grow the process-wide card state.
-        append_bounded(
-            self.state.euicc_package_results,
-            SimEuiccPackageResultEntry(
-                seq_number=seq_number,
-                eim_id=envelope.eim_id,
-                counter_value=int(envelope.counter_value),
-                eim_transaction_id=bytes(envelope.eim_transaction_id),
-                payload=bytes(payload_tlv),
-            ),
-        )
+        append_bounded(self.state.euicc_package_results, result_entry)
+        self.state.last_euicc_package_result = result_entry
         self._sync_euicc_store()
         return outer_tlv, 0x90, 0x00
 
@@ -2960,13 +3373,8 @@ class SgpLogic:
                 ):
                     # listProfileInfoResult [45] BF2D with
                     # ProfileInfoListError ::= INTEGER {profileChangeOngoing(11)}.
-                    # The listProfileInfoError alternative is encoded as a
-                    # primitive INTEGER (no inner context tag).
                     results.append(
-                        tlv(
-                            bytes.fromhex("BF2D"),
-                            tlv(b"\x02", encode_der_integer(11)),
-                        )
+                        self._profile_info_list_error(PROFILE_INFO_LIST_CHANGE_ONGOING)
                     )
                     results.append(self._processing_terminated(2))
                     return results
@@ -2986,6 +3394,11 @@ class SgpLogic:
                 results.append(self._processing_terminated(2))
                 return results
             results.append(result_tlv)
+            # SGP.32 v1.3 §5.9.1: after a processingTerminated result the
+            # remaining command sequence is not executed. No other
+            # EuiccResultData alternative is a universal INTEGER ('02').
+            if result_tlv[:1] == b"\x02":
+                return results
         return results
 
     @staticmethod
@@ -3047,10 +3460,7 @@ class SgpLogic:
         if tag_bytes == b"\xA5":
             return self._psmo_delete(body)
         if tag_bytes == bytes.fromhex("BF2D"):
-            return tlv(
-                bytes.fromhex("BF2D"),
-                tlv("A0", b""),
-            ) if len(self.state.profiles) == 0 else self._psmo_list_profile_info()
+            return self._psmo_list_profile_info(_raw_tlv)
         if tag_bytes == b"\xA6":
             return tlv(b"\xA6", b"")
         if tag_bytes == b"\xA7":
@@ -3148,11 +3558,11 @@ class SgpLogic:
         self._sync_profile_store()
         return tlv(b"\x85", encode_der_integer(0))
 
-    def _psmo_list_profile_info(self) -> bytes:
-        # Reuse the existing ES10b.GetProfilesInfo response body. The
-        # outer tag (BF2D) already matches the listProfileInfoResult
-        # alternative in EuiccResultData.
-        return self._build_profiles_info_response()
+    def _psmo_list_profile_info(self, request: bytes) -> bytes:
+        # listProfileInfo [45] ProfileInfoListRequest is processed as ES10b
+        # GetProfilesInfo (SGP.32 v1.3 §2.11.1.1.3, §5.9.14) with its own
+        # default list; listProfileInfoResult [45] carries the same response.
+        return self._handle_get_profiles_info(request, PSMO_PROFILE_INFO_DEFAULT_TAGS)
 
     def _psmo_configure_immediate_enable(self, body: bytes) -> bytes:
         # SGP.32 §2.11.1.1 configureImmediateEnable [7] SEQUENCE {
@@ -3211,14 +3621,29 @@ class SgpLogic:
         return ".".join(str(component) for component in components)
 
     def _psmo_set_fallback_attribute(self, body: bytes) -> bytes:
+        # SGP.32 v1.3 §3.4.6, in the order of its steps. Result codes:
         # SetFallbackAttributeResult ::= INTEGER {
         #     ok(0), iccidOrAidNotFound(1), fallbackNotAllowed(2),
         #     fallbackProfileEnabled(3), undefinedError(127) }
+        # Step 1: an eUICC without the Fallback Mechanism answers
+        # processingTerminated with unknownOrDamagedCommand.
         if bool(self.state.euicc_info.iot_specific_info.fallback_supported) is False:
-            return tlv(b"\x8D", encode_der_integer(2))  # fallbackNotAllowed
+            return self._processing_terminated(2)
+        # Step 2.
         profile = self._resolve_profile_reference(body)
         if profile is None:
             return tlv(b"\x8D", encode_der_integer(1))
+        # Step 3: already the Fallback Profile, before any other check.
+        if profile.fallback_attribute is True:
+            return tlv(b"\x8D", encode_der_integer(0))
+        # Step 4 (and §4.4): only a Profile whose fallbackAllowed is TRUE.
+        if profile.fallback_allowed is not True:
+            return tlv(b"\x8D", encode_der_integer(2))  # fallbackNotAllowed
+        # Step 5: never the Emergency Profile.
+        if profile.ecall_indication is True:
+            return tlv(b"\x8D", encode_der_integer(127))  # undefinedError
+        # Step 6: an enabled Fallback Profile blocks the move; a disabled
+        # one hands the attribute over.
         if any(
             entry.fallback_attribute is True and entry.state == "enabled"
             for entry in self.state.profiles
@@ -3226,6 +3651,7 @@ class SgpLogic:
             return tlv(b"\x8D", encode_der_integer(3))  # fallbackProfileEnabled
         for entry in self.state.profiles:
             entry.fallback_attribute = False
+        # Step 7.
         profile.fallback_attribute = True
         self._sync_profile_store()
         return tlv(b"\x8D", encode_der_integer(0))
@@ -3348,20 +3774,42 @@ class SgpLogic:
         existing = self._find_eim_entry(update.eim_id)
         if existing is None:
             return tlv(b"\x8A", encode_der_integer(1))  # eimNotFound
-        if int(update.counter_value or 0) < int(existing.counter_value or 0) and len(update.eim_public_key_data or b"") == 0:
+        # SGP.32 v1.3 §2.11.1.1.2: an updateEim carries eimId and the members to change; the eUICC keeps the
+        # rest (the associationToken is never in an update), and a lower counterValue needs a new key with it.
+        present = self._eim_row_tags(body)
+        if (b"\x83" in present and int(update.counter_value or 0) < int(existing.counter_value or 0)
+                and b"\xA5" not in present):
             return tlv(b"\x8A", encode_der_integer(6))  # counterValueOutOfRange
-        self._upsert_eim_entries([update])
+        if b"\x81" in present:
+            existing.eim_fqdn = update.eim_fqdn
+        if b"\x82" in present:
+            existing.eim_id_type = update.eim_id_type
+        if b"\x83" in present:
+            existing.counter_value = update.counter_value
+        if b"\x87" in present:
+            existing.supported_protocol_bits = list(update.supported_protocol_bits)
+        if b"\x88" in present:
+            existing.euicc_ci_pkid = bytes(update.euicc_ci_pkid)
+        if b"\x89" in present:
+            existing.indirect_profile_download = True
+        if b"\xA5" in present:
+            existing.eim_public_key_data = bytes(update.eim_public_key_data)
+        if b"\xA6" in present:
+            existing.trusted_tls_public_key_data = bytes(update.trusted_tls_public_key_data)
         self._sync_euicc_store()
         return tlv(b"\x8A", encode_der_integer(0))
 
     def _eco_list_eim(self) -> bytes:
+        # SGP.32 v1.3 §2.11.2.1: ListEimResult ::= CHOICE { eimIdList SEQUENCE OF EimIdInfo, listEimError INTEGER }
+        # under AUTOMATIC TAGS, so the list is 'A0' and each EimIdInfo keeps its SEQUENCE tag '30' with
+        # eimId [0] '80' and eimIdType [2] '82'.
         eim_id_list = b""
         for entry in self.state.eim_entries:
             row = tlv(b"\x80", str(entry.eim_id or "").encode("utf-8"))
             if int(entry.eim_id_type or 0) > 0:
                 row += tlv(b"\x82", encode_der_integer(int(entry.eim_id_type)))
             eim_id_list += tlv(b"\x30", row)
-        return tlv(b"\xAB", tlv(b"\x30", eim_id_list))
+        return tlv(b"\xAB", tlv(b"\xA0", eim_id_list))
 
     def _extract_association_token_request(self, body: bytes) -> int | None:
         token_raw = find_first_tlv(body, "84")
@@ -3382,10 +3830,14 @@ class SgpLogic:
 
 
 
-    def _remove_notification_from_list(self, payload: bytes) -> bytes:
+    def _remove_notification_from_list(self, payload: bytes) -> tuple[bytes, int, int]:
+        # SGP.22 v3.1 §5.7.11, which SGP.32 v1.3 §5.9.12 extends to eUICC Package Results:
+        # NotificationSentResponse ::= [48] SEQUENCE { deleteNotificationStatus INTEGER
+        # {ok(0), nothingToDelete(1), undefinedError(127)} }, automatic tag [0] '80'. A request
+        # without its mandatory seqNumber is malformed: '6A 80' (SGP.22 v3.1 §5.7.2).
         seq_number = self._extract_notification_seq(payload)
         if seq_number is None:
-            return tlv("BF30", b"")
+            return b"", 0x6A, 0x80
         before_notifications = len(self.state.notifications)
         self.state.notifications = [
             notification for notification in self.state.notifications if notification.seq_number != seq_number
@@ -3394,12 +3846,14 @@ class SgpLogic:
         self.state.euicc_package_results = [
             entry for entry in self.state.euicc_package_results if entry.seq_number != seq_number
         ]
-        if (
+        deleted = (
             len(self.state.notifications) != before_notifications
             or len(self.state.euicc_package_results) != before_results
-        ):
+        )
+        if deleted:
             self._sync_euicc_store()
-        return tlv("BF30", b"")
+        status = 0 if deleted else 1
+        return tlv("BF30", tlv(b"\x80", encode_der_integer(status))), 0x90, 0x00
 
     def _extract_notification_seq(self, payload: bytes) -> int | None:
         seq_raw = find_first_tlv(payload, "80")
@@ -3529,12 +3983,14 @@ class SgpLogic:
         iccid: str = "",
         bpp_command_id: int = 0,
         error_reason: int = 0,
+        ppi_response: bytes = b"",
     ) -> bytes:
         """ProfileInstallationResult (SGP.22 v3.1 §2.5.6).
 
         euiccSignPIR is made with SK.EUICC.SIG over the whole BF27 object and sits beside it in
         BF37. The notificationAddress is the AuthenticateServer serverAddress; the ICCID is left
-        out when the error came before the eUICC knew it.
+        out when the error came before the eUICC knew it. ErrorResult carries ppi_response as
+        its optional ppiResponse [2] when the error came from a ProfileElement.
         """
         session = self.state.sgp_session
         metadata = self._notification_metadata_tlv(
@@ -3550,7 +4006,8 @@ class SgpLogic:
             final_result = tlv(
                 "A1",
                 tlv("80", encode_der_integer(int(bpp_command_id)))
-                + tlv("81", encode_der_integer(int(error_reason))),
+                + tlv("81", encode_der_integer(int(error_reason)))
+                + (tlv("82", bytes(ppi_response)) if len(ppi_response) > 0 else b""),
             )
         result_data = tlv(
             "BF27",
@@ -3569,6 +4026,7 @@ class SgpLogic:
         profile: SimProfileEntry | None = None,
         bpp_command_id: int = 0,
         error_reason: int = 0,
+        ppi_response: bytes = b"",
     ) -> bytes:
         """Store the PIR as a pending Notification, add the configured install Notifications on
         success, then end the RSP session (SGP.22 v3.1 §2.5.6, §5.7.6)."""
@@ -3584,6 +4042,7 @@ class SgpLogic:
             iccid=iccid,
             bpp_command_id=bpp_command_id,
             error_reason=error_reason,
+            ppi_response=ppi_response,
         )
         append_bounded(
             self.state.notifications,
@@ -3619,12 +4078,13 @@ class SgpLogic:
             tlv("A1", tlv("80", bytes(transaction_id)) + tlv("02", encode_der_integer(int(error_code)))),
         )
 
-    def _install_failure(self, command: str, error_reason: int) -> bytes:
+    def _install_failure(self, command: str, error_reason: int, *, ppi_response: bytes = b"") -> bytes:
         bpp_command_id = self.BPP_COMMAND_IDS.get(str(command), self.state.sgp_session.install_command_id)
         return self._deliver_installation_result(
             success=False,
             bpp_command_id=bpp_command_id,
             error_reason=error_reason,
+            ppi_response=ppi_response,
         )
 
     @staticmethod
@@ -3750,9 +4210,9 @@ class SgpLogic:
     def _validate_authenticate_server_request(self, parsed: dict[str, Any]) -> int | None:
         """Certificate and signature checks of SGP.22 v3.1 §5.7.13, as AuthenticateErrorCode (p.339).
 
-        invalidCertificate(1), invalidSignature(2), invalidOid(5), ciPKUnknown(7). With
-        conformance_strict the chain is verified to a held eSIM CA RootCA and the role OID is
-        required; otherwise the authorityKeyIdentifier is compared with the configured CIs.
+        invalidCertificate(1), invalidSignature(2), invalidOid(5), ciPKUnknown(7). In both
+        modes the chain is verified up to an eSIM CA RootCA the eUICC holds; conformance_strict
+        adds the keyUsage and role OID checks.
         """
         certificate_der = bytes(parsed.get("server_certificate_der", b""))
         if len(certificate_der) == 0:
@@ -3770,15 +4230,10 @@ class SgpLogic:
                 other_certificates,
                 self.ROLE_OIDS_DP_AUTH + self.ROLE_OIDS_DS_AUTH,
             )
-            if fault is not None:
-                return {"ci_unknown": 7, "invalid_certificate": 1, "invalid_role": 5}[fault]
         else:
-            # A Variant O server certificate is issued by the RootCA itself, so its
-            # authorityKeyIdentifier names the PK.CI.SIG; self-signed test certificates carry none.
-            authority_key_id = self._certificate_authority_key_identifier(certificate)
-            if len(other_certificates) == 0 and len(authority_key_id) > 0:
-                if authority_key_id not in self._configured_ci_pkids():
-                    return 7
+            fault = self._issuer_chain_fault(certificate, other_certificates)
+        if fault is not None:
+            return {"ci_unknown": 7, "invalid_certificate": 1, "invalid_role": 5}[fault]
 
         raw_signature = bytes(parsed.get("server_signature", b""))
         if len(raw_signature) != 64:
@@ -3837,15 +4292,44 @@ class SgpLogic:
         other_certificates_der: list[bytes],
         role_oids: tuple[str, ...],
     ) -> str | None:
-        """Verify an RSP Server certificate chain up to a held eSIM CA RootCA.
+        """Verify an RSP Server certificate chain up to a held eSIM CA RootCA, and its role.
 
-        SGP.22 v3.1 §4.5.2.2 / §5.7.13: each certificate is checked with the key its
-        authorityKeyIdentifier names, from otherCertsInChain or from a RootCA the eUICC holds;
-        the leaf carries digitalSignature and its role OID in certificatePolicies (Table 13).
+        SGP.22 v3.1 §4.5.2.2 / §5.7.13: the chain is checked by _issuer_chain_fault, and the
+        leaf carries digitalSignature and its role OID in certificatePolicies (Table 13).
         Answers None, "ci_unknown", "invalid_certificate" or "invalid_role".
         """
         try:
             leaf = crypto_x509.load_der_x509_certificate(bytes(leaf_der))
+        except ValueError:
+            return "invalid_certificate"
+        fault = self._issuer_chain_fault(leaf, other_certificates_der)
+        if fault is not None:
+            return fault
+        try:
+            key_usage = leaf.extensions.get_extension_for_class(crypto_x509.KeyUsage).value
+        except crypto_x509.ExtensionNotFound:
+            return "invalid_certificate"
+        if key_usage.digital_signature is False:
+            return "invalid_certificate"
+        if len(self._certificate_policy_oids(leaf) & set(role_oids)) == 0:
+            return "invalid_role"
+        return None
+
+    def _issuer_chain_fault(
+        self,
+        leaf: crypto_x509.Certificate,
+        other_certificates_der: list[bytes],
+    ) -> str | None:
+        """Check each certificate of a chain with the key its authorityKeyIdentifier names.
+
+        SGP.22 v3.1 §5.7.13 (p.334): the chain is verified with the PK.CI.SIG that the
+        authorityKeyIdentifier of its last certificate names, and an unknown PK.CI.SIG is
+        ciPKUnknown. Issuer keys come from otherCertsInChain or from a RootCA whose key the
+        eUICC holds (§2.4.2 p.32), so a CI known only by a configured PKID is unknown, and so
+        is the issuer of a certificate without an authorityKeyIdentifier.
+        Answers None, "ci_unknown" or "invalid_certificate".
+        """
+        try:
             intermediates = [crypto_x509.load_der_x509_certificate(bytes(der)) for der in other_certificates_der]
         except ValueError:
             return "invalid_certificate"
@@ -3877,19 +4361,9 @@ class SgpLogic:
             except (InvalidSignature, UnsupportedAlgorithm, TypeError, ValueError):
                 return "invalid_certificate"
             if next_certificate is None:
-                break
+                return None
             current = next_certificate
-        else:
-            return "invalid_certificate"
-        try:
-            key_usage = leaf.extensions.get_extension_for_class(crypto_x509.KeyUsage).value
-        except crypto_x509.ExtensionNotFound:
-            return "invalid_certificate"
-        if key_usage.digital_signature is False:
-            return "invalid_certificate"
-        if len(self._certificate_policy_oids(leaf) & set(role_oids)) == 0:
-            return "invalid_role"
-        return None
+        return "invalid_certificate"
 
     @staticmethod
     def _certificate_name_text(name: Any) -> str:
@@ -3959,9 +4433,9 @@ class SgpLogic:
         DownloadErrorCode: invalidCertificate(1), invalidSignature(2), unsupportedCurve(3).
 
         The certificate is valid (§4.5.2.2), names the same SM-DP+ OID in subjectAltName as
-        CERT.DPauth.SIG and has the same authorityKeyIdentifier keyIdentifier. With
-        conformance_strict the chain is verified against the AuthenticateServer chain and the
-        DPpb role OID is required.
+        CERT.DPauth.SIG and has the same authorityKeyIdentifier keyIdentifier. In both modes the
+        chain is verified up to an eSIM CA RootCA the eUICC holds, with the AuthenticateServer
+        otherCertsInChain; conformance_strict adds the keyUsage and DPpb role OID checks.
         """
         certificate_der = bytes(parsed.get("smdp_certificate_der", b""))
         if len(certificate_der) == 0:
@@ -3998,6 +4472,8 @@ class SgpLogic:
             if len(dpauth_oids) > 0 and len(dppb_oids & dpauth_oids) == 0:
                 return 1
             if self._prepare_download_certificate_continuation_valid(certificate_der, certificate, session) is False:
+                return 1
+            if self._issuer_chain_fault(certificate, list(session.smdp_other_certificates)) is not None:
                 return 1
         public_key = certificate.public_key()
         if isinstance(public_key, ec.EllipticCurvePublicKey) is False:
@@ -4146,6 +4622,11 @@ class SgpLogic:
                 result["notification_configuration"] = configuration
                 if len(configuration) > 0:
                     result["notification_address"] = configuration[0][1]
+            elif field_tag == bytes.fromhex("9F67"):
+                # SGP.32 v1.3 §5.5 StoreMetadataRequest fallbackAllowed [103] BOOLEAN.
+                if len(field_value) != 1:
+                    raise ValueError("fallbackAllowed is a one-octet BOOLEAN.")
+                result["fallback_allowed"] = field_value != b"\x00"
             offset = next_offset
         if len(result["profile_name"]) == 0 and len(result["service_provider"]) > 0:
             result["profile_name"] = result["service_provider"]
@@ -4242,6 +4723,10 @@ class SgpLogic:
             str(metadata.get("notification_address", "")).strip() or self._default_notification_address()
         )
         requested_iccid = str(metadata.get("iccid", "")).strip()
+        try:
+            check_profile_package_framing(session.bpp_unprotected_profile)
+        except ValueError as error:
+            raise BppProfileInterpretationError(str(error)) from error
         profile_image = decode_profile_image(
             session.bpp_unprotected_profile,
             default_iccid=requested_iccid,
@@ -4288,6 +4773,7 @@ class SgpLogic:
             profile_source="upp",
             auth_config=profile_auth_config,
             notification_configuration=list(metadata.get("notification_configuration", [])),
+            fallback_allowed=metadata.get("fallback_allowed"),
         )
         self.state.profiles.append(profile)
         rebuild_runtime_filesystem(self.state)

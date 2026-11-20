@@ -357,6 +357,32 @@ class ReleaseMetadataTests(unittest.TestCase):
             <= set(source_boundary.reviewed_python_sources(REPO_ROOT, reviewed))
         )
 
+    def test_every_tracked_subpackage_of_a_reviewed_package_is_reviewed(self) -> None:
+        # The discovery list holds exact names, so a subpackage it does not
+        # name stays out of the wheel while the checkout still imports it.
+        reviewed = set(source_boundary.load_reviewed_packages())
+        top_level = {package.split(".")[0] for package in reviewed}
+        tracked = subprocess.run(
+            ["git", "ls-files", "--", "*/__init__.py"],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if tracked.returncode != 0:
+            self.skipTest("git ls-files is not available in this tree")
+        packages = {
+            str(Path(line).parent).replace(os.sep, ".").replace("/", ".")
+            for line in tracked.stdout.splitlines()
+            if line.strip()
+        }
+        missing = sorted(
+            package
+            for package in packages
+            if package.split(".")[0] in top_level and package not in reviewed
+        )
+        self.assertEqual(missing, [])
+
     def test_explicit_source_addition_allows_only_that_untracked_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -455,11 +481,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         # from project_version() would restate validate_tag's own comparison
         # and pass even with the function gutted. Bump them with the release.
         self.assertEqual(
-            release_validation.validate_tag(REPO_ROOT, "v2.2.0"),
-            "2.2.0",
+            release_validation.validate_tag(REPO_ROOT, "v2.3.0"),
+            "2.3.0",
         )
         with self.assertRaises(release_validation.ReleaseValidationError):
-            release_validation.validate_tag(REPO_ROOT, "v2.2.1")
+            release_validation.validate_tag(REPO_ROOT, "v2.3.1")
 
     def test_archive_listing_scan_matches_real_directory_components(self) -> None:
         listing = (
@@ -601,7 +627,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         with (REPO_ROOT / "uv.lock").open("rb") as handle:
             lock = tomllib.load(handle)
         pysim = next(item for item in lock["package"] if item["name"] == "pysim")
-        self.assertIn("c50f4b4a0222a964710ce3124a66fe13c804be65", pysim["source"]["git"])
+        self.assertIn("3322531ecb506956dbbb13bb9122152fac7db47e", pysim["source"]["git"])
         registry_packages = [
             item
             for item in lock["package"]
@@ -623,7 +649,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             item["name"]: item["value"] for item in pysim.get("properties", [])
         }
         self.assertIn(
-            "c50f4b4a0222a964710ce3124a66fe13c804be65",
+            "3322531ecb506956dbbb13bb9122152fac7db47e",
             properties["yggdrasim:lock-source:git"],
         )
 
@@ -631,7 +657,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
         self.assertNotIn("\npyudev", requirements)
         self.assertIn(
-            "pysim.git@c50f4b4a0222a964710ce3124a66fe13c804be65",
+            "pysim.git@3322531ecb506956dbbb13bb9122152fac7db47e",
             requirements.casefold(),
         )
 

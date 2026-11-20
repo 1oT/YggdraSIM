@@ -179,6 +179,28 @@ def _print_apdu_exchange(
     print(f"{status_color}    -> SW {status_hex} len={len(response)}{_trace_reset()}")
 
 
+_BLOCK_SUFFIX_RE = re.compile(r"\s*\[Block \d+\]$")
+
+
+def _print_apdu_milestone(log_name: str, sw1: int, sw2: int, response_length: int, previous_label: str) -> str:
+    """Print one line per command label and return the label now current.
+
+    The blocks of one STORE DATA sequence share a label once ``[Block n]``
+    is taken off, so the sequence prints once; a GET RESPONSE belongs to the
+    command before it. A failing status word always prints.
+    """
+    label = str(log_name or "").strip() or "APDU"
+    if label.endswith("[GET RESPONSE]"):
+        return previous_label
+    label = _BLOCK_SUFFIX_RE.sub("", label)
+    if label != previous_label:
+        print(f"[*] {label}")
+    if f"{sw1:02X}{sw2:02X}" in ("9000", "9100") or sw1 in (0x61, 0x6C):
+        return label
+    print(f"    -> SW {sw1:02X}{sw2:02X} len={response_length}")
+    return label
+
+
 def _print_chunk_banner(log_name: str, total: int, *, raw: bool) -> None:
     label = str(log_name or "").strip() or "APDU"
     label_color = _trace_label_color(label)
@@ -447,7 +469,7 @@ _MACOS_CCID_HINT = (
 )
 
 
-def _pcsc_status_code(error: BaseException) -> Optional[int]:
+def pcsc_status_code(error: BaseException) -> Optional[int]:
     """Return the PC/SC status behind a pyscard exception, or None when it carries none."""
     hresult = getattr(error, "hresult", None)
     if isinstance(hresult, int) and hresult != -1:
@@ -458,12 +480,56 @@ def _pcsc_status_code(error: BaseException) -> Optional[int]:
     return int(match.group(1), 16)
 
 
+_STATUS_WORD_IN_MESSAGE = re.compile(r"APDU Failed: ([0-9A-Fa-f]{4})")
+
+
+def card_status_word(error: BaseException) -> Optional[int]:
+    """Return the status word a card refused a command with, or None for any other failure.
+
+    PcscApduChannel.send raises IOError("APDU Failed: XXXX") only after the
+    card answered with a status word that does not end the command normally;
+    a link failure carries no such text. A caller with a second way to ask
+    reads this first: a refusal means the card is still answering.
+    """
+    match = _STATUS_WORD_IN_MESSAGE.search(str(error))
+    if match is None:
+        return None
+    return int(match.group(1), 16)
+
+
 def _is_transient_connect_error(error: BaseException) -> bool:
-    return _pcsc_status_code(error) in _PCSC_TRANSIENT_CONNECT_STATUS
+    return pcsc_status_code(error) in _PCSC_TRANSIENT_CONNECT_STATUS
+
+
+# PC/SC status codes that say the card session is gone while a card is still
+# in the reader: the transmit was not carried out (SCARD_E_NOT_TRANSACTED;
+# seen once on a eUICC right after the session that delivered a Profile
+# switch, and the next session found the switch done), the card was reset
+# (SCARD_W_RESET_CARD), or it is powering down or up. A removed card
+# (SCARD_W_REMOVED_CARD) and an empty reader (SCARD_E_NO_SMARTCARD) are not
+# in the set: nothing to reconnect to.
+PCSC_CARD_SESSION_LOST_STATUS = frozenset(
+    {
+        0x80100016,  # SCARD_E_NOT_TRANSACTED
+        0x80100066,  # SCARD_W_UNRESPONSIVE_CARD
+        0x80100067,  # SCARD_W_UNPOWERED_CARD
+        0x80100068,  # SCARD_W_RESET_CARD
+    }
+)
+
+
+def is_card_session_lost(error: BaseException) -> bool:
+    """True when *error* is a PC/SC failure that a reconnect and a fresh bring-up recover from."""
+    return pcsc_status_code(error) in PCSC_CARD_SESSION_LOST_STATUS
 
 
 class PcscApduChannel:
     """Local PC/SC APDU channel with SW handling."""
+
+    # True while the card session holds the IPAd declaration a session sent
+    # through SCP11.shared.ipad_declaration. This class sends none itself: a
+    # poll's card session has to stay without one.
+    ipad_declared = False
 
     def __init__(self, reader_index: int = 0, *, quiet_apdu_logging: bool = False):
         self._reader_index = reader_index
@@ -475,6 +541,10 @@ class PcscApduChannel:
         # request (a command's --debug, the global debug flag) and prints
         # every exchange on a quiet channel too.
         self._quiet_apdu_logging = bool(quiet_apdu_logging)
+        # Milestone logging narrates a quiet channel: one line per command
+        # label, a chunked STORE DATA sequence once (the GUI's live trace).
+        self._milestone_apdu_logging = False
+        self._last_milestone_label = ""
 
     def _connect(self, index: int):
         if is_simulated_card_backend():
@@ -607,8 +677,14 @@ class PcscApduChannel:
     def reset(self) -> bool:
         """Power-cycle and reconnect the card channel, clearing selected application state."""
         self.disconnect()
+        # The card session ends here, and with it what the terminal declared
+        # to it (TS 102 221 v18.4 §11.1.19.2.4: per new card session).
+        self.ipad_declared = False
         time.sleep(0.2)
-        self._conn = self._connect_after_power_cycle(self._reader_index)
+        # Through _connect, never straight to PC/SC: under the simulated card
+        # backend the reconnect has to reach the simulated card again, not
+        # whatever card sits in the reader of that index.
+        self._conn = self._connect(self._reader_index)
         return True
 
     def is_connected(self) -> bool:
@@ -671,6 +747,14 @@ class PcscApduChannel:
                 sw1,
                 sw2,
                 raw=raw_logging,
+            )
+        elif bool(getattr(self, "_milestone_apdu_logging", False)):
+            self._last_milestone_label = _print_apdu_milestone(
+                log_name,
+                sw1,
+                sw2,
+                len(payload),
+                str(getattr(self, "_last_milestone_label", "")),
             )
         emit_apdu_trace_event(
             log_name=log_name,
@@ -791,17 +875,18 @@ class PcscApduChannel:
         response = b""
         chunks = split_tlv_aware_chunks(payload, chunk_size)
 
-        _print_chunk_banner(log_name, total, raw=bool(self._raw_apdu_logging))
-        print_store_data_chunk_plan(
-            log_name,
-            payload,
-            cla=cla,
-            ins=ins,
-            final_p1=p1,
-            p2_start=p2_start,
-            chunk_size=chunk_size,
-            chunks=chunks,
-        )
+        if self.narrates_milestones_only() is False:
+            _print_chunk_banner(log_name, total, raw=bool(self._raw_apdu_logging))
+            print_store_data_chunk_plan(
+                log_name,
+                payload,
+                cla=cla,
+                ins=ins,
+                final_p1=p1,
+                p2_start=p2_start,
+                chunk_size=chunk_size,
+                chunks=chunks,
+            )
         for chunk_index, chunk in enumerate(chunks, start=1):
             is_last_chunk = chunk_index == len(chunks)
             current_p1 = p1
@@ -828,6 +913,16 @@ class PcscApduChannel:
 
     def get_quiet_apdu_logging(self) -> bool:
         return bool(self._quiet_apdu_logging)
+
+    def set_milestone_apdu_logging(self, enabled: bool) -> None:
+        self._milestone_apdu_logging = bool(enabled)
+        self._last_milestone_label = ""
+
+    def narrates_milestones_only(self) -> bool:
+        """True while the channel prints one line per command and nothing below it."""
+        if bool(getattr(self, "_raw_apdu_logging", False)):
+            return False
+        return bool(getattr(self, "_milestone_apdu_logging", False))
 
 
 
@@ -966,6 +1061,17 @@ class SGP22Transport:
 
     def get_quiet_apdu_logging(self) -> bool:
         getter = getattr(self._channel, "get_quiet_apdu_logging", None)
+        if callable(getter):
+            return bool(getter())
+        return False
+
+    def set_milestone_apdu_logging(self, enabled: bool) -> None:
+        setter = getattr(self._channel, "set_milestone_apdu_logging", None)
+        if callable(setter):
+            setter(bool(enabled))
+
+    def narrates_milestones_only(self) -> bool:
+        getter = getattr(self._channel, "narrates_milestones_only", None)
         if callable(getter):
             return bool(getter())
         return False

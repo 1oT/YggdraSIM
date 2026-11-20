@@ -5,8 +5,10 @@
 
 Checks the RSP Server certificate chain against a held eSIM CA RootCA, the role OIDs, the
 error codes and their order (§5.7.13 p.334-339, §5.7.5 p.327-328), the transactionId in
-every error body, and the end of the RSP Session on an error. Strict mode is used throughout;
-the lenient default is covered by tests/test_simcard_backend.py.
+every error body, and the end of the RSP Session on an error, in strict mode. The default
+mode verifies the chain the same way and skips the keyUsage and role OID checks; its other
+conveniences are covered by tests/test_simcard_backend.py. The euiccChallenge is random
+(§5.7.7 p.330).
 """
 
 from __future__ import annotations
@@ -76,6 +78,33 @@ def _root_ca(common_name: str) -> tuple[x509.Certificate, ec.EllipticCurvePrivat
     return certificate, key
 
 
+def _sub_ca(
+    issuer: x509.Certificate,
+    issuer_key: ec.EllipticCurvePrivateKey,
+    common_name: str,
+) -> tuple[x509.Certificate, ec.EllipticCurvePrivateKey]:
+    key = ec.generate_private_key(ec.SECP256R1())
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(_name(common_name))
+        .issuer_name(issuer.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - datetime.timedelta(days=1))
+        .not_valid_after(NOW + datetime.timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(_key_usage(key_cert_sign=True), critical=True)
+        .sign(issuer_key, hashes.SHA256())
+    )
+    return certificate, key
+
+
+def _subject_key_identifier(certificate: x509.Certificate) -> bytes:
+    return certificate.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value.digest
+
+
 def _server_certificate(
     issuer: x509.Certificate,
     issuer_key: ec.EllipticCurvePrivateKey,
@@ -124,6 +153,7 @@ def _authenticate_server(
     ci_pkid_v3: bytes | None = None,
     transaction_id: bytes = TRANSACTION_ID,
     signature: bytes | None = None,
+    other_certificates: tuple[bytes, ...] = (),
 ) -> bytes:
     signed1_body = (
         tlv("80", transaction_id)
@@ -139,6 +169,9 @@ def _authenticate_server(
     body += tlv("04", ci_pkid) + certificate_der
     # ctxParamsForCommonAuthentication [0] { deviceInfo [1] { tac [0], deviceCapabilities [1] } }
     body += tlv("A0", tlv("A1", tlv("80", bytes.fromhex("01020304")) + tlv("A1", b"")))
+    if len(other_certificates) > 0:
+        # otherCertsInChain [1] follows ctxParams1 (§5.7.13 p.336).
+        body += tlv("A1", b"".join(other_certificates))
     return tlv("BF38", body)
 
 
@@ -193,6 +226,18 @@ class _StrictRig(unittest.TestCase):
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         return response
 
+    def _authenticated_signature1(self) -> bytes:
+        ok_value = _ok_value(self._authenticate(self.dpauth_der, self.dpauth_key))
+        _, _, _, offset = read_tlv(ok_value, 0)
+        _, euicc_signature1, _, _ = read_tlv(ok_value, offset)
+        return euicc_signature1
+
+    def _prepare(self, certificate_der: bytes, key: ec.EllipticCurvePrivateKey, **kwargs: object) -> bytes:
+        request = _prepare_download(self._authenticated_signature1(), certificate_der, key, **kwargs)
+        response, sw1, sw2 = self.logic.handle_store_data(request)
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        return response
+
 
 class StrictAuthenticateServerTests(_StrictRig):
     def test_chain_to_a_held_root_ca_is_accepted(self) -> None:
@@ -230,6 +275,19 @@ class StrictAuthenticateServerTests(_StrictRig):
         )
 
         self.assertEqual(self._authenticate(certificate_der, key), _error("BF38", TRANSACTION_ID, 1))
+
+    def test_chain_through_a_sub_ca_in_other_certs_in_chain_is_accepted(self) -> None:
+        sub_ca, sub_ca_key = _sub_ca(self.ci, self.ci_key, "Test SM-DP+ SubCA")
+        certificate_der, key = _server_certificate(sub_ca, sub_ca_key, role_oid=DP_AUTH_ROLE)
+
+        response = self._authenticate(
+            certificate_der,
+            key,
+            other_certificates=(sub_ca.public_bytes(serialization.Encoding.DER),),
+        )
+
+        signed1_tag, _, _, _ = read_tlv(_ok_value(response), 0)
+        self.assertEqual(signed1_tag, b"\x30")
 
     def test_dppb_certificate_offered_for_authentication_is_invalid_oid(self) -> None:
         certificate_der, key = _server_certificate(self.ci, self.ci_key, role_oid=DP_PB_ROLE)
@@ -282,18 +340,6 @@ class StrictPrepareDownloadTests(_StrictRig):
         super().setUp()
         self.dppb_der, self.dppb_key = _server_certificate(self.ci, self.ci_key, role_oid=DP_PB_ROLE)
 
-    def _authenticated_signature1(self) -> bytes:
-        ok_value = _ok_value(self._authenticate(self.dpauth_der, self.dpauth_key))
-        _, _, _, offset = read_tlv(ok_value, 0)
-        _, euicc_signature1, _, _ = read_tlv(ok_value, offset)
-        return euicc_signature1
-
-    def _prepare(self, certificate_der: bytes, key: ec.EllipticCurvePrivateKey, **kwargs: object) -> bytes:
-        request = _prepare_download(self._authenticated_signature1(), certificate_der, key, **kwargs)
-        response, sw1, sw2 = self.logic.handle_store_data(request)
-        self.assertEqual((sw1, sw2), (0x90, 0x00))
-        return response
-
     def test_dppb_of_the_authenticated_sm_dp_is_accepted(self) -> None:
         response = self._prepare(self.dppb_der, self.dppb_key)
 
@@ -337,6 +383,124 @@ class StrictPrepareDownloadTests(_StrictRig):
         response, _, _ = self.logic.handle_store_data(request)
 
         self.assertEqual(response, _error("BF21", TRANSACTION_ID, 4))
+
+
+class _LenientRig(_StrictRig):
+    """The default mode: conformance_strict off, the issuing CI held as in the strict rig."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.state.conformance_strict = False
+
+
+class LenientAuthenticateServerTests(_LenientRig):
+    def _assert_accepted(self, response: bytes) -> None:
+        signed1_tag, _, _, _ = read_tlv(_ok_value(response), 0)
+        self.assertEqual(signed1_tag, b"\x30")
+
+    def test_chain_to_a_held_root_ca_is_accepted(self) -> None:
+        self._assert_accepted(self._authenticate(self.dpauth_der, self.dpauth_key))
+
+    def test_key_usage_and_role_oid_are_not_required(self) -> None:
+        certificate_der, key = _server_certificate(
+            self.ci,
+            self.ci_key,
+            role_oid=DP_PB_ROLE,
+            digital_signature=False,
+        )
+
+        self._assert_accepted(self._authenticate(certificate_der, key))
+
+    def test_certificate_the_named_held_issuer_did_not_sign_is_invalid_certificate(self) -> None:
+        # The authorityKeyIdentifier of a held CI, an attacker's signature.
+        forged_der, key = _server_certificate(
+            self.ci,
+            self.ci_key,
+            role_oid=DP_AUTH_ROLE,
+            signing_key=ec.generate_private_key(ec.SECP256R1()),
+        )
+
+        self.assertEqual(self._authenticate(forged_der, key), _error("BF38", TRANSACTION_ID, 1))
+
+    def test_chain_to_a_root_ca_the_euicc_does_not_hold_is_ci_pk_unknown(self) -> None:
+        stranger_ci, stranger_ci_key = _root_ca("Stranger CI")
+        certificate_der, key = _server_certificate(stranger_ci, stranger_ci_key, role_oid=DP_AUTH_ROLE)
+        stranger_der = stranger_ci.public_bytes(serialization.Encoding.DER)
+
+        for other_certificates in ((), (stranger_der,)):
+            with self.subTest(chain_length=len(other_certificates)):
+                response = self._authenticate(certificate_der, key, other_certificates=other_certificates)
+                self.assertEqual(response, _error("BF38", TRANSACTION_ID, 7))
+
+    def test_chain_through_a_sub_ca_to_a_held_root_ca_is_accepted(self) -> None:
+        sub_ca, sub_ca_key = _sub_ca(self.ci, self.ci_key, "Test SM-DP+ SubCA")
+        certificate_der, key = _server_certificate(sub_ca, sub_ca_key, role_oid=DP_AUTH_ROLE)
+
+        self._assert_accepted(
+            self._authenticate(
+                certificate_der,
+                key,
+                other_certificates=(sub_ca.public_bytes(serialization.Encoding.DER),),
+            )
+        )
+
+    def test_other_certs_in_chain_member_that_is_no_certificate_is_invalid_certificate(self) -> None:
+        for member in (bytes.fromhex("3003020100"), bytes.fromhex("040100")):
+            with self.subTest(member=member.hex()):
+                response = self._authenticate(self.dpauth_der, self.dpauth_key, other_certificates=(member,))
+                self.assertEqual(response, _error("BF38", TRANSACTION_ID, 1))
+
+    def test_self_signed_certificate_without_authority_key_identifier_is_ci_pk_unknown(self) -> None:
+        # §5.7.13 (p.334): the PK.CI.SIG is the one the last authorityKeyIdentifier names.
+        certificate, key = _root_ca("Self-signed test SM-DP+")
+
+        response = self._authenticate(certificate.public_bytes(serialization.Encoding.DER), key)
+
+        self.assertEqual(response, _error("BF38", TRANSACTION_ID, 7))
+
+    def test_chain_ending_at_a_configured_ci_without_its_certificate_is_ci_pk_unknown(self) -> None:
+        # §2.4.2 (p.32): the eUICC verifies with the PK.CI.SIG it holds, not with a PKID.
+        unheld_ci, unheld_ci_key = _root_ca("Unheld CI")
+        self.state.configured_data.allowed_ci_pkids.append(_subject_key_identifier(unheld_ci))
+        certificate_der, key = _server_certificate(unheld_ci, unheld_ci_key, role_oid=DP_AUTH_ROLE)
+
+        self.assertEqual(self._authenticate(certificate_der, key), _error("BF38", TRANSACTION_ID, 7))
+
+
+class LenientPrepareDownloadTests(_LenientRig):
+    def test_dppb_of_the_authenticated_sm_dp_is_accepted(self) -> None:
+        dppb_der, dppb_key = _server_certificate(self.ci, self.ci_key, role_oid=DP_PB_ROLE)
+
+        euicc_signed2_tag, _, _, _ = read_tlv(_ok_value(self._prepare(dppb_der, dppb_key)), 0)
+
+        self.assertEqual(euicc_signed2_tag, b"\x30")
+
+    def test_dppb_the_named_held_issuer_did_not_sign_is_invalid_certificate(self) -> None:
+        forged_der, key = _server_certificate(
+            self.ci,
+            self.ci_key,
+            role_oid=DP_PB_ROLE,
+            signing_key=ec.generate_private_key(ec.SECP256R1()),
+        )
+
+        self.assertEqual(self._prepare(forged_der, key), _error("BF21", TRANSACTION_ID, 1))
+
+
+class EuiccChallengeTests(unittest.TestCase):
+    def test_each_get_euicc_challenge_answers_a_new_random_challenge(self) -> None:
+        state = build_default_state()
+        logic = SgpLogic(state)
+        challenges = []
+        for _ in range(2):
+            response, sw1, sw2 = logic.handle_store_data(bytes.fromhex("BF2E00"))
+            self.assertEqual((sw1, sw2), (0x90, 0x00))
+            _, value, _, _ = read_tlv(response, 0)
+            _, challenge, _, _ = read_tlv(value, 0)
+            challenges.append(challenge)
+
+        self.assertEqual([len(challenge) for challenge in challenges], [16, 16])
+        self.assertNotEqual(challenges[0], challenges[1])
+        self.assertEqual(state.sgp_session.card_challenge, challenges[1])
 
 
 if __name__ == "__main__":

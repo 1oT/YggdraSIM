@@ -272,12 +272,20 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
 
         mocked_action.assert_called_once_with("card_bridge.local_stop", {"confirm": True})
 
-    def _wireshark_argv(self, dissector_args: list[str]) -> list[str]:
+    def _wireshark_argv(
+        self,
+        dissector_args: list[str],
+        profile_args: tuple[str, ...] = (),
+        time_format_args: tuple[str, ...] = (),
+    ) -> list[str]:
         """Capture the argv Wireshark is launched with.
 
         The dissector arguments are stubbed rather than computed: the real
         helper returns an absolute path to the Lua tree, which differs per
-        checkout and would pin the assertion to one machine.
+        checkout and would pin the assertion to one machine. The profile
+        arguments are stubbed too, so no test writes into the operator's
+        Wireshark configuration, and so are the time-format arguments, which
+        follow the operator's environment.
         """
         with mock.patch.object(main_wrapper, "_hil_bridge_wireshark_binary_path", return_value="/usr/bin/wireshark"):
             with mock.patch.object(main_wrapper, "_hil_bridge_capture_interface", return_value="lo"):
@@ -286,11 +294,107 @@ class MainWrapperHilBridgeRouteTests(unittest.TestCase):
                     "_hil_bridge_apdu_dissector_args",
                     return_value=list(dissector_args),
                 ):
-                    with mock.patch.object(main_wrapper.subprocess, "Popen") as mocked_popen:
-                        main_wrapper._launch_hil_bridge_wireshark()
+                    with mock.patch.object(
+                        main_wrapper,
+                        "_hil_bridge_wireshark_profile_args",
+                        return_value=list(profile_args),
+                    ):
+                        with mock.patch.object(
+                            main_wrapper,
+                            "_hil_bridge_wireshark_time_format_args",
+                            return_value=list(time_format_args),
+                        ):
+                            with mock.patch.object(main_wrapper.subprocess, "Popen") as mocked_popen:
+                                main_wrapper._launch_hil_bridge_wireshark()
 
         mocked_popen.assert_called_once()
         return list(mocked_popen.call_args.args[0])
+
+    def test_launch_hil_bridge_wireshark_shows_wall_clock_time(self) -> None:
+        self.assertEqual(
+            self._wireshark_argv(
+                ["-X", "lua_script:/tmp/yggdrasim_apdu.lua"],
+                ("-C", "YggdraSIM-HIL"),
+                ("-t", "u"),
+            ),
+            [
+                "/usr/bin/wireshark",
+                "-k",
+                "-i",
+                "lo",
+                "-f",
+                "udp port 4729",
+                "-C",
+                "YggdraSIM-HIL",
+                "-t",
+                "u",
+                "-X",
+                "lua_script:/tmp/yggdrasim_apdu.lua",
+            ],
+        )
+
+    def test_time_format_args_follow_the_setting(self) -> None:
+        env_name = main_wrapper.hil_bridge_runtime.WIRESHARK_TIME_FORMAT_ENV
+        with mock.patch.dict(main_wrapper.os.environ, {}, clear=False):
+            main_wrapper.os.environ.pop(env_name, None)
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_time_format_args(), ["-t", "u"])
+            main_wrapper.os.environ[env_name] = "ud.6"
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_time_format_args(), ["-t", "ud.6"])
+            main_wrapper.os.environ[env_name] = "off"
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_time_format_args(), [])
+            main_wrapper.os.environ[env_name] = "utc"
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_time_format_args(), [])
+
+    def test_launch_hil_bridge_wireshark_opens_the_hil_profile(self) -> None:
+        self.assertEqual(
+            self._wireshark_argv(["-X", "lua_script:/tmp/yggdrasim_apdu.lua"], ("-C", "YggdraSIM-HIL")),
+            [
+                "/usr/bin/wireshark",
+                "-k",
+                "-i",
+                "lo",
+                "-f",
+                "udp port 4729",
+                "-C",
+                "YggdraSIM-HIL",
+                "-X",
+                "lua_script:/tmp/yggdrasim_apdu.lua",
+            ],
+        )
+
+    def test_profile_args_follow_the_prepared_profile(self) -> None:
+        with mock.patch(
+            "Tools.HilBridge.wireshark_profile.ensure_hil_wireshark_profile",
+            return_value="YggdraSIM-APDU",
+        ), mock.patch(
+            "Tools.HilBridge.wireshark_profile.hil_wireshark_stylesheet_args",
+            return_value=[],
+        ):
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_profile_args(), ["-C", "YggdraSIM-APDU"])
+        # A profile with the opt-in style sheet passes it as one more token.
+        with mock.patch(
+            "Tools.HilBridge.wireshark_profile.ensure_hil_wireshark_profile",
+            return_value="YggdraSIM-APDU",
+        ), mock.patch(
+            "Tools.HilBridge.wireshark_profile.hil_wireshark_stylesheet_args",
+            return_value=["-stylesheet=/tmp/yggdrasim.qss"],
+        ):
+            self.assertEqual(
+                main_wrapper._hil_bridge_wireshark_profile_args(),
+                ["-C", "YggdraSIM-APDU", "-stylesheet=/tmp/yggdrasim.qss"],
+            )
+        with mock.patch(
+            "Tools.HilBridge.wireshark_profile.ensure_hil_wireshark_profile",
+            return_value="",
+        ):
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_profile_args(), [])
+
+    def test_a_failing_profile_never_stops_wireshark(self) -> None:
+        with mock.patch(
+            "Tools.HilBridge.wireshark_profile.ensure_hil_wireshark_profile",
+            side_effect=RuntimeError("profile store exploded"),
+        ):
+            self.assertEqual(main_wrapper._hil_bridge_wireshark_profile_args(), [])
 
     def test_launch_hil_bridge_wireshark_uses_the_desktop_default_style(self) -> None:
         # No -style argument, so Wireshark keeps the desktop's own Qt palette

@@ -85,6 +85,27 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "Repository entry point -- what YggdraSIM is and how to start.",
     ),
     (
+        "user-manual",
+        "User Manual",
+        "guides/USER_MANUAL.md",
+        "Overview",
+        "Start here: the modules, installing and starting, shared concepts, real-card work.",
+    ),
+    (
+        "user-manual-gui",
+        "User Manual · GUI",
+        "guides/USER_MANUAL_GUI.md",
+        "Overview",
+        "The Command Center: the window, running an action, every module in sidebar order.",
+    ),
+    (
+        "user-manual-cli",
+        "User Manual · CLI",
+        "guides/USER_MANUAL_CLI.md",
+        "Overview",
+        "The launcher and the shells: how every shell works, every module in turn.",
+    ),
+    (
         "guides-index",
         "Guide Index",
         "guides/README.md",
@@ -142,6 +163,13 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "Docker, PyInstaller, .deb, and packaging guidance.",
     ),
     # -- operator guides --
+    (
+        "runbook",
+        "Runbook",
+        "guides/RUNBOOK.md",
+        "Operator Guides",
+        "Each task on the CLI and in the GUI, repository upkeep, card and simulator runs.",
+    ),
     (
         "cli-and-piping",
         "CLI & Piping",

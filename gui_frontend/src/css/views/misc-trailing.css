@@ -81,7 +81,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-deep);
   border: 1px solid var(--border);
 }
@@ -114,7 +114,7 @@
   font-size: 11px;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   color: var(--fg);
   word-break: break-all;
@@ -208,7 +208,7 @@
   border-radius: var(--radius-lg);
   padding: 16px 20px;
   margin-bottom: 16px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   min-width: 0;
 }
 
@@ -285,7 +285,7 @@
 .cb-status-summary {
   margin-top: 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg);
   border: 1px dashed var(--border);
   font-size: 0.85rem;
@@ -295,6 +295,47 @@
 
 .cb-rig-panel {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+/* Remote Bridge sections: Host, Rig, Status, one at a time. */
+.cb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cb-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cb-tab:hover {
+  color: var(--fg);
+}
+
+.cb-tab[aria-selected="true"] {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cb-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cb-tabpanel[hidden] {
+  display: none;
 }
 
 .cb-rig-grid {
@@ -310,6 +351,9 @@
 .cb-rig-field {
   display: flex;
   flex-direction: column;
+  /* .form-row centres its items, which centred each label over its input
+     and the Add host button under the field. */
+  align-items: flex-start;
   gap: 5px;
   margin: 0;
 }
@@ -397,9 +441,9 @@
 .cb-rig-action-group-label {
   margin-right: 2px;
   color: var(--fg-dim);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
   text-transform: uppercase;
 }
 
@@ -471,7 +515,7 @@
   content: "";
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--cb-badge-status);
   opacity: 0.85;
 }
@@ -516,7 +560,7 @@
   padding: 10px 14px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cb-override summary {
@@ -566,14 +610,14 @@
 .cb-probe-card {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 10px 12px;
 }
 
 .cb-probe-label {
-  font-size: 0.72rem;
+  font-size: var(--legend-size);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--legend-track);
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
@@ -582,6 +626,21 @@
   color: var(--fg);
   font-size: 0.92rem;
   word-break: break-all;
+}
+
+/* A URL keeps its line: shortened with an ellipsis, whole in its title.
+   Its card takes two grid tracks so a loopback URL fits whole. */
+.cb-probe-card--wide {
+  grid-column: span 2;
+}
+
+.cb-probe-value.cb-url,
+.cb-status-value.cb-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .cb-probe-value.cb-probe-bridge-fp--match {
@@ -599,7 +658,7 @@
 .cb-probe-reason {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--fail-soft);
   border: 1px solid color-mix(in oklab, var(--fail) 34%, var(--border));
   color: var(--fail);
@@ -617,7 +676,7 @@
   height: 140px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   display: block;
 }
 

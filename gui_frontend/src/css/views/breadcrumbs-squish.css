@@ -23,25 +23,27 @@
 /* Progressive disclosure for the top bar. Every control keeps its
    title and aria-label; only the redundant text goes at each step, so
    a 1280 px laptop still shows the brand and every bridge pill. Below
-   1300 px the suite chip goes, and the crumb gives way while a plugin
-   console pill shows (shell.css). */
-@media (max-width: 1500px) {
+   1300 px the suite chip and the crumb go (shell.css). The first step sits
+   at 1760 px: three bridge pills (HIL bridge, Remote, Local eIM) with their
+   values put Classic over the crumbs at 1440 px, and a plugin pill drops
+   its value at the same width; the dot keeps the state, the title the text. */
+@media (max-width: 1760px) {
+  .topbar-card-bridge-value {
+    display: none;
+  }
+
+  .topbar-backend-switch .topbar-control-label {
+    display: none;
+  }
+}
+
+@media (max-width: 1700px) {
   .topbar-suite-separator,
   .topbar-suite-active {
     display: none;
   }
 
   .theme-picker label {
-    display: none;
-  }
-}
-
-@media (max-width: 1400px) {
-  .topbar-card-bridge-value {
-    display: none;
-  }
-
-  .topbar-backend-switch .topbar-control-label {
     display: none;
   }
 }

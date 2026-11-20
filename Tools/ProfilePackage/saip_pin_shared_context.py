@@ -49,7 +49,7 @@ def _normalise_path_hex(value: Any) -> str:
     if len(text) % 2 != 0:
         raise ValueError(
             f"shared-context filePath has odd nybble count ({len(text)}); "
-            "expected concatenated 16-bit FIDs (TS 102 221 §8.3.5).",
+            "expected concatenated 16-bit FIDs (TS 102 221 v18.4 §8.3).",
         )
     if _FID_PATH_RE.fullmatch(text) is None:
         # Defensive: shouldn't trigger after the even-length check.

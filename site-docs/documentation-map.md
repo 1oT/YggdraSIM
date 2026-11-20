@@ -43,6 +43,9 @@ subsystems.
 | Path | Purpose |
 | --- | --- |
 | `README.md` | top-level overview, install, launch, state model, and documentation map |
+| `guides/USER_MANUAL.md` | user manual: modules, install and start, shared concepts, real-card work, failures |
+| `guides/USER_MANUAL_GUI.md` | user manual, GUI chapter: the window, actions and answers, every module |
+| `guides/USER_MANUAL_CLI.md` | user manual, CLI chapter: launcher, shells, every module |
 | `guides/README.md` | index of authored operator and developer guides |
 | `guides/CAPABILITIES.md` | suite-level capability reference grouped by subsystem |
 | `guides/ARCHITECTURE.md` | system structure, dependency map, runtime state, and flow charts |

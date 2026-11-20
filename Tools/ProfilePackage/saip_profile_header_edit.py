@@ -363,7 +363,7 @@ def set_iccid_hex(header: dict[str, Any], hex_value: str | None) -> str:
 
 
 def set_pol_hex(header: dict[str, Any], hex_value: str | None) -> str:
-    """Replace ``pol`` (policy rules bitmask, SGP.02 §5.1.3.5)."""
+    """Replace ``pol`` (POL1 policy rules bitmask, TCA SAIP v3.4.1 §8.2.1, coded per SGP.02 v4.2 Table 71)."""
     text = _normalise_hex(hex_value, even_length=True, label="pol")
     if len(text) == 0:
         header.pop("pol", None)

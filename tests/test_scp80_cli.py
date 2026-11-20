@@ -128,7 +128,7 @@ class OtaShellTests(unittest.TestCase):
             sniff_context=lambda raw_apdu: (None, 0),
             try_decode=lambda fid, le, por, por_info=None: None,
         )
-        shell._print_result = lambda result: setattr(shell, "_last_result", result)
+        shell._print_result = lambda result, **kwargs: setattr(shell, "_last_result", result)
         shell._print_reader_protocol_caveat = lambda multipart_required=False: setattr(
             shell,
             "_last_caveat",
@@ -216,7 +216,7 @@ class OtaShellTests(unittest.TestCase):
         with redirect_stdout(buffer):
             shell._process_line("wat")
 
-        self.assertIn("Unknown command or invalid hex.", buffer.getvalue())
+        self.assertIn("[!] Unknown command or invalid hex.", buffer.getvalue())
 
     def test_print_result_suppresses_successful_por_summary(self) -> None:
         shell = OtaShell.__new__(OtaShell)
@@ -231,7 +231,7 @@ class OtaShellTests(unittest.TestCase):
                 "cntr": "000000FFFF",
                 "pcntr": "00",
                 "command_count": 1,
-                "command_response": "9000",
+                "command_response": "",
                 "command_sw": "9000",
                 "fetch_sw": "9130",
             },
@@ -270,6 +270,33 @@ class OtaShellTests(unittest.TestCase):
         self.assertIn("CNTR low (02)", output)
         self.assertIn("fetch SW 912D", output)
 
+    def test_print_result_lists_the_event_lists_answered_after_the_por(self) -> None:
+        shell = OtaShell.__new__(OtaShell)
+        result = {
+            "sw": "912D",
+            "por": "D02B",
+            "por_decoded": {
+                "valid": True,
+                "status_code": "00",
+                "status_meaning": "PoR OK",
+                "tar": "B00001",
+                "cntr": "0000000007",
+                "pcntr": "00",
+                "fetch_sw": "912D",
+            },
+            "answered_event_lists": ["03090A", ""],
+            "pending_proactive": "D009810301260082028182",
+        }
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            shell._print_result(result)
+
+        output = buffer.getvalue()
+        self.assertIn("SET UP EVENT LIST after the PoR answered OK: events 03 09 0A", output)
+        self.assertIn("SET UP EVENT LIST after the PoR answered OK: no events", output)
+        self.assertIn("left unanswered: D009810301260082028182", output)
+
     def test_print_result_includes_failed_inner_apdu_summary(self) -> None:
         shell = OtaShell.__new__(OtaShell)
         result = {
@@ -283,7 +310,7 @@ class OtaShellTests(unittest.TestCase):
                 "cntr": "0000010010",
                 "pcntr": "00",
                 "command_count": 1,
-                "command_response": "6A82",
+                "command_response": "",
                 "command_sw": "6A82",
                 "fetch_sw": "9130",
             },
@@ -309,7 +336,7 @@ class OtaShellTests(unittest.TestCase):
             "valid": True,
             "status_code": "00",
             "command_count": 1,
-            "command_response": "6A82",
+            "command_response": "",
             "command_sw": "6A82",
         }
 
@@ -331,7 +358,7 @@ class OtaShellTests(unittest.TestCase):
             "valid": True,
             "status_code": "00",
             "command_count": 1,
-            "command_response": "912D",
+            "command_response": "",
             "command_sw": "912D",
             "fetch_sw": "912D",
         }
@@ -373,8 +400,8 @@ class OtaShellTests(unittest.TestCase):
             "valid": True,
             "status_code": "00",
             "command_count": 2,
-            "command_response": "900098888011111111111111",
-            "command_sw": None,
+            "command_response": "98888011111111111111",
+            "command_sw": "9000",
         }
 
         with patch.object(scp80_cli, "SCP03_AVAIL", True):
@@ -578,6 +605,7 @@ class _FakeReadline:
         self.history_reads: list[str] = []
         self.history_writes: list[str] = []
         self.history_length = 0
+        self.history: list[str] = []
 
     def get_line_buffer(self) -> str:
         return self.line_buffer
@@ -599,6 +627,17 @@ class _FakeReadline:
 
     def write_history_file(self, path: str) -> None:
         self.history_writes.append(path)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("".join(f"{line}\n" for line in self.history))
+
+    def get_current_history_length(self) -> int:
+        return len(self.history)
+
+    def get_history_item(self, index: int) -> str:
+        return self.history[index - 1]
+
+    def remove_history_item(self, position: int) -> None:
+        del self.history[position]
 
 
 class OtaShellCompletionTests(unittest.TestCase):
@@ -775,10 +814,57 @@ class OtaShellCompletionTests(unittest.TestCase):
         shell = self._make_shell()
         fake = _FakeReadline()
 
-        with patch.object(scp80_cli, "readline", fake):
-            shell._save_history()
+        with tempfile.TemporaryDirectory() as tmp:
+            shell.history_file = os.path.join(tmp, "history")
+            with patch.object(scp80_cli, "readline", fake):
+                shell._save_history()
 
         self.assertEqual(fake.history_writes, [shell.history_file])
+
+    def test_save_history_drops_the_lines_that_set_a_key(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline()
+        kept = [
+            "show",
+            "set kic_indicator 15",
+            "set tar B00010",
+            "set kic",
+            "send A0A40000023F00",
+        ]
+        fake.history = [
+            kept[0],
+            "set kic 000102030405060708090A0B0C0D0E0F",
+            kept[1],
+            "SET KID 00 01 02 03 04 05 06 07",
+            kept[2],
+            "set key_enc 000102030405060708090A0B0C0D0E0F",
+            "set key_mac 000102030405060708090A0B0C0D0E0F --log trace.log",
+            kept[3],
+            kept[4],
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            shell.history_file = os.path.join(tmp, "history")
+            with patch.object(scp80_cli, "readline", fake):
+                shell._save_history()
+            with open(shell.history_file, "r", encoding="utf-8") as handle:
+                written = handle.read().splitlines()
+
+        self.assertEqual(fake.history, kept)
+        self.assertEqual(written, kept)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_save_history_leaves_the_file_readable_by_its_owner_only(self) -> None:
+        shell = self._make_shell()
+        fake = _FakeReadline()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            shell.history_file = os.path.join(tmp, "history")
+            with patch.object(scp80_cli, "readline", fake):
+                shell._save_history()
+            mode = os.stat(shell.history_file).st_mode & 0o777
+
+        self.assertEqual(mode, 0o600)
 
     def test_save_history_without_readline_is_a_no_op(self) -> None:
         shell = self._make_shell()

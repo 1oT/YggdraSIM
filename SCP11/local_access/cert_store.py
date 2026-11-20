@@ -5,11 +5,13 @@
 import logging
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 from cryptography import x509 as crypto_x509
+from cryptography.utils import CryptographyDeprecationWarning
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID
 from yggdrasim_common.inventory_crypto import read_secret_file_bytes, read_secret_json_file
@@ -72,6 +74,7 @@ class LocalSgp26CertStore:
         self._subca_by_ski: dict[str, str] = {}
         self._auth_records: list[SmdpCertificateRecord] = []
         self._pb_records: list[SmdpCertificateRecord] = []
+        self._ds_auth_records: list[SmdpCertificateRecord] | None = None
 
     def load(self) -> None:
         """Load the CI and SM-DP+ certificate chains from the configured paths."""
@@ -119,6 +122,25 @@ class LocalSgp26CertStore:
     def resolve_pb_record(self, allowed_ci_pkids: list[str]) -> Optional[SmdpCertificateRecord]:
         self.load()
         return self._resolve_record(self._pb_records, allowed_ci_pkids)
+
+    def ds_auth_records(self) -> list[SmdpCertificateRecord]:
+        """The CERT.DSauth.SIG records of the bundle (role ``ds_auth``), read on first use.
+
+        Only a local SM-DS asks for them, so the scan stays out of ``load``:
+        every session that needs the SM-DP+ pair would otherwise read the
+        SM-DS folders too.
+        """
+        self.load()
+        if self._ds_auth_records is None:
+            records: list[SmdpCertificateRecord] = []
+            if os.path.isdir(self.valid_cert_root):
+                self._subca_by_ski.update(self._load_subca_root_map("**/SM-DS/SM_DSSubCA/CERT_*.pem"))
+                records = self._load_smdp_records(role="ds_auth")
+            self._ds_auth_records = records
+        return list(self._ds_auth_records)
+
+    def resolve_ds_auth_record(self, allowed_ci_pkids: list[str]) -> Optional[SmdpCertificateRecord]:
+        return self._resolve_record(self.ds_auth_records(), allowed_ci_pkids)
 
     def _resolve_record(
         self,
@@ -181,9 +203,9 @@ class LocalSgp26CertStore:
             )
         return records
 
-    def _load_subca_root_map(self) -> dict[str, str]:
+    def _load_subca_root_map(self, pattern: str = "**/SM-DP+/SM_DPSubCA/CERT_*.pem") -> dict[str, str]:
         output: dict[str, str] = {}
-        for cert_path in self._iter_paths("**/SM-DP+/SM_DPSubCA/CERT_*.pem"):
+        for cert_path in self._iter_paths(pattern):
             try:
                 certificate = self._load_certificate(cert_path)
             except Exception as load_error:
@@ -203,8 +225,10 @@ class LocalSgp26CertStore:
             pattern = "**/SM-DP+/SM_DPauth/CERT_*.der"
         elif role == "pb":
             pattern = "**/SM-DP+/SM_DPpb/CERT_*.der"
+        elif role == "ds_auth":
+            pattern = "**/SM-DS/SM_DSauth/CERT_*.der"
         else:
-            raise ValueError(f"Unsupported SM-DP+ role: {role}")
+            raise ValueError(f"Unsupported RSP Server certificate role: {role}")
 
         records: list[SmdpCertificateRecord] = []
         for cert_path in self._iter_paths(pattern):
@@ -421,9 +445,14 @@ class LocalSgp26CertStore:
             path,
             protect_plaintext_on_read=self._path_is_under_root(path, self.override_cert_root),
         )
-        if cert_data.lstrip().startswith(b"-----BEGIN"):
-            return crypto_x509.load_pem_x509_certificate(cert_data)
-        return crypto_x509.load_der_x509_certificate(cert_data)
+        # The SGP.26 test CI of Variants A/B/C carries serial number 0, which
+        # cryptography reports on every load; the bundle is published that
+        # way, and the warning would repeat in each trace that scans it.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", CryptographyDeprecationWarning)
+            if cert_data.lstrip().startswith(b"-----BEGIN"):
+                return crypto_x509.load_pem_x509_certificate(cert_data)
+            return crypto_x509.load_der_x509_certificate(cert_data)
 
     def _load_private_key(self, path: str) -> Any:
         key_data = read_secret_file_bytes(

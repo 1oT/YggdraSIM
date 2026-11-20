@@ -32,6 +32,10 @@
     pcPills.timer = null;
     // Hidden: no tick is booked; the visibilitychange handler books the next.
     if (document.hidden || pcPills.polling) return;
+    if (!backgroundPollDue("plugin-pills")) {
+      pcSchedulePills(PC_PILLS_POLL_MS);
+      return;
+    }
     pcPills.polling = true;
     try {
       var data = await apiFetch("/api/plugin-consoles/pills");

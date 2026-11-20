@@ -175,9 +175,9 @@ jumps the JSON outline to the matching PE.
 ## Runtime dependencies
 
 - Python runtime only
-- the optional on-disk `pysim/` tree for the PE codecs (clone
-  `https://gitlab.com/osmocom/pysim.git` into the repo root when SAIP
-  flows are needed; the gitignored directory is not shipped)
+- the pinned pySim for the PE codecs, or an on-disk `pysim/` checkout of
+  `https://github.com/hampushellsberg-dev/pysim.git` in the repo root that
+  carries the same fixes (the gitignored directory is not shipped)
 - optional external `saip-tool` binary for extended RAW operations
 - the writable runtime root for `*.transcode.json`, `*.transcode.der`,
   `*.transcode.txt` sidecars

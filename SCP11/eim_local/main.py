@@ -12,6 +12,7 @@ import textwrap
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Optional
 
+from yggdrasim_common.batch_outcome import BatchOutcome
 from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.plugin_runtime import ensure_plugins_loaded, extend_target_with_plugins
 from yggdrasim_common.process_debug import (
@@ -46,7 +47,7 @@ except Exception:
     decode_eim_configuration_entries = None
 
 from .config import EimLocalConfig
-from .eim_package_codec import resolve_package_runtime_hints
+from .engine_shell import HELP_SECTIONS as ENGINE_HELP_SECTIONS, install_engine_verbs
 from .session import EimLocalSession
 from SCP11.shared.gsma_error_codes import (
     SGP22_DOWNLOAD_ERROR_CODE,
@@ -116,7 +117,6 @@ class EimLocalShell:
             "DELETE-EIM": self._cmd_delete_eim,
             "EUICC-MEMORY-RESET": self._cmd_euicc_memory_reset,
             "ISDR-GET-EIM-CONFIG": self._cmd_isdr_get_eim_config,
-            "ISDR-DELETE-EIM": self._cmd_isdr_delete_eim,
             "IPAD-DISCOVER": self._cmd_ipad_discover,
             "HANDOVER-SET": self._cmd_handover_set,
             "HANDOVER-STATUS": self._cmd_handover_status,
@@ -139,7 +139,6 @@ class EimLocalShell:
             "ADD-INITIAL-EIM": self._cmd_add_initial_eim,
             "ADD-EIM": self._cmd_add_eim,
             "ISDR-ADD-INITIAL-EIM": self._cmd_isdr_add_initial_eim,
-            "ISDR-ADD-EIM": self._cmd_isdr_add_eim,
             "LOAD-EIM-PACKAGE": self._cmd_load_eim_package,
             "EIM-ACKNOWLEDGE": self._cmd_eim_acknowledge,
             "ERROR-CODES": self._cmd_error_codes,
@@ -216,7 +215,7 @@ class EimLocalShell:
             "STORE-METADATA": {"usage": "STORE-METADATA [metadataPath]", "summary": "Encode/send StoreMetadata APDU flow from JSON.", "examples": ["STORE-METADATA"]},
             "UPDATE-METADATA": {"usage": "UPDATE-METADATA [metadataPath]", "summary": "Encode/send UpdateMetadata APDU flow from JSON.", "examples": ["UPDATE-METADATA"]},
             "GET-EIM-CONFIG": {"usage": "GET-EIM-CONFIG", "summary": "Send standalone BF55 GetEimConfigurationData command.", "examples": ["GET-EIM-CONFIG"]},
-            "DELETE-EIM": {"usage": "DELETE-EIM <eimId>", "summary": "Send BF59 DeleteEim request for target eIM ID.", "examples": ["DELETE-EIM 2.25.311782205282738360923618091971140414400"]},
+            "DELETE-EIM": {"usage": "DELETE-EIM [eid] <eimId>", "summary": "Queue the deleteEim eCO (SGP.32 v1.3 §2.11.1.1.2) for the card; QUEUE DELETE-EIM.", "examples": ["DELETE-EIM 1.3.6.1.4.1.32473.999.10.124"]},
             "EUICC-MEMORY-RESET": {
                 "usage": "EUICC-MEMORY-RESET [packagePath]",
                 "summary": "Run template-driven ES10c eUICCMemoryReset directly on ISD-R.",
@@ -226,7 +225,6 @@ class EimLocalShell:
                 ],
             },
             "ISDR-GET-EIM-CONFIG": {"usage": "ISDR-GET-EIM-CONFIG", "summary": "Decode/report live BF55 eIM rows from the card.", "examples": ["ISDR-GET-EIM-CONFIG"]},
-            "ISDR-DELETE-EIM": {"usage": "ISDR-DELETE-EIM <eimId>", "summary": "Delete target eIM and print decoded post-state.", "examples": ["ISDR-DELETE-EIM 2.25.311782205282738360923618091971140414400"]},
             "IPAD-DISCOVER": {"usage": "IPAD-DISCOVER [packagePath]", "summary": "Run IPAd discovery and optional package selection.", "examples": ["IPAD-DISCOVER"]},
             "HANDOVER-SET": {"usage": "HANDOVER-SET <transactionIdHex> [matchingId]", "summary": "Manually seed handover context.", "examples": ["HANDOVER-SET 01020304AABBCCDD MID-1"]},
             "HANDOVER-STATUS": {"usage": "HANDOVER-STATUS [--json|--yaml]", "summary": "Print the current handover context.", "examples": ["HANDOVER-STATUS", "HANDOVER-STATUS --yaml"]},
@@ -243,10 +241,9 @@ class EimLocalShell:
             "HOTFOLDER-FETCH": {"usage": "HOTFOLDER-FETCH [directory] [--json|--yaml]", "summary": "Issue the effective package queue in deterministic order.", "examples": ["HOTFOLDER-FETCH", "HOTFOLDER-FETCH --json", "HOTFOLDER-FETCH --yaml"]},
             "POLL-CAMPAIGN": {"usage": "POLL-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["POLL-CAMPAIGN", "POLL-CAMPAIGN 5 0 --until-empty", "POLL-CAMPAIGN 10 1000 Workspace/LocalEIM/eim_packages/hotfolder"]},
             "HOTFOLDER-CAMPAIGN": {"usage": "HOTFOLDER-CAMPAIGN [cycles] [intervalMs] [hotfolderDir] [--until-empty] [--max-cycles n] [--json|--yaml]", "summary": "Run a deterministic hotfolder queue campaign and print cycle results.", "examples": ["HOTFOLDER-CAMPAIGN", "HOTFOLDER-CAMPAIGN 5 0 --until-empty"]},
-            "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddInitialEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM isdr", "ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
-            "ADD-EIM": {"usage": "ADD-EIM [package|isdr] [certPath] [packagePath]", "summary": "Issue AddEim using package or ISDR mode, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-EIM package", "ADD-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_eim.json"]},
-            "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-INITIAL-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
-            "ISDR-ADD-EIM": {"usage": "ISDR-ADD-EIM [certPath] [packagePath]", "summary": "Validate AddEim directly on-card, with package-through-local-auth when packagePath is supplied.", "examples": ["ISDR-ADD-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-EIM Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json"]},
+            "ADD-INITIAL-EIM": {"usage": "ADD-INITIAL-EIM [package] [certPath] [packagePath]", "summary": "Issue AddInitialEim (SGP.32 v1.3 §5.9.4) from an add_initial_eim package, with card-aware cert auto-selection when certPath is omitted.", "examples": ["ADD-INITIAL-EIM", "ADD-INITIAL-EIM package Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
+            "ADD-EIM": {"usage": "ADD-EIM [eid] <eimId> key=value ... | ADD-EIM [eid] config=<saved eIM configuration> [key=value ...]", "summary": "Queue the addEim eCO (SGP.32 v1.3 §2.11.1.1.2) for the card; QUEUE ADD-EIM. config= takes every field from a configuration saved in the AddInitialEim builder.", "examples": ["ADD-EIM 2.999.1 eim_fqdn=other.example.test certificate=<name or hex> association_token=on", "ADD-EIM 89049032123451234512345678901235 config=other-eim"]},
+            "ISDR-ADD-INITIAL-EIM": {"usage": "ISDR-ADD-INITIAL-EIM [certPath] [packagePath]", "summary": "Validate AddInitialEim directly on-card through local auth; the default add_initial_eim template is used when packagePath is omitted.", "examples": ["ISDR-ADD-INITIAL-EIM /path/to/local_eim_signing_cert.pem", "ISDR-ADD-INITIAL-EIM Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json"]},
             "LOAD-EIM-PACKAGE": {"usage": "LOAD-EIM-PACKAGE [packagePath] [certPath]", "summary": "Execute a card-facing package directly toward ISD-R, bypassing hotfolder routing.", "examples": ["LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json", "LOAD-EIM-PACKAGE Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json /path/to/local_eim_signing_cert.pem"]},
             "EIM-ACKNOWLEDGE": {"usage": "EIM-ACKNOWLEDGE [transactionIdHex] [matchingId]", "summary": "Close pending eIM operations and sync notifications.", "examples": ["EIM-ACKNOWLEDGE", "EIM-ACKNOWLEDGE 01020304AABBCCDD MID-1"]},
             "ERROR-CODES": {"usage": "ERROR-CODES [SGP.02|SGP.22|SGP.32|ALL]", "summary": "List known GSMA error code tables.", "examples": ["ERROR-CODES", "ERROR-CODES SGP.32"]},
@@ -265,6 +262,7 @@ class EimLocalShell:
         # Commands that read --debug themselves: the dispatcher leaves the
         # flag in their argument instead of switching the transport trace on.
         self._internal_debug_commands: set[str] = set()
+        self._engine_verbs = install_engine_verbs(self)
         extend_target_with_plugins(self)
 
     def _setup_readline(self) -> None:
@@ -401,36 +399,10 @@ class EimLocalShell:
         *,
         strict_exec: bool = False,
     ) -> dict[str, Any]:
-        resolved_path = self.session.resolve_eim_package_path(override_path=package_path)
-        document = self.session.load_eim_package_document(package_path)
-        lint_report = self.session.lint_eim_package(
-            package_path=package_path,
+        return self.session.explain_eim_package(
+            package_path,
             strict_executable=strict_exec,
         )
-        runtime_hints = resolve_package_runtime_hints(document)
-        certificate_preview = self.session.preview_eim_signing_certificate(
-            package_path=resolved_path
-        )
-        identity = self.session.identity_summary()
-        return {
-            "package": {
-                "path": resolved_path,
-                "type": str(lint_report.get("package_type", "")).strip(),
-                "version": str(lint_report.get("package_version", "")).strip(),
-                "strict_executable": bool(strict_exec),
-                "command_tag_hex": str(document.get("command_tag_hex", "")).strip().upper(),
-            },
-            "runtime_hints": runtime_hints,
-            "signing_certificate": certificate_preview,
-            "identity_defaults": {
-                "eim_id": identity.get("eim_id", ""),
-                "eim_fqdn": identity.get("eim_fqdn", ""),
-                "default_matching_id": identity.get("default_matching_id", ""),
-                "eim_endpoint": identity.get("eim_endpoint", ""),
-                "smdp_address": identity.get("smdp_address", ""),
-            },
-            "lint": lint_report,
-        }
 
     def _render_eim_package_explain_text(self, payload: dict[str, Any]) -> None:
         package = payload.get("package", {})
@@ -891,7 +863,9 @@ class EimLocalShell:
                     "",
                     self._resolve_isdr_add_package_path(token, expected_types),
                 )
-            return "isdr", token, ""
+            # A certificate alone goes with the default package: the bare
+            # ISD-R handshake it used to send is no SGP.32 structure.
+            return "package_isdr", token, self._resolve_isdr_add_package_path("", expected_types)
         if len(parts) != 2:
             raise ValueError(usage)
         cert_path = parts[0].strip()
@@ -984,15 +958,13 @@ class EimLocalShell:
             self._help_row("EIM-PACKAGE-ISSUE [path]", "EIM-PACKAGE-ISSUE"),
             self._help_row("EIM-PACKAGE-ISSUE-ALL [dir]", "EIM-PACKAGE-ISSUE-ALL"),
             self._help_row("EIM-CERTS [--json|--yaml] [pkg] [cert]", "EIM-CERTS"),
-            self._help_row("ADD-INITIAL-EIM [mode] [cert] [pkg]", "ADD-INITIAL-EIM"),
-            self._help_row("ADD-EIM [mode] [cert] [pkg]", "ADD-EIM"),
+            self._help_row("ADD-INITIAL-EIM [cert] [pkg]", "ADD-INITIAL-EIM"),
+            self._help_row("ADD-EIM [eid] <eimId> k=v", "ADD-EIM"),
             self._help_row("GET-EIM-CONFIG", "GET-EIM-CONFIG"),
-            self._help_row("DELETE-EIM <eimId>", "DELETE-EIM"),
+            self._help_row("DELETE-EIM [eid] <eimId>", "DELETE-EIM"),
             self._help_row("EUICC-MEMORY-RESET [pkg]", "EUICC-MEMORY-RESET"),
             self._help_row("ISDR-GET-EIM-CONFIG", "ISDR-GET-EIM-CONFIG"),
-            self._help_row("ISDR-DELETE-EIM <eimId>", "ISDR-DELETE-EIM"),
             self._help_row("ISDR-ADD-INITIAL-EIM [cert] [pkg]", "ISDR-ADD-INITIAL-EIM"),
-            self._help_row("ISDR-ADD-EIM [cert] [pkg]", "ISDR-ADD-EIM"),
             self._help_row("LOAD-EIM-PACKAGE [pkg] [cert]", "LOAD-EIM-PACKAGE"),
             self._help_row("EIM-ACKNOWLEDGE [txid] [mid]", "EIM-ACKNOWLEDGE"),
         ]
@@ -1021,6 +993,8 @@ class EimLocalShell:
             self._help_row("QA", "QA"),
         ]
 
+        for title, rows in ENGINE_HELP_SECTIONS:
+            self._print_help_section(title, ShellStyle.GREEN, [self._help_row(label, key) for label, key in rows])
         self._print_help_section("Local Profile Flow", ShellStyle.CYAN, local_flow_rows)
         self._print_help_section("Targets & Overrides", ShellStyle.BLUE, override_rows)
         self._print_help_section("Localized Routing & Handover", ShellStyle.GREEN, localized_rows)
@@ -1295,12 +1269,14 @@ class EimLocalShell:
         self._print_eim_configuration_report(response)
 
     def _cmd_delete_eim(self, argument: str = "") -> None:
-        eim_id = argument.strip()
-        if len(eim_id) == 0:
-            raise ValueError("Usage: DELETE-EIM <eimId>")
-        response = self.session.delete_eim(eim_id)
-        self._print_command_response("DeleteEim", response)
-        self._invalidate_poll_target_cache()
+        # deleteEim is an eCO in a signed eUICC Package (SGP.32 v1.3
+        # §2.11.1.1.2); the 'BF59' STORE DATA this verb sent before is
+        # ConfigureImmediateProfileEnabling.
+        if len(argument.strip()) == 0:
+            raise ValueError("Usage: DELETE-EIM [eid] <eimId>")
+        if self._engine_verbs.run("queue", f"DELETE-EIM {argument}"):
+            print("[*] Queued: SERVE (then an IPA poll) or DELIVER runs it.")
+            self._invalidate_poll_target_cache()
 
     def _cmd_isdr_get_eim_config(self, _: str = "") -> None:
         response = self.session.get_eim_configuration_data()
@@ -1309,19 +1285,6 @@ class EimLocalShell:
             response,
             title="ISDR GetEimConfigurationData",
         )
-
-    def _cmd_isdr_delete_eim(self, argument: str = "") -> None:
-        eim_id = argument.strip()
-        if len(eim_id) == 0:
-            raise ValueError("Usage: ISDR-DELETE-EIM <eimId>")
-        response = self.session.delete_eim(eim_id)
-        self._print_command_response(
-            "ISDR DeleteEim",
-            response,
-            transport="direct_card",
-        )
-        self._invalidate_poll_target_cache()
-        self._print_post_eim_configuration_snapshot()
 
     def _cmd_ipad_discover(self, argument: str = "") -> None:
         # Always safe -- pure ASN.1 GetEimPackage exchange; no bridge needed.
@@ -1842,16 +1805,14 @@ class EimLocalShell:
         self._invalidate_poll_target_cache()
 
     def _cmd_add_eim(self, argument: str = "") -> None:
-        source_mode, cert, package = self._parse_add_eim_args(argument)
-        response = self.session.add_eim(
-            cert_path=cert,
-            package_path=package,
-            source_mode=source_mode,
-        )
-        print(f"[+] AddEim completed ({len(response)} bytes).")
-        print(f"    {self._hex_preview(response)}")
-        self._print_selected_eim_certificate()
-        self._invalidate_poll_target_cache()
+        # addEim is an eCO in a signed eUICC Package (SGP.32 v1.3
+        # §2.11.1.1.2); the 'BF58' STORE DATA this verb sent before is
+        # ProfileRollback (§5.9.16).
+        if len(argument.strip()) == 0:
+            raise ValueError("Usage: ADD-EIM [eid] <eimId> key=value ...")
+        if self._engine_verbs.run("queue", f"ADD-EIM {argument}"):
+            print("[*] Queued: SERVE (then an IPA poll) or DELIVER runs it.")
+            self._invalidate_poll_target_cache()
 
     def _cmd_isdr_add_initial_eim(self, argument: str = "") -> None:
         source_mode, cert, package = self._parse_isdr_add_args(
@@ -1867,27 +1828,6 @@ class EimLocalShell:
         transport = "local_auth" if source_mode == "isdr" else "local_auth + package"
         self._print_command_response(
             "ISDR AddInitialEim",
-            response,
-            transport=transport,
-        )
-        self._print_selected_eim_certificate()
-        self._invalidate_poll_target_cache()
-        self._print_post_eim_configuration_snapshot()
-
-    def _cmd_isdr_add_eim(self, argument: str = "") -> None:
-        source_mode, cert, package = self._parse_isdr_add_args(
-            argument,
-            expected_types=("add_eim", "addeim"),
-            usage="Usage: ISDR-ADD-EIM [certPath] [packagePath]",
-        )
-        response = self.session.add_eim(
-            cert_path=cert,
-            package_path=package,
-            source_mode=source_mode,
-        )
-        transport = "local_auth" if source_mode == "isdr" else "local_auth + package"
-        self._print_command_response(
-            "ISDR AddEim",
             response,
             transport=transport,
         )
@@ -1960,7 +1900,7 @@ class EimLocalShell:
         tables: list[tuple[str, dict[int, str]]] = []
         if target in ("ALL", "SGP.22", "SGP22"):
             tables.append(("SGP.22 DownloadErrorCode", SGP22_DOWNLOAD_ERROR_CODE))
-            tables.append(("SGP.22 ES10b ProfileState Result", SGP22_ES10B_PROFILE_STATE_RESULT))
+            tables.append(("SGP.22 ES10c ProfileState Result", SGP22_ES10B_PROFILE_STATE_RESULT))
             tables.append(
                 ("SGP.22 ProfileInstallationResultErrorReason", SGP22_PROFILE_INSTALLATION_RESULT_REASON)
             )
@@ -2083,7 +2023,7 @@ class EimLocalShell:
                     return source_mode, "", token
                 return source_mode, token, ""
             if len(parts) > 3:
-                raise ValueError("Usage: ADD-INITIAL-EIM [package|isdr] [certPath] [packageJson]")
+                raise ValueError("Usage: ADD-INITIAL-EIM [package] [certPath] [packageJson]")
             cert = parts[1]
             package = parts[2]
             return source_mode, cert, package
@@ -2428,15 +2368,22 @@ class EimLocalShell:
         finally:
             self._finalize_recording_on_exit()
 
-    def run_commands(self, cmd_line: str) -> None:
-        """Execute a semicolon-delimited command string non-interactively."""
+    def run_commands(self, cmd_line: str) -> bool:
+        """Execute a semicolon-delimited command string non-interactively.
+
+        Returns False when a command of the batch failed (a ``[-]`` line, a
+        refusal or other ``[!]`` line that is not a warning, an exception).
+        """
+        outcome = BatchOutcome()
         try:
             for raw_command in self._split_batch_commands(cmd_line):
-                keep_running = self._execute_command_line(raw_command, source="batch")
+                with outcome.command(raw_command):
+                    keep_running = self._execute_command_line(raw_command, source="batch")
                 if keep_running is False:
                     break
         finally:
             self._finalize_recording_on_exit()
+        return outcome.ok
 
 
 def entry() -> None:
@@ -2445,10 +2392,10 @@ def entry() -> None:
     shell.run()
 
 
-def entry_cmd(cmd_line: str) -> None:
+def entry_cmd(cmd_line: str) -> bool:
     ensure_plugins_loaded()
     shell = EimLocalShell()
-    shell.run_commands(cmd_line)
+    return shell.run_commands(cmd_line)
 
 
 def _read_stdin_command_text() -> str:
@@ -2463,8 +2410,8 @@ def _read_stdin_command_text() -> str:
     return "; ".join(commands)
 
 
-def entry_stdin() -> None:
-    entry_cmd(_read_stdin_command_text())
+def entry_stdin() -> bool:
+    return entry_cmd(_read_stdin_command_text())
 
 
 def run_standalone() -> None:
@@ -2487,11 +2434,14 @@ def run_standalone() -> None:
     )
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
+    # A batch in which a command failed ends with exit code 1.
     if args.cmd:
-        entry_cmd(args.cmd)
+        if not entry_cmd(args.cmd):
+            sys.exit(1)
         return
     if args.stdin:
-        entry_stdin()
+        if entry_stdin() is False:
+            sys.exit(1)
         return
     shell = EimLocalShell()
     shell.run()

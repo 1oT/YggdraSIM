@@ -164,6 +164,17 @@ class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
         self.assertEqual(len(eid), 32, f"EID should be 32 BCD digits, got '{eid}'")
         self.assertTrue(eid.isdigit(), f"EID must be all digits, got '{eid}'")
 
+    def test_get_eid_registers_the_simulated_eid_with_the_local_eim(self) -> None:
+        from SCP11.eim_local.engine.service import LocalEim
+
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(
+            os.environ, {"YGGDRASIM_LOCAL_EIM_STORE": store}
+        ):
+            eid = self._build_session().get_eid()
+            record = LocalEim(Path(store)).record(eid)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.label, "detected by a local ISD-R session")
+
     def test_get_euicc_info1_returns_bf20_envelope(self) -> None:
         session = self._build_session()
         session.select_isdr()

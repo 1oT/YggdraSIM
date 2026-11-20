@@ -178,12 +178,12 @@ class SGP22Client:
         console = self._console_cls(self)
         console.run()
 
-    def run_commands(self, cmd_line: str):
+    def run_commands(self, cmd_line: str) -> bool:
         self._run_startup_preflight()
         self._build_runtime()
         self._print_startup_warnings()
         console = self._console_cls(self)
-        console.run_commands(cmd_line)
+        return console.run_commands(cmd_line) is not False
 
 
 def entry() -> None:
@@ -265,8 +265,10 @@ def entry() -> None:
     if args.flow:
         client.run_flow()
         return
+    # A batch in which a command failed ends with exit code 1.
     if args.cmd:
-        client.run_commands(args.cmd)
+        if not client.run_commands(args.cmd):
+            sys.exit(1)
         return
     if args.stdin:
         command_lines = []
@@ -277,7 +279,8 @@ def entry() -> None:
             if command_text.startswith("#"):
                 continue
             command_lines.append(command_text)
-        client.run_commands("; ".join(command_lines))
+        if not client.run_commands("; ".join(command_lines)):
+            sys.exit(1)
         return
     client.run_shell()
 

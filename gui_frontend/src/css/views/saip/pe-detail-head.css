@@ -20,7 +20,7 @@
 .saip-detail-head-chips .cc-chip {
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   padding: 3px 8px;
   font-size: 11px;
@@ -42,7 +42,7 @@
   gap: 6px;
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg-muted);
   font-size: 11px;

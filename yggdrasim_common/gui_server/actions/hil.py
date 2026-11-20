@@ -726,7 +726,9 @@ def _build_hil_bridge_service_options(
         extract_remsim_extra_args_from_supervisor_state,
         guess_bridge_python_executable,
         read_supervisor_state,
+        resolve_apdu_timeout_service_setting,
         resolve_card_trace_enabled,
+        resolve_modem_diag_device,
         resolve_simtrace_reset_service_settings,
         split_shell_like_arguments,
     )
@@ -802,6 +804,8 @@ def _build_hil_bridge_service_options(
         uhubctl_binary=uhubctl_binary,
         uhubctl_location=uhubctl_location,
         uhubctl_port=uhubctl_port,
+        modem_diag_device=resolve_modem_diag_device(),
+        apdu_timeout_ms=resolve_apdu_timeout_service_setting(),
         documentation_path=bundle_path("guides", "HIL_BRIDGE_GUIDE.md"),
         environment_overrides=tuple(environment_overrides),
     )

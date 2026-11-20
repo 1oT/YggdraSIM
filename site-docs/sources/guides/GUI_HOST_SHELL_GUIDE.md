@@ -219,9 +219,9 @@ Content-Type: application/json
   "count": 2,
   "devices": [
     {
-      "path":        "/dev/serial/by-id/usb-Quectel_EG25-G-if02-port0",
+      "path":        "/dev/serial/by-id/usb-Example_LTE_Modem-if02-port0",
       "link_target": "/dev/ttyUSB2",
-      "label":       "by-id · usb-Quectel_EG25-G-if02-port0"
+      "label":       "by-id · usb-Example_LTE_Modem-if02-port0"
     },
     {
       "path":        "/dev/ttyUSB3",
@@ -363,7 +363,7 @@ on a host that hands the modem `\n`-only.
 ### 4.3 `minicom` against a `by-id` symlink
 
 ```bash
-minicom -D /dev/serial/by-id/usb-Quectel_EG25-G-if02-port0 -b 115200 -8 -o
+minicom -D /dev/serial/by-id/usb-Example_LTE_Modem-if02-port0 -b 115200 -8 -o
 ```
 
 `-o` skips the modem init string so the first byte sent is exactly

@@ -363,6 +363,9 @@ class BackendSelectionTests(unittest.TestCase):
                 invocations.append((reader_index, reader_name))
                 self.reader_label = "stubbed PC/SC"
 
+            def selected_reader_name(self) -> str:
+                return self.reader_label
+
             def connect(self) -> None:
                 pass
 

@@ -659,7 +659,9 @@ def _sentinel_ranges(image: bytes, sentinel_hexes: Iterable[str]) -> list[tuple[
 def template_record_size(template_oid: Any, pe_name: str) -> int | None:
     """The TCA template's record length for ``pe_name``, when pySim knows it."""
     try:
-        from pySim.esim.saip.templates import ProfileTemplateRegistry
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        ProfileTemplateRegistry = import_saip_templates().ProfileTemplateRegistry
     except ImportError:
         return None
     oid_text = str(template_oid or "").strip()

@@ -219,8 +219,9 @@ class EuiccMemoryResetBf64ExpandedTests(_Gap2Base):
         request = bytes.fromhex("BF640482020780")
         response, sw1, sw2 = self.logic.handle_store_data(request)
 
+        # SGP.32 v1.3 §5.9.5: resetResult ok(0), the only member for a profile option.
         self.assertEqual((sw1, sw2), (0x90, 0x00))
-        self.assertEqual(response, bytes.fromhex("BF6400"))
+        self.assertEqual(response, bytes.fromhex("BF6403800100"))
         self.assertNotIn(operational_extra, self.state.profiles)
         leftover = [
             p for p in self.state.profiles if str(p.profile_class).lower() == "operational"
@@ -234,7 +235,9 @@ class EuiccMemoryResetBf64ExpandedTests(_Gap2Base):
         request = bytes.fromhex("BF640482020520")
         response, _sw1, _sw2 = self.logic.handle_store_data(request)
 
-        self.assertEqual(response, bytes.fromhex("BF6400"))
+        self.assertEqual(response, bytes.fromhex("BF6403800100"))
+        response, _sw1, _sw2 = self.logic.handle_store_data(request)
+        self.assertEqual(response, bytes.fromhex("BF6403800101"))
         self.assertEqual(self.state.default_dp_address, "")
 
     def test_reset_immediate_enable_clears_configuration(self) -> None:
@@ -246,7 +249,8 @@ class EuiccMemoryResetBf64ExpandedTests(_Gap2Base):
         request = bytes.fromhex("BF640482020102")
         response, _sw1, _sw2 = self.logic.handle_store_data(request)
 
-        self.assertEqual(response, bytes.fromhex("BF6400"))
+        # resetResult ok(0) with no profile option asked, resetImmediateEnableConfigResult ok(0).
+        self.assertEqual(response, bytes.fromhex("BF6406800100820100"))
         self.assertFalse(self.state.immediate_enable_flag)
         self.assertEqual(self.state.immediate_enable_smdp_oid, "")
         self.assertEqual(self.state.immediate_enable_smdp_address, "")

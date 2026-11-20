@@ -616,7 +616,7 @@ class RecordCountTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class AkaFixedFieldTests(unittest.TestCase):
-    """YRL-AKA-003: fixed-length SGP.22 §B.3 AKA field wrong length."""
+    """YRL-AKA-003: fixed-length TCA SAIP v3.4.1 §8.4.2 AKA Parameters field wrong length."""
 
     def _doc_with_aka(self, field_name: str, value_hex: str) -> dict:
         algo_params: dict = {

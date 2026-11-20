@@ -114,7 +114,7 @@ On first successful load the manager prints a one-line stderr banner naming each
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `ADD-INITIAL-EIM` rejected | BF55 row already populated or overwrite not allowed | check `Workspace/SIMCARD/isdr_config.json` simulator-side, or use `ADD-EIM` |
+| `ADD-INITIAL-EIM` rejected | BF55 row already populated or overwrite not allowed | check `Workspace/SIMCARD/isdr_config.json` simulator-side, or reset the eIM configuration first (`ASSOCIATE` in the Local eIM resets it and stores the Local eIM) |
 | optional relay verbs absent from SCP11 shells | local command extension not loaded | same opt-in and hard-lock checks as above. |
 | Hotfolder empty after drop | wrong directory | confirm the runtime root `SCP11/eim_local/eim_packages/hotfolder/` |
 
@@ -126,6 +126,8 @@ On first successful load the manager prints a one-line stderr banner naming each
 | relay never reports `status: ok` | `osmo-remsim-client-st2` failing | check its stderr, verify firmware |
 | missing `atr` in relay state | card not powered or inserted | reseat card |
 | `reader busy` in a YggdraSIM shell | direct PC/SC handle used while bridge owns the reader | route through the relay |
+| `reader busy: <what runs> (pid <n>) has held '<reader>' since <time>` | another YggdraSIM process holds the local reader (a console command in a terminal, the HIL bridge, the GUI, an MCP card session) | let it finish or stop it; the pid is in the message |
+| supervisor status `reader-busy` | another YggdraSIM process holds the bridge's reader; no session is started (no SIMtrace2 reset, no modem reset) until it is free | stop that process; the state's reason names it |
 | `Card source: remote` never appears | bridge is still using local PC/SC mode | pass `--remote-card-url` and `--remote-card-token-file` to the bridge or supervisor |
 
 ## Profile package

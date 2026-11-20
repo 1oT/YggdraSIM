@@ -141,7 +141,7 @@ def _encode_enum_name(
 
 
 def encode_life_cycle_state(payload: dict[str, Any]) -> bytes:
-    """Encode a lifecycle-state integer as the ASN.1 OCTET STRING for lcsState (GSMA SGP.22 §A.1)."""
+    """Encode a lifecycle-state integer as the ASN.1 OCTET STRING for lifeCycleState (TCA SAIP v3.4.1 §8.7.3, coded per GPC v2.3.1 §11.1.1)."""
     return _encode_enum_name(
         payload,
         name_key="state",
@@ -625,7 +625,7 @@ def encode_ef_smss(
     *,
     target_length: int | None = None,
 ) -> bytes:
-    """Encode EF.SMSS content: SMS status byte and SMSP pointer (3GPP TS 31.102 §4.2.57)."""
+    """Encode EF.SMSS content: last used TP-MR and memory-capacity-exceeded flag (3GPP TS 31.102 v19.5 §4.2.28)."""
     if "lastUsedTpMr" in payload or "memoryCapacityExceeded" in payload:
         last_used = _require_int(payload, "lastUsedTpMr")
         if not 0 <= last_used <= 0xFF:
@@ -1443,11 +1443,20 @@ _ARR_CONDITION_KEY_REFERENCE: dict[str, int] = {
 }
 
 
+# TS 102 221 v18.4 §9.5.1: the CRT holds a usage qualifier DO ('95') as well
+# as the key reference DO ('83'); every row of Table 9.3 codes it as
+# A4 06 83 01 <key reference> 95 01 08.
+_ARR_CRT_USAGE_QUALIFIER = 0x08
+
+
 def _default_arr_items_for_condition(condition: str) -> list[dict[str, str]]:
     key_ref = _ARR_CONDITION_KEY_REFERENCE.get(str(condition or "").strip().upper())
     if key_ref is None:
         return []
-    return [{"tag": "83", "raw": f"{key_ref:02X}"}]
+    return [
+        {"tag": "83", "raw": f"{key_ref:02X}"},
+        {"tag": "95", "raw": f"{_ARR_CRT_USAGE_QUALIFIER:02X}"},
+    ]
 
 
 def _encode_arr_rules_from_scratch(
@@ -4828,7 +4837,7 @@ def encode_notification_address_field(payload: dict[str, Any]) -> bytes:
 # Wave A -- generic tagged-bytes pass-through fields.
 #
 # These fields are already carried as raw OCTET STRINGs in the SAIP JSON
-# (GlobalPlatform 9F70 / TS 102 226 / GSMA SAIP Annex D tagged bytes).
+# (GlobalPlatform 9F70 / TS 102 226 / TCA SAIP v3.4.1 §8.4.3 CDMA bytes).
 # The decoded view and round-trip encoder both operate on the hex blob
 # without parsing the internal TLV -- this is the "pass-through" contract
 # the user approved for Wave A (deeper TLV decoding is out of scope).
@@ -4854,7 +4863,7 @@ _PASSTHROUGH_BYTES_FIELD_NAMES: tuple[str, ...] = (
     "loadBlockObject",
     # PE-NonStandard opaque vendor content.
     "content",
-    # PE-CDMAParameter -- GSMA SAIP Annex D authentication material.
+    # PE-CDMAParameter -- TCA SAIP v3.4.1 §8.4.3 authentication material.
     # These are security credentials; we only pass-through the hex on
     # the editor surface. Any cryptographic use goes through the CDMA
     # personalisation path elsewhere in the toolkit.
@@ -4973,7 +4982,11 @@ def _encode_oid_dotted_to_bytes(oid_text: str) -> bytes:
 
 
 def encode_application_provider_identifier_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.8.2 -- re-encode the Application Provider OID.
+    """Re-encode the Application Provider Identifier as an OID.
+
+    ``controlReferenceTemplate.applicationProviderIdentifier`` of
+    TCA SAIP v3.4.1 §8.7.3, tag '5F20' of GPC v2.3.1 §11.5.2.3.7 Table 11-49
+    (see GPC v2.3.1 §6.5.1.7); GP CS gives it no coding beyond 1-n bytes.
 
     Preferred inputs (first non-empty wins):
     1. ``hex`` -- verbatim passthrough (keeps bytes identical even for
@@ -5005,7 +5018,12 @@ _GLOBAL_SERVICE_BITMAP: dict[str, int] = {
 
 
 def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
-    """SAIP §2.6.3 Table 2-6 -- single-byte bitmap of global services.
+    """Encode ``globalServiceParameters`` as a one-byte bitmap.
+
+    The field is in ``ApplicationSystemParameters`` of TCA SAIP v3.4.1
+    §8.7.3. GPC v2.3.1 §8.1.3 codes Global Service Parameters (tag 'CB', 2-n bytes,
+    §11.5.2.3.7 Table 11-49) as two-byte service names (family, id); the
+    bitmap paths below are this module's own reading.
 
     Accepts ``hex`` (any length; verbatim passthrough so non-canonical
     payloads authored before the Round-6 structured decoder still
@@ -5056,11 +5074,14 @@ def encode_global_service_parameters_field(payload: dict[str, Any]) -> bytes:
 
 
 def encode_implicit_selection_parameter_field(payload: dict[str, Any]) -> bytes:
-    """GlobalPlatform Card Spec Amd A §A.3 -- single-byte selection flags.
+    """Implicit Selection Parameter, GPC v2.3.1 §11.1.7 Table 11-15.
 
-    Bit 8 (``defaultSelected``) distinguishes default-application
-    selection from explicit AID selection; bits 1-5 carry the channel
-    mask. Accepts ``hex`` (any length; verbatim passthrough) or
+    The structured path treats bit 8 (``defaultSelected``) as default
+    application versus explicit AID selection and bits 1-5 as a channel
+    mask; Table 11-15 reads b8 as Contactless I/O, b7 as Contact I/O and
+    b5-b1 as the logical channel number (0 to 19).
+
+    Accepts ``hex`` (any length; verbatim passthrough) or
     structured ``defaultSelected`` (bool) + ``channelMask``
     (``"0xNN"`` / int). Length constraints only apply to the
     structured path -- the hex path stays lossless so legacy profiles
@@ -5230,8 +5251,10 @@ def _encode_memory_quota_bytes(
 
     ``hex`` always takes precedence so existing payloads round-trip
     verbatim. If the decoder-produced ``decimal`` is present the encoder
-    re-emits the value using 2..4 bytes so the result is ASN.1 SIZE
-    compliant (GP Amd A §5.1.2 / Amd C).
+    re-emits the value using 2..4 bytes so the result meets the
+    SIZE (2..4) of TCA SAIP v3.4.1 §8.7.3. GPC v2.3.1 §11.5.2.3.7
+    (Table 11-49) asks for 2 bytes up to 32767 and 4 bytes above, which
+    the shortest-form encoding below does not follow.
     """
 
     hex_text = _hex_string_or_none(payload, "hex")

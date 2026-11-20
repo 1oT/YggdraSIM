@@ -220,9 +220,9 @@ local function add_tlv_node(tree, payload, node, options)
     -- field beneath would print the same hex twice.
     local value_on_label = false
     if node.name ~= "" then
-        label = string.format("%s (0x%X)", node.name, node.base_tag)
+        label = string.format("%s (0x%02X)", node.name, node.base_tag)
     else
-        label = string.format("Tag 0x%X", node.base_tag)
+        label = string.format("Tag 0x%02X", node.base_tag)
     end
     if node.constructed then
         label = label .. string.format(", %s", util.plural_bytes(node.value_length))
@@ -237,7 +237,9 @@ local function add_tlv_node(tree, payload, node, options)
     local item = tree:add(fields.tlv, range)
     item:set_text(label)
     local tag_range = util.safe_range(payload, node.tag_offset, node.tag_length)
-    item:add(fields.tlv_tag, tag_range)
+    -- The label carries the tag, and the length is the size of the bytes
+    -- the node selects, so neither takes a row; both stay filter fields.
+    item:add(fields.tlv_tag, tag_range):set_hidden()
     if node.base_tag ~= node.tag then
         -- The label names the tag with its comprehension bit already
         -- cleared, which is what this field carries.
@@ -257,11 +259,13 @@ local function add_tlv_node(tree, payload, node, options)
     -- than restated beside the whole node.
     local identifier = util.safe_range(payload, node.tag_offset, 1)
     if identifier ~= nil then
+        -- The class is in the tag the label prints and a constructed
+        -- node shows its members, so both are filter fields without a row.
         if node.class ~= nil then
-            item:add(fields.tlv_class, identifier)
+            item:add(fields.tlv_class, identifier):set_hidden()
         end
         if node.constructed ~= nil then
-            item:add(fields.tlv_constructed, identifier)
+            item:add(fields.tlv_constructed, identifier):set_hidden()
         end
         if node.comprehension_required ~= nil then
             -- Whether a terminal must understand the tag is a property of
@@ -274,7 +278,7 @@ local function add_tlv_node(tree, payload, node, options)
         fields.tlv_length,
         util.safe_range(payload, node.length_offset, node.length_length),
         node.length
-    )
+    ):set_hidden()
     if node.indefinite then
         item:add(fields.tlv_indefinite, range, true):set_generated()
     end
@@ -954,6 +958,10 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
     -- The domain name this payload carries, returned to add_cat_subtree for
     -- the Detail column. Stays nil until a DNS query is read from the bytes.
     local fqdn = nil
+    -- The TLS alert this block carries, returned beside the name: the
+    -- alert is what a failed download is read for, and the tree and the
+    -- stock dissector's Info text are both one step away from the row.
+    local alert_note = nil
     local effective_port = port
     local transport = nil
     local opened = state.bip_channel(
@@ -984,6 +992,11 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
                 )
             )
             alert:set_generated()
+            alert_note = string.format(
+                "%s TLS alert %s (%d)",
+                record.alert_level_name, record.alert_description_name,
+                record.alert_description
+            )
             if record.alert_level == 2 then
                 alert:add_proto_expert_info(
                     experts.tls_alert,
@@ -1005,6 +1018,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
             -- post-handshake alert, so an operator who does not see a
             -- named alert should not conclude there was none.
             tree:add(fields.tls_alert_encrypted, range, true):set_generated()
+            alert_note = "encrypted TLS alert"
         end
         if record.complete == false then
             tree:add(fields.tls_incomplete, range, true):set_generated()
@@ -1013,7 +1027,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
 
     local wanted, skip = cat.channel_payload_dissector(values, effective_port, transport)
     if wanted == "" then
-        return fqdn
+        return fqdn, alert_note
     end
     tree:add(fields.cat_payload_protocol, range, wanted):set_generated()
 
@@ -1036,7 +1050,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
     -- stock dissector report a malformed packet, which is worse than the
     -- header this function already rendered.
     if wanted == "tls" and record ~= nil and record.complete == false then
-        return fqdn
+        return fqdn, alert_note
     end
 
     -- A DNS-over-TCP payload is handed over past its two-byte length
@@ -1044,7 +1058,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
     local handoff = range
     if skip ~= nil and skip > 0 then
         if range:len() <= skip then
-            return fqdn
+            return fqdn, alert_note
         end
         handoff = range:range(skip)
     end
@@ -1061,7 +1075,7 @@ local function add_channel_payload(tree, values, range, channel_id, port, pinfo)
         end
         handler:call(handoff:tvb("BIP channel data"), pinfo, tree)
     end)
-    return fqdn
+    return fqdn, alert_note
 end
 
 --- Render a CAT proactive command or terminal response.
@@ -1494,7 +1508,7 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
         state.record_bip_frame(machine, frame_number)
     end
 
-    local payload_fqdn = add_channel_payload(
+    local payload_fqdn, payload_alert = add_channel_payload(
         channel_data_item, channel_payload, channel_payload_range,
         channel_id or status_channel, port, pinfo
     )
@@ -1513,6 +1527,10 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
             detail = string.format("%s: %s", name, result_label)
             if result_cause_label ~= nil then
                 detail = string.format("%s (%s)", detail, result_cause_label)
+            end
+            -- A peer's alert arrives in a RECEIVE DATA response.
+            if payload_alert ~= nil then
+                detail = string.format("%s, %s", detail, payload_alert)
             end
         else
             -- The proactive command as issued. Append the endpoint a BIP
@@ -1539,7 +1557,8 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                 -- BIP channels in flight at once -- routine for an SGP.32
                 -- IPAd running DNS on one and TLS on another -- do not
                 -- collapse to identical rows; then the host name the
-                -- payload carries, then the SEND DATA payload size.
+                -- payload carries, then the SEND DATA payload size, then
+                -- the TLS alert the card sent, if the block is one.
                 if channel_id ~= nil then
                     parts[#parts + 1] = string.format("channel %d", channel_id)
                 end
@@ -1548,6 +1567,9 @@ local function add_cat_subtree(tree, payload, offset, length, budget, pinfo)
                 end
                 if command_type == 0x43 and send_data_bytes ~= nil then
                     parts[#parts + 1] = util.plural_bytes(send_data_bytes)
+                end
+                if payload_alert ~= nil then
+                    parts[#parts + 1] = payload_alert
                 end
             elseif command_type == 0x41 and channel_id ~= nil then
                 parts[#parts + 1] = string.format("channel %d", channel_id)
@@ -1606,7 +1628,7 @@ local function add_command_subtree(
     -- it stays for the Operation column the bundled profile defines.
     local ins_item = item:add(fields.ins, payload(1, 1))
     ins_item:set_text(
-        string.format("INS: %s (0x%02x)", command.name, command.ins)
+        string.format("Instruction: %s (0x%02x)", command.name, command.ins)
     )
     item:add(fields.command_name, payload(1, 1), command.name):set_hidden()
     -- Which specification defines the instruction does not change what
@@ -2092,10 +2114,11 @@ local function add_status_word(item, payload, response)
     -- as "Unknown", which is exactly backwards: they are the ones
     -- carrying the most information.
     sw_item:set_text(string.format(
-        "Status word: %04X - %s", response.status_word, response.meaning
+        "Status Word: %04X %s", response.status_word, response.meaning
     ))
-    sw_item:add(fields.sw1, sw_range(0, 1))
-    sw_item:add(fields.sw2, sw_range(1, 1))
+    -- Both bytes are in the line above; they stay as filter fields.
+    sw_item:add(fields.sw1, sw_range(0, 1)):set_hidden()
+    sw_item:add(fields.sw2, sw_range(1, 1)):set_hidden()
     -- The meaning, the boolean and the ISO/IEC 7816-4 clause 5.1.3
     -- category are all readable from the line above. They stay as
     -- fields because a display filter and the HIL-Bridge TUI select
@@ -2640,8 +2663,6 @@ local function dissect_exchange(payload, pinfo, tree)
         context = state.snapshot(machine, pinfo.number)
     end
 
-    add_split_subtree(root, payload, result, context)
-
     local budget = tlv.new_budget()
     local rsp_description = rsp.describe(payload, command, context)
     local _command_item, command_cat = add_command_subtree(
@@ -2652,6 +2673,9 @@ local function dissect_exchange(payload, pinfo, tree)
         root, payload, response, context, command, budget, pinfo
     )
     add_secure_messaging(root, payload, pinfo, command, response, context, budget)
+    -- Bookkeeping about how the frame was cut follows the decode, so the
+    -- tree opens on the class byte the way Wireshark's gsm_sim tree does.
+    add_split_subtree(root, payload, result, context)
 
     root:set_text(string.format(
         "YggdraSIM APDU: %s -> %04X", command.name, response.status_word

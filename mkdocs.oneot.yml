@@ -144,6 +144,9 @@ nav:
   - Home: index.md
   - Overview:
       - Getting Started: getting-started.md
+      - User Manual: sources/guides/USER_MANUAL.md
+      - User Manual -- GUI: sources/guides/USER_MANUAL_GUI.md
+      - User Manual -- CLI: sources/guides/USER_MANUAL_CLI.md
       - Architecture: architecture.md
       - Operator Surfaces: operator-surfaces.md
       - Documentation Map: documentation-map.md

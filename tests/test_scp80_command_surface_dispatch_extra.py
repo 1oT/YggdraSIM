@@ -118,7 +118,7 @@ class OtaShellCommandSurfaceDispatchExtraTests(unittest.TestCase):
             sniff_context=lambda raw_apdu: (None, 0),
             try_decode=lambda fid, le, por, por_info=None: None,
         )
-        shell._print_result = lambda result: None
+        shell._print_result = lambda result, **kwargs: None
         shell._print_reader_protocol_caveat = lambda multipart_required=False: None
         shell._bind_inventory_profile = lambda iccid, announce=True: True
         shell._refresh_inventory_from_reader = lambda announce=True: True

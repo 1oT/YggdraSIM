@@ -16,10 +16,10 @@ verify three invariants:
 Spec references:
   ef-imsi            TS 31.102 §4.2.2   (USIM IMSI)
   ef-arr-usim        TS 102 221 §9.4    (Access Rule Reference)
-  ef-threshold       TS 31.102 §4.4.3.7 (Threshold)
-  ef-eapkeys         TS 102 310 §5.2.2  (EAP MSK/EMSK)
-  ef-eapstatus       TS 102 310 §5.2.2  (EAP Status)
-  ef-reid            TS 102 310 §5.2.2  (EAP Re-authentication ID)
+  ef-threshold       TS 31.102 v19.5 §4.2.52 (Threshold)
+  ef-eapkeys         TS 102 310 v9.1 §7.1 (EAP MSK/EMSK)
+  ef-eapstatus       TS 102 310 v9.1 §7.2 (EAP Status)
+  ef-reid            TS 102 310 v9.1 §7.6 (EAP Re-authentication ID)
   ef-model           3GPP2 C.S0023 §3.4.61
   ef-call-count      3GPP2 C.S0023 §3.4.72
   ef-call-prompt     3GPP2 C.S0023 §3.4.55

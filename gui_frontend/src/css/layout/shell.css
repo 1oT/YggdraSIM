@@ -8,7 +8,7 @@
 
 .app-shell {
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: var(--bar-h) minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   grid-template-areas:
     "topbar    topbar"
@@ -27,7 +27,7 @@
 }
 
 .app-shell[data-log-collapsed="true"] {
-  grid-template-rows: 52px minmax(0, 1fr) 28px 28px;
+  grid-template-rows: var(--bar-h) minmax(0, 1fr) 28px var(--status-h);
 }
 
 /* SA-G8: collapsible Command Center sidebar. The 260px column folds
@@ -56,11 +56,11 @@
    bar must NOT also remove the operator's only handle to the
    sidebar. */
 .app-shell[data-topbar-collapsed="true"] {
-  grid-template-rows: 30px minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: 30px minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
 }
 
 .app-shell[data-topbar-collapsed="true"][data-log-collapsed="true"] {
-  grid-template-rows: 30px minmax(0, 1fr) 28px 28px;
+  grid-template-rows: 30px minmax(0, 1fr) 28px var(--status-h);
 }
 
 .app-shell[data-topbar-collapsed="true"] .topbar {
@@ -181,7 +181,7 @@
   inset: 0 auto 0 0;
   width: min(260px, 88vw);
   z-index: 6;
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--overlay-shadow);
   transform: translateX(calc(-100% - 48px));
   will-change: transform, opacity;
 }
@@ -208,11 +208,11 @@
 }
 
 .app-shell[data-topbar-mode="auto"] {
-  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) 28px;
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) var(--log-dock-height, 180px) var(--status-h);
 }
 
 .app-shell[data-topbar-mode="auto"][data-log-collapsed="true"] {
-  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px 28px;
+  grid-template-rows: var(--panel-hotzone) minmax(0, 1fr) 28px var(--status-h);
 }
 
 /* Opaque while it moves: the glass blur of the resting bar would have
@@ -220,12 +220,12 @@
 .app-shell[data-topbar-mode="auto"] .topbar {
   position: absolute;
   inset: 0 0 auto 0;
-  height: 52px;
+  height: var(--bar-h);
   z-index: 7;
   background: var(--bg-elev);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--overlay-shadow);
   transform: translateY(calc(-100% - 48px));
   will-change: transform, opacity;
 }
@@ -267,9 +267,9 @@
   bottom: 3px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--accent);
-  box-shadow: 0 0 6px 0 var(--accent-glow);
+  box-shadow: 0 0 6px 0 var(--glow);
 }
 
 .topbar-collapse-toggle,
@@ -361,14 +361,14 @@
 .topbar {
   grid-area: topbar;
   position: relative;
-  background: var(--topbar-bg);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-bottom: 1px solid var(--border);
+  background: var(--bar-bg);
+  backdrop-filter: var(--bar-blur);
+  -webkit-backdrop-filter: var(--bar-blur);
+  border-bottom: 1px solid var(--bar-rule);
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 20px;
+  gap: var(--bar-gap);
+  padding: var(--bar-pad);
   min-width: 0;
   min-height: 0;
   z-index: 3;
@@ -379,10 +379,7 @@
   position: absolute;
   inset: auto 0 -1px 0;
   height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    var(--accent-soft) 50%,
-    transparent 100%);
+  background: var(--bar-underline);
   pointer-events: none;
 }
 
@@ -406,8 +403,10 @@
   overflow: hidden;
   background: color-mix(in oklab, var(--bg-elev), var(--bg) 28%);
   border: 1px solid color-mix(in oklab, var(--accent), var(--border) 48%);
+  /* The mark is round under every skin: it is the logo's geometry, not a
+     control radius. */
   border-radius: 50%;
-  box-shadow: 0 4px 14px -6px var(--accent-glow);
+  box-shadow: 0 4px 14px -6px var(--glow);
   transition: transform var(--transition-mid) var(--ease-out-bounce),
     box-shadow var(--transition-mid);
 }
@@ -419,13 +418,13 @@
 }
 
 .brand:hover .brand-mark {
-  transform: rotate(-6deg) scale(1.05);
-  box-shadow: 0 6px 18px -4px var(--accent-glow);
+  transform: var(--brand-hover-transform);
+  box-shadow: 0 6px 18px -4px var(--glow);
 }
 
 .brand-name {
   font-size: 15px;
-  background: var(--gradient-brand);
+  background: var(--brand-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -461,11 +460,11 @@
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  min-height: 30px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
   color: var(--fg-dim);
   font-size: 11px;
   line-height: 1;
@@ -492,11 +491,11 @@
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  min-height: 30px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
   color: var(--fg-dim);
   cursor: pointer;
   font: inherit;
@@ -528,7 +527,7 @@
 .topbar-card-bridge-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: currentColor;
   opacity: 0.72;
 }
@@ -546,6 +545,11 @@
   font-weight: 700;
 }
 
+/* A name inside a pill legend keeps its case: LOCAL eIM, never LOCAL EIM. */
+.topbar-card-bridge-name {
+  text-transform: none;
+}
+
 .topbar-card-bridge[data-state="configured"] {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
   background: var(--accent-soft);
@@ -560,7 +564,7 @@
 
 .topbar-card-bridge[data-state="running"] .topbar-card-bridge-dot {
   opacity: 1;
-  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 10px color-mix(in oklab, var(--ok) 38%, transparent);
+  box-shadow: 0 0 0 2px var(--ok-soft), 0 0 var(--glow-size) color-mix(in oklab, var(--ok) 38%, transparent);
 }
 
 .topbar-card-bridge[data-state="error"] {
@@ -592,7 +596,10 @@
 }
 
 /* Then a console's further pills, then the suite chip (the version is in
-   About) and, while a plugin pill shows, the crumb the page title repeats. */
+   About) and the crumb the page title repeats: beside HIL bridge and Remote
+   the bar always carries the Local eIM pill, which put Classic over the
+   crumbs at 1280 px. Last, that pill drops the word Local (its title still
+   names the service). */
 @media (max-width: 1400px) {
   .topbar-plugin-pill--more {
     display: none;
@@ -604,7 +611,13 @@
     display: none;
   }
 
-  .topbar:has(.topbar-plugin-pills:not([hidden])) > .breadcrumbs {
+  .topbar > .breadcrumbs {
+    display: none;
+  }
+}
+
+@media (max-width: 1240px) {
+  .topbar-local-eim-qualifier {
     display: none;
   }
 }
@@ -623,16 +636,16 @@
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
-  min-height: 34px;
-  padding: 3px 5px 3px 9px;
-  border: 1px solid var(--border);
+  min-height: var(--chrome-pill-h);
+  padding: 2px 3px 2px 9px;
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
+  background: var(--chrome-pill-bg);
 }
 
 .topbar-backend-option {
-  min-height: 28px;
-  padding: 4px 9px;
+  min-height: calc(var(--chrome-pill-h) - 6px);
+  padding: 3px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: transparent;
@@ -657,19 +670,20 @@
 }
 
 .topbar-backend-option.is-active {
-  background: var(--accent-soft);
-  border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
-  color: var(--fg);
+  background: var(--seg-on-bg);
+  border-color: var(--seg-on-border);
+  color: var(--seg-on-fg);
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: var(--chrome-pill-h);
   padding: 4px 10px;
   border-radius: var(--radius-pill);
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
+  background: var(--chrome-pill-bg);
+  border: 1px solid var(--chrome-pill-border);
   font-size: 11px;
   color: var(--fg-dim);
   text-transform: lowercase;
@@ -690,7 +704,7 @@
 .badge-api .dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--fg-dim);
   position: relative;
 }
@@ -752,9 +766,9 @@
   .sidebar {
     position: fixed;
     z-index: 6;
-    inset: 52px auto 28px 0;
+    inset: var(--bar-h) auto var(--status-h) 0;
     width: min(260px, 88vw);
-    box-shadow: var(--shadow-card-hover);
+    box-shadow: var(--overlay-shadow);
   }
 
   .app-shell[data-topbar-collapsed="true"] .sidebar {

@@ -69,13 +69,17 @@ eIM local shell.
 
 - Directly executable now via `EIM-PACKAGE-ISSUE`:
   - `add_initial_eim`
-  - `add_eim`
   - `get_eim_package`
   - `profile_download_trigger_request`
-  - `provide_eim_package_result`
   - `bound_profile_package`
   - `euicc_memory_reset`
-- Schema-first templates:
-  - `eim_package_request`
+- Queued with `PACKAGE-IMPORT <document> [eid]`, then signed and served by the operation queue:
+  - `eim_package_request` (its eUICC Package, IPA eUICC data and download trigger choices)
+  - `euicc_package_request_psmos`, `euicc_package_request_ecos`
   - `ipa_euicc_data_request` (answered by the IPA, not by ISD-R; the eIM composes and queues it)
-  - request/result branch families intended for linting, composition, and mock-registration mode unless `runtime.allow_model_only` is enabled
+  - `profile_download_trigger_request`
+- Explained only (`EIM-PACKAGE-EXPLAIN`), since results come from the card: the `*_result`
+  families
+- Retired: `add_eim` (addEim is an eCO, `QUEUE ADD-EIM`) and
+  `euicc_package_request_eim_configuration_data` (an EuiccPackage is a psmoList or an ecoList,
+  GSMA SGP.32 v1.3 §2.11.1.1)

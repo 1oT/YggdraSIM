@@ -173,8 +173,23 @@ shell with `RUN <file>`.
 
 ### Offline Tools
 
-Offline Tools opens on a context-aware decoder (`tool.decoder.context`). One
-paste box takes an APDU, a response, a bare TLV or a whole exchange trace;
+Offline Tools lists seven entries under the Offline Tools leaf of the
+navigation, shown while Offline Tools is open, and one entry fills the page
+at a time, with no card grid. Tools that share an input or a store are one
+entry with a tab per tool: Decoder (the Decoder and the ASN.1/TLV decode),
+TERMINAL PROFILE (Decode, Build), AddInitialEim (Build, Send, Configurations,
+Certificate store, Saved values) and SUCI keys (Use key file, Generate, Dump
+public key, under a line with the key file and the `suci-keytool` command in
+use; that command is set with `YGGDRASIM_SUCI_TOOL` under Environment >
+Configuration). eIM package
+lint, TUAK -- derive TOPc and the GSMA error-code reference stand alone, and
+any other tool (a plugin's, for example) follows by title. A tab keeps what
+was typed into it while another tab is open, and reads the saved names and
+values again when it is shown.
+
+The Offline Tools
+leaf opens the Decoder, a context-aware decoder (`tool.decoder.context`). One
+paste box takes an APDU, a response, a bare TLV, a status word or a whole exchange trace;
 each command is classified by its CLA/INS pair and the payload decoded
 against the specification that governs it -- TS 102 221 SELECT parameters and
 FCP templates, TS 102 223 / TS 101 220 proactive commands, envelopes and
@@ -182,11 +197,125 @@ terminal responses, GPC v2.3.1 GET STATUS entries, INSTALL, DELETE, STORE
 DATA and GET DATA, SCP03 INITIALIZE UPDATE, ES10 requests and responses named
 from their BF tag, and TS 31.102 AUTHENTICATE. A trace carries state: the
 selected file names READ BINARY content, and a `61 xx` word chains GET
-RESPONSE onto its command.
+RESPONSE onto its command. A ProfileInstallationResult, or the EUICCResponse
+inside it pasted on its own, is headed by its outcome: every PE ok, or the
+failing PE with its status and offset (TCA eUICC Profile Package V3.4.1
+section 8.11). The EUICCInfo2 of an IoT eUICC carries the SGP.32 check as a
+note (GSMA SGP.32 v1.3 §5.9.2). The Decoder stands in for the separate TLV
+parse, status-word lookup, EUICCInfo2 decode and SIMa response decode
+actions, which are gone.
+
+Several commands go in at once, one per row: paste them, or use **Open file**
+(or drop the file on the box) to read a script file into it. The file is read
+in the page and reaches the decoder as text, like a paste; the server is given
+no path. A script file is what the SCP03 shell's `RUN` and the SCP80 shell's
+`script` read: a row that starts with `#` is a comment, a row of hex is one
+command (the decoder and the SCP80 `script` also drop a `#` comment after the
+hex; `RUN` in the SCP03 shell does not take one). Each row is decoded as its
+own command with the trace state carried along, and its card shows the row it
+stands on when comments make the two counts part. The panel decodes the first
+1000 exchanges of an input and says how many it holds; Open file takes up to 1
+MiB. Rows may also be exchanges, a command with its answer on the row below or
+on the same row after ` | `, ` ; ` or a tab. A marker (`>`, `<`, `C:`, `R:`,
+`sw=XXXX`) says what a row is; without one, a row that is a well-formed
+command of a known instruction starts a new exchange, and any other row
+answers the command above it. The Command APDU context takes every row as a
+command and the Response context every row as an answer, whatever the row
+looks like. A row that holds no hex, such as a shell verb, is left unread and
+counted by row number in a note under the banner; it is never mined for hex
+and never quoted.
+
+Hex is the form the Decoder reads first, and apart from those rows nothing it
+already reads into a domain is read differently. Around it:
+
+- `AT+CSIM`, `AT+CRSM`, `AT+CGLA` and `AT+CRLA` lines with their answers
+  (3GPP TS 27.007 V19.6 §8.17, §8.18, §8.43, §8.44) are read as exchanges; a
+  restricted-access line names its file, so the content it returns is decoded
+  without a SELECT in the trace.
+- A paste that is not hex is tried as PEM (certificates are read, a key block
+  is left unread), a JSON body whose base64 members are RSP objects, base64,
+  an EID, ICCID or IMSI in digits with its check digits, an ATR and TLS
+  records. Four bytes that are a PC/SC return code are named, with a note on
+  what the same bytes say as an APDU.
+- A plain BER tree is replaced by the certificate or the profile package it
+  is; the Raw BER-TLV context keeps the tree.
+- The EF content context reads one file's content: the file identifier on the
+  first line (`ADF_USIM/6F07`), the content below.
+
+Inside a trace it reads further than the object's name: the SMS TPDU of an
+SMS-PP download or a SEND SHORT MESSAGE with the secured command or response
+packet in it (ETSI TS 102 225 V19.0.0 §5.1 and §5.2), the channel data of SEND
+DATA and RECEIVE DATA followed across the trace as one stream per channel (TLS
+records and handshake messages, a record cut across data blocks read once it
+is whole, DNS messages, HTTP request and status lines), the PUT KEY data field and the Key
+Information Template (GlobalPlatform Card Specification v2.4 §11.8.2.3 and
+§11.3.3.1), TERMINAL CAPABILITY with the LPAd and IPAd bits, the SUCI that GET
+IDENTITY returns (3GPP TS 31.102 V19.5 §7.5.2.1), and the SCP11 commands
+PERFORM SECURITY OPERATION, MUTUAL AUTHENTICATE and INTERNAL AUTHENTICATE
+(GlobalPlatform Amendment F v1.2 §6.4 to §6.6). An ES10 data field under
+secure messaging is shown as the protected block it is. Not read: CPLC (its
+layout is in none of the documents the decoder is built from), a certificate
+of PERFORM SECURITY OPERATION that is split over chained commands, and a CAP
+file.
 
 The same engine backs `python -m Tools.Asn1TlvDecode --context` and the
 `context_decode` MCP tool, so a decode reads the same from the GUI, a
-terminal and an agent.
+terminal and an agent. The ASN.1/TLV decode action (`tool.asn1_tlv.decode`)
+shows the same schema reading of a GSMA RSP object as its notation; the BER
+structure stays in its decoded TLV tree.
+
+The two tabs of the TERMINAL PROFILE entry decode and build a profile against
+ETSI TS 102 223 V18.3.0 clause 5.2 and the 3GPP bits of TS 31.111 V19.4.0 clause 5.2.
+TERMINAL PROFILE decode (`tool.tp.decode`) lists every bit and count field
+by byte, adds the TS 31.111 reading where the two specifications word a bit
+differently, and reports the bits the coding keeps 0; given a second profile
+it lists only the facilities that differ. TERMINAL PROFILE build
+(`tool.tp.build`) starts from the maximal profile every YggdraSIM shell sends,
+from an empty one or from a pasted one, and takes facilities by `byte.bit`
+(`5.5`), count fields by their bit range (`13.6-8=1`) or a facility by a
+piece of its name. The context decoder names the facilities of a TERMINAL
+PROFILE APDU from the same table, and
+`python -m yggdrasim_common.terminal_profile` decodes, compares, builds and
+lists in a terminal.
+
+AddInitialEim build (`tool.eim_builder.add_initial_eim`) composes the
+ES10b.AddInitialEimRequest of GSMA SGP.32 v1.3 §5.9.4. The eIM and TLS
+certificates come from the eIM certificate store
+(`tool.eim_builder.certificates`: import a PEM, DER, base64 or hex
+certificate, list, remove; a private key block in the source is dropped,
+never stored);
+eimId, eimFqdn and euiccCiPKId are typed, and every build saves them so
+the next form offers them as suggestions (`tool.eim_builder.saved_values`
+lists, edits or forgets one; a certificate renames in place and the saved
+values and configurations follow it). Every build or send also keeps its
+whole form, settings and ticks included, as the last build
+(`last_configuration.json` in the store): the build and send forms open with
+it, and a field changed before the store answers keeps what was typed. A
+configuration is a named copy of the whole form: tick Save with a
+Configuration name and a request that builds is stored under it; picking a
+configuration fills every field, so testing another set of values is a pick
+rather than a retype (`tool.eim_builder.configurations` lists, renames or
+deletes them). The result is
+the request, read back member by member before it is shown, and the APDU
+script of the run: TERMINAL CAPABILITY declaring the IPAd, MANAGE CHANNEL,
+SELECT ISD-R, eUICCMemoryReset with resetEimConfigData and
+resetImmediateEnableConfig (§5.9.5; AddInitialEim is refused while any eIM
+Configuration Data is stored), then AddInitialEim in 255-byte STORE DATA
+blocks. Copy takes the commands alone, one per line, for the SCP03 shell's
+`RUN`. AddInitialEim as one APDU shows the same request in a single STORE DATA,
+with an extended Lc past 255 bytes, for a reader and card that take one or a
+console that chains it into the blocks above. The store lives outside the checkout
+(`YGGDRASIM_EIM_BUILDER_STORE`, default `~/.yggdrasim/eim_builder/`) and
+is never tracked. The build touches no card. AddInitialEim send, the tab next
+to it (`tool.eim_builder.send`) and again in the SGP.32 IoT (IPA-d) tab of
+eSIM Management (`scp11_live.add_initial_eim`), takes the same form plus a
+reader and the confirm checkbox, builds the request before it touches the
+card, then runs the connect phase, the reset and the request and streams
+both decoded answers. In a terminal, the eSIM
+Live shell's `ADD-INITIAL-EIM` asks for the same members one at a time
+and holds no card transport while it waits; once confirmed it sends the
+reset and the request and decodes both answers. `EIM-CERT-STORE` manages
+the same store.
 
 ## Live APDU stream
 

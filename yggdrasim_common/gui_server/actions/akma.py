@@ -3,7 +3,7 @@
 
 """AKMA (TS 33.535) Command Center actions.
 
-Five Phase-1b actions that surface the simulator's AKMA support
+Five actions that surface the simulator's AKMA support
 through the GUI without requiring a real 5GC:
 
 * ``akma.derive_keys``           -- pure crypto wizard (KAUSF in,
@@ -18,6 +18,10 @@ through the GUI without requiring a real 5GC:
 All actions report ``mode: "stub"`` in their result so the operator
 can never accidentally confuse a local crypto walk-through with a
 live OpenCAPIF / AAnF round-trip.
+
+They sit in the YggdraCore module of the GUI, beside the stub AUSF:
+the AUSF registers the A-KID and KAKMA of every completed 5G AKA in the
+same AAnF stub these actions read and clear.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ from __future__ import annotations
 from typing import Any
 
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
+
+# The GUI module the AKMA actions share with the stub AUSF (actions/yggdracore.py).
+YGGDRACORE_SUBSYSTEM = "YggdraCore"
 
 
 # ----------------------------------------------------------------------
@@ -269,7 +276,7 @@ def _dispatch_aanf_clear(ctx: ActionContext) -> dict[str, Any]:
 
 DERIVE_KEYS_SPEC = ActionSpec(
     id="akma.derive_keys",
-    subsystem="AKMA",
+    subsystem=YGGDRACORE_SUBSYSTEM,
     title="Derive AKMA keys",
     description=(
         "Run TS 33.535 Annex A.2 / A.3 / A.4 against a KAUSF you "
@@ -349,7 +356,7 @@ DERIVE_KEYS_SPEC = ActionSpec(
 
 AANF_REGISTER_SPEC = ActionSpec(
     id="akma.aanf_register",
-    subsystem="AKMA",
+    subsystem=YGGDRACORE_SUBSYSTEM,
     title="AAnF \u2014 register A-KID (stub)",
     description=(
         "Push a (SUPI, A-KID, KAKMA) tuple into the in-process AAnF "
@@ -401,7 +408,7 @@ AANF_REGISTER_SPEC = ActionSpec(
 
 AANF_LIST_SPEC = ActionSpec(
     id="akma.aanf_list",
-    subsystem="AKMA",
+    subsystem=YGGDRACORE_SUBSYSTEM,
     title="AAnF \u2014 list registrations (stub)",
     description=(
         "Snapshot of every live (SUPI, A-KID, KAKMA) entry the AAnF "
@@ -417,7 +424,7 @@ AANF_LIST_SPEC = ActionSpec(
 
 AF_SESSION_ESTABLISH_SPEC = ActionSpec(
     id="akma.af_session_establish",
-    subsystem="AKMA",
+    subsystem=YGGDRACORE_SUBSYSTEM,
     title="AF \u2014 establish session via AAnF (stub)",
     description=(
         "Mirrors the TS 33.535 \u00a76.2 application-session bootstrap. "
@@ -462,7 +469,7 @@ AF_SESSION_ESTABLISH_SPEC = ActionSpec(
 
 AANF_CLEAR_SPEC = ActionSpec(
     id="akma.aanf_clear",
-    subsystem="AKMA",
+    subsystem=YGGDRACORE_SUBSYSTEM,
     title="AAnF \u2014 clear (stub)",
     description=(
         "Wipe every entry currently held by the AAnF stub. Use between "

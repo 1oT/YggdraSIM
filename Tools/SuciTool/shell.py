@@ -4,6 +4,7 @@
 from pathlib import Path
 from typing import Callable
 
+from yggdrasim_common.batch_outcome import BatchOutcome
 from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.quit_control import quit_all
 from yggdrasim_common.cli_theme import ThemedColorsMeta as _ThemedColorsMeta
@@ -58,16 +59,20 @@ class SuciToolShell:
 
             self._exec_line(raw_line)
 
-    def run_commands(self, cmd_line: str) -> None:
+    def run_commands(self, cmd_line: str) -> bool:
+        """Run a semicolon-separated batch; False when a command printed ``[-]`` / ``[!]`` or raised."""
         self._print_banner()
+        outcome = BatchOutcome()
         for raw_command in str(cmd_line or "").split(";"):
             command_text = raw_command.strip()
             if len(command_text) == 0:
                 continue
             try:
-                self._exec_line(command_text)
+                with outcome.command(command_text):
+                    self._exec_line(command_text)
             except SystemExit:
                 break
+        return outcome.ok
 
     def _print_banner(self) -> None:
         print(f"{ShellStyle.HEADER}=== SUCI Key Tool ==={ShellStyle.END}")

@@ -95,7 +95,13 @@ class KeyAttributeTests(unittest.TestCase):
         self.assertEqual(C.decode_key_version("71")["bucket"], "IN_RANGE")
         self.assertEqual(C.decode_key_version("00")["bucket"], "OUT_OF_RANGE")
         self.assertEqual(C.decode_key_version("FF")["bucket"], "OUT_OF_RANGE")
-        for byte in (0x01, 0x11, 0x30, 0x71, 0xFF):
+        # SGP.02 v4.2 section 2.2.5.1: SCP80 key sets '01' to '0F', SCP81 '40' to '4F'.
+        self.assertEqual(C.decode_key_version("0F")["reserved_for"], "SCP80")
+        for byte in (0x40, 0x47, 0x4F):
+            self.assertEqual(C.decode_key_version(f"{byte:02X}")["reserved_for"], "SCP81")
+        for byte in (0x3F, 0x50):
+            self.assertNotEqual(C.decode_key_version(f"{byte:02X}")["reserved_for"], "SCP81")
+        for byte in (0x01, 0x11, 0x30, 0x40, 0x71, 0xFF):
             with self.subTest(kvn=byte):
                 self.assertEqual(
                     C.decode_key_version(f"{byte:02X}")["reserved_for"],

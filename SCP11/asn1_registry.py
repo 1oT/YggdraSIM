@@ -58,32 +58,60 @@ class ServerSigned1(core.Sequence):
     ]
 
 
+# The RSP module is AUTOMATIC TAGS (SGP.22 v3.1 page 437): DeviceInfo and DeviceCapabilities members
+# carry the context tag of their position, IMPLICIT, and CtxParamsForCommonAuthentication writes its
+# [0] / [1] (page 449). Without them asn1crypto writes the universal tags ('0C', '30', '04'). The
+# pySim codec is the encoder of record; this model is its fallback and must give the same bytes
+# (tests/test_scp11_payloads.py). Members follow SGP.22 v3.1, page 441 (DeviceInfo) and page 442.
+class DeviceAdditionalFeatureSupport(core.Sequence):
+    _fields = [
+        ("naiSupport", VersionType, {"implicit": 0, "optional": True}),
+    ]
+
+
 class DeviceCapabilities(core.Sequence):
     _fields = [
-        ("gsmSupportedRelease", VersionType, {"optional": True}),
-        ("utranSupportedRelease", VersionType, {"optional": True}),
-        ("cdma2000onexSupportedRelease", VersionType, {"optional": True}),
-        ("cdma2000hrpdSupportedRelease", VersionType, {"optional": True}),
-        ("cdma2000ehrpdSupportedRelease", VersionType, {"optional": True}),
-        ("eutranEpcSupportedRelease", VersionType, {"optional": True}),
-        ("contactlessSupportedRelease", VersionType, {"optional": True}),
-        ("rspCrlSupportedVersion", VersionType, {"optional": True}),
+        ("gsmSupportedRelease", VersionType, {"implicit": 0, "optional": True}),
+        ("utranSupportedRelease", VersionType, {"implicit": 1, "optional": True}),
+        ("cdma2000onexSupportedRelease", VersionType, {"implicit": 2, "optional": True}),
+        ("cdma2000hrpdSupportedRelease", VersionType, {"implicit": 3, "optional": True}),
+        ("cdma2000ehrpdSupportedRelease", VersionType, {"implicit": 4, "optional": True}),
+        ("eutranEpcSupportedRelease", VersionType, {"implicit": 5, "optional": True}),
+        ("contactlessSupportedRelease", VersionType, {"implicit": 6, "optional": True}),
+        ("rspCrlSupportedVersion", VersionType, {"implicit": 7, "optional": True}),
+        ("nrEpcSupportedRelease", VersionType, {"implicit": 8, "optional": True}),
+        ("nr5gcSupportedRelease", VersionType, {"implicit": 9, "optional": True}),
+        ("eutran5gcSupportedRelease", VersionType, {"implicit": 10, "optional": True}),
+        ("lpaSvn", VersionType, {"implicit": 11, "optional": True}),
+        ("catSupportedClasses", core.BitString, {"implicit": 12, "optional": True}),
+        ("euiccFormFactorType", core.Integer, {"implicit": 13, "optional": True}),
+        ("deviceAdditionalFeatureSupport", DeviceAdditionalFeatureSupport, {"implicit": 14, "optional": True}),
     ]
+
+
+class PreferredLanguages(core.SequenceOf):
+    _child_spec = core.UTF8String
 
 
 class DeviceInfo(core.Sequence):
     _fields = [
-        ("tac", core.OctetString),
-        ("deviceCapabilities", DeviceCapabilities),
-        ("imei", core.OctetString, {"optional": True}),
+        ("tac", core.OctetString, {"implicit": 0}),
+        ("deviceCapabilities", DeviceCapabilities, {"implicit": 1}),
+        ("imei", core.OctetString, {"implicit": 2, "optional": True}),
+        ("preferredLanguages", PreferredLanguages, {"implicit": 3, "optional": True}),
+        ("deviceTestMode", core.Null, {"implicit": 4, "optional": True}),
+        ("lpaRspCapability", core.BitString, {"implicit": 5, "optional": True}),
     ]
 
 
 class CtxParamsForCommonAuthentication(core.Sequence):
+    # ctxParamsForCommonAuthentication [0] of CtxParams1 (SGP.22 v3.1 page 449). The members
+    # PayloadBuilder fills; operationType [2] (left at its DEFAULT, which DER omits), iccid,
+    # matchingIdSource [3] and vendorSpecificExtension [4] are not modelled here.
     class_, tag, method = 2, 0, 1
     _fields = [
-        ("matchingId", core.UTF8String, {"tag_type": "context", "tag": 0, "optional": True}),
-        ("deviceInfo", DeviceInfo, {"tag_type": "context", "tag": 1}),
+        ("matchingId", core.UTF8String, {"implicit": 0, "optional": True}),
+        ("deviceInfo", DeviceInfo, {"implicit": 1}),
     ]
 
 

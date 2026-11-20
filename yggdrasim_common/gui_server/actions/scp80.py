@@ -9,7 +9,7 @@ GUI can drive the same flow operators use via ``python -m SCP80``:
 * ``scp80.show_config`` -- report the active OTA profile (counter, header,
   SPI, KIc/KID, TAR, transport, concat_sms, tp_ud_max, reader protocol).
 * ``scp80.set_config`` -- set one key-value pair on the OTA profile and
-  persist it to ``ota_config.ini`` + the inventory store.
+  persist it to the inventory store.
 * ``scp80.iccid_bind`` -- bind / read the active ICCID inventory profile.
 * ``scp80.build_plan`` -- build the OTA packet plan without sending it.
   Returns the APDU list, reader-path APDU (single reassembled ENVELOPE),
@@ -34,11 +34,11 @@ the GUI's perspective, idempotent against the persisted config.
 from __future__ import annotations
 
 import contextlib
-import io
 import logging
 import re
 from typing import Any
 
+from ..live_trace import live_trace_sink
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -89,9 +89,13 @@ def _with_reader_override(reader_index: Any, config: Any) -> None:
 
 
 def _resolve_reader_index_from_name(reader_name: str) -> int:
+    from yggdrasim_common.card_backend import is_simulated_reader_name
+
     cleaned = str(reader_name or "").strip()
     if len(cleaned) == 0:
         return -1
+    if is_simulated_reader_name(cleaned):
+        return 0
     try:
         from smartcard.System import readers as list_pcsc_readers
     except ImportError:
@@ -187,7 +191,7 @@ def _dispatch_show_config(
 ) -> dict[str, Any]:
     config = _load_config()
     chosen_index = _apply_reader_choice(str(reader or ""), reader_index, config)
-    hidden = {"header", "cla", "sender"}
+    hidden = {"header", "cla"}
     lines: list[dict[str, str]] = []
     if len(config.active_iccid) > 0:
         lines.append({"key": "iccid", "value": str(config.active_iccid)})
@@ -309,7 +313,7 @@ def _dispatch_build_plan(
     verbose_b = bool(verbose)
     config = _load_config()
     builder = _build_packet_builder(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     plan_dict: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -352,9 +356,10 @@ def _dispatch_send(
     chosen_index = _apply_reader_choice(reader_name, reader_index, config)
     builder = _build_packet_builder(config)
     transport = _build_transport(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     plan_dict: dict[str, Any] = {}
     result: dict[str, Any] = {}
+    decoded_por = ""
     note_parts: list[str] = []
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
@@ -366,6 +371,11 @@ def _dispatch_send(
             result = transport.send_ota_sequence(
                 _plan_apdu_list_for_transport(plan, config),
                 verbose=verbose_b,
+            )
+        por_hex = str(result.get("por") or "")
+        if len(por_hex) > 0:
+            decoded_por = _try_decode_por(
+                str(plan.payload_hex or ""), por_hex, result.get("por_decoded")
             )
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
@@ -381,6 +391,7 @@ def _dispatch_send(
         "transport": str(config.get("transport")),
         "plan": plan_dict,
         "result": result,
+        "por_decoded": decoded_por,
         "note": "; ".join(note_parts) if note_parts else (
             "OTA packet delivered."
             if result.get("delivered", False)
@@ -405,7 +416,7 @@ def _dispatch_send_raw(
         raise ValueError("send_raw requires the reader transport; change it via scp80.set_config.")
     chosen_index = _apply_reader_choice(str(reader or ""), reader_index, config)
     transport = _build_transport(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     data_hex = ""
     sw = 0
     note_parts: list[str] = []
@@ -450,7 +461,7 @@ def _dispatch_reset_connection(
         }
     chosen_index = _apply_reader_choice(str(reader or ""), reader_index, config)
     transport = _build_transport(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
@@ -527,7 +538,7 @@ def _dispatch_ota_smart(
     chosen_index = _apply_reader_choice(str(reader or ""), reader_index, config)
     builder = _build_packet_builder(config)
     transport = _build_transport(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     plan_dict: dict[str, Any] = {}
     result: dict[str, Any] = {}
     decoded_por: str = ""
@@ -546,7 +557,7 @@ def _dispatch_ota_smart(
             )
         por_hex = str(result.get("por") or "")
         if len(por_hex) > 0:
-            decoded_por = _try_decode_por(apdu_s, por_hex)
+            decoded_por = _try_decode_por(apdu_s, por_hex, result.get("por_decoded"))
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
     finally:
@@ -571,8 +582,12 @@ def _dispatch_ota_smart(
     }
 
 
-def _try_decode_por(apdu_hex: str, por_hex: str) -> str:
-    """Best-effort POR decode using the SCP03 ``ContentDecoder``."""
+def _try_decode_por(apdu_hex: str, por_hex: str, por_info: Any = None) -> str:
+    """Best-effort POR decode: the last command's reply, then its data decoded.
+
+    *por_info* is the transport's ``por_decoded``; without it a PoR that came
+    by SEND SHORT MESSAGE is a raw proactive command and decodes to nothing.
+    """
     try:
         from SCP80.cli import SmartDecoder
     except Exception:  # noqa: BLE001 -- optional dep
@@ -580,9 +595,12 @@ def _try_decode_por(apdu_hex: str, por_hex: str) -> str:
     try:
         decoder = SmartDecoder()
         fid, le = decoder.sniff_context(apdu_hex)
-        sink = io.StringIO()
+        sink = live_trace_sink()
         with contextlib.redirect_stdout(sink):
-            decoder.try_decode(fid, le, por_hex)
+            reply = SmartDecoder.last_reply(por_info)
+            if reply is not None:
+                print("[<--] " + " ".join(part for part in reply if part))
+            decoder.try_decode(fid, le, por_hex, por_info)
         return _strip_ansi(sink.getvalue())
     except Exception:  # noqa: BLE001 -- purely decorative
         return ""
@@ -607,7 +625,7 @@ def _dispatch_run_script(
     chosen_index = _apply_reader_choice(str(reader or ""), reader_index, config)
     builder = _build_packet_builder(config)
     transport = _build_transport(config)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     results: list[dict[str, Any]] = []
     note_parts: list[str] = []
 
@@ -710,7 +728,7 @@ SET_CONFIG_SPEC = ActionSpec(
     description=(
         "Update one config key (cntr, spi, kic, kid, tar, key_enc, "
         "key_mac, transport, reader_idx, concat_sms, tp_ud_max, ...) and "
-        "persist it to ota_config.ini + the inventory store."
+        "persist it to the inventory store."
     ),
     inputs=(
         ActionField(
@@ -829,7 +847,7 @@ SEND_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_send,
     requires_card=True,
-    tags=("scp80", "send", "ota"),
+    tags=("destructive", "scp80", "send", "ota"),
 )
 
 
@@ -925,7 +943,7 @@ OTA_SMART_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_ota_smart,
     requires_card=True,
-    tags=("scp80", "ota", "decode"),
+    tags=("destructive", "scp80", "ota", "decode"),
 )
 
 
@@ -961,7 +979,7 @@ RUN_SCRIPT_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_run_script,
     requires_card=True,
-    tags=("scp80", "script", "batch"),
+    tags=("destructive", "scp80", "script", "batch"),
 )
 
 

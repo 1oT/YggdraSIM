@@ -47,6 +47,7 @@ from yggdrasim_common.command_log import (
 )
 from yggdrasim_common.progress import progress_session
 from yggdrasim_common.quit_control import quit_all
+from yggdrasim_common.batch_outcome import BatchOutcome
 
 try:
     import readline
@@ -86,6 +87,7 @@ HISTORY_SENSITIVE_INSTRUCTIONS = frozenset(CREDENTIAL_INSTRUCTIONS | {0xE2})
 CREDENTIAL_COMMANDS = frozenset(
     {
         "DERIVE-OPC",
+        "DERIVE-TOPC",
         "EXTRADITE",
         "INSTALL-EXTRADITION",
         "INSTALL-FOR-LOAD",
@@ -142,11 +144,6 @@ class ShellDispatcher:
             print(f"{Config.Colors.FAIL}[!] Critical: {e}{Config.Colors.ENDC}")
 
         self._initialize_controllers()
-        # Plugins add verbs the same way they do on the SCP11 shells; loading
-        # stays behind YGGDRASIM_ALLOW_PLUGINS.
-        from yggdrasim_common.plugin_runtime import extend_target_with_plugins
-
-        extend_target_with_plugins(self)
         self.prompt_str = ""
         self._prompt_context_label = ""
         self._update_prompt_state()
@@ -168,6 +165,12 @@ class ShellDispatcher:
         self.commands = {}
         for k, v in self.command_map.items():
             self.commands[k] = v[0]
+        # Plugins add verbs the same way they do on the SCP11 shells; loading
+        # stays behind YGGDRASIM_ALLOW_PLUGINS. The hook runs once the command
+        # table exists, since a plugin verb is an entry in ``self.commands``.
+        from yggdrasim_common.plugin_runtime import extend_target_with_plugins
+
+        extend_target_with_plugins(self)
 
         self.hidden_commands = {"DEBUG", "VERBOSE"}
         self.visible_commands = []
@@ -1392,7 +1395,7 @@ class ShellDispatcher:
         decoded_rules = AdvancedDecoders.decode_ara_rulesets(data.hex().upper())
         if len(decoded_rules) == 0:
             print(
-                f"{Config.Colors.WARNING}[!] No ARA rulesets returned.{Config.Colors.ENDC}"
+                f"{Config.Colors.CYAN}[*] No ARA rulesets returned.{Config.Colors.ENDC}"
             )
             return
 
@@ -1600,7 +1603,7 @@ class ShellDispatcher:
                 is_ok = True
             if not is_ok:
                 print(
-                    f"{Config.Colors.WARNING}[!] {label} SW={status}{Config.Colors.ENDC}"
+                    f"{Config.Colors.WARNING}[!] Warning: {label} SW={status}{Config.Colors.ENDC}"
                 )
 
         report["keys"] = self.gp_ctrl.get_keys_info_data()
@@ -2106,7 +2109,7 @@ class ShellDispatcher:
                 is_valid = True
             if not is_valid:
                 print(
-                    f"{Config.Colors.WARNING}[!] Unknown spec '{raw}'. Using SGP.32.{Config.Colors.ENDC}"
+                    f"{Config.Colors.WARNING}[!] Warning: Unknown spec '{raw}'. Using SGP.32.{Config.Colors.ENDC}"
                 )
                 spec = "SGP.32"
 
@@ -2205,6 +2208,28 @@ class ShellDispatcher:
             print(f"{Config.Colors.GREEN}OPc: {opc}{Config.Colors.ENDC}")
         except Exception as e:
             print(f"{Config.Colors.FAIL}[!] {e}{Config.Colors.ENDC}")
+
+    def _handle_derive_topc(self, arg: str):
+        """Derive TOPc from TOP and K (3GPP TS 35.231 v19 §6.1). Usage: DERIVE-TOPC <TOP_hex> <K_hex> [iterations]."""
+        parts = arg.split()
+        if len(parts) not in (2, 3):
+            print(
+                f"{Config.Colors.FAIL}[!] Usage: DERIVE-TOPC <TOP_hex> <K_hex> [Keccak iterations] "
+                f"(TOP 64 hex chars, K 32 or 64){Config.Colors.ENDC}"
+            )
+            return
+        from SIMCARD.tuak import derive_topc_from_text
+
+        try:
+            result = derive_topc_from_text(parts[0], parts[1], parts[2] if len(parts) == 3 else None)
+        except ValueError as error:
+            print(f"{Config.Colors.FAIL}[!] {error}{Config.Colors.ENDC}")
+            return
+        print(f"{Config.Colors.GREEN}TOPc: {result['topc_hex']}{Config.Colors.ENDC}")
+        print(
+            f"{Config.Colors.CYAN}[*] K of {result['key_length_bits']} bits, "
+            f"{result['number_of_keccak']} Keccak iteration(s).{Config.Colors.ENDC}"
+        )
 
     def _handle_cert_info(self):
         """Decode ECASD/card certificates (subject, issuer, validity)."""
@@ -2416,34 +2441,20 @@ class ShellDispatcher:
         self._flush_pending_startup_stderr()
         commands = [c.strip() for c in cmd_line.split(";") if c.strip()]
         results = []
+        # A failed command (a [-] or [!] line, an exception) makes the batch
+        # fail; run_standalone turns that into exit code 1.
+        outcome = BatchOutcome()
         for line in commands:
             if line.startswith("#"):
                 continue
-            if yaml_out:
-                old_stdout = sys.stdout
-                sys.stdout = mystdout = io.StringIO()
-                try:
-                    self._exec_line(line)
-                except Exception as e:
-                    print(f"Error: {e}")
-                finally:
-                    sys.stdout = old_stdout
-                captured = mystdout.getvalue()
-                ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-                clean = ansi_escape.sub("", captured).strip()
-                sensitive = self._history_line_is_sensitive(line)
-                report_output = clean
-                if sensitive:
-                    report_output = "[sensitive command output redacted]"
-                results.append(
-                    {
-                        "command": self._redact_command_line_for_display(line),
-                        "output": report_output,
-                    }
-                )
-                print(captured, end="")
-            else:
-                self._exec_line(line)
+            try:
+                self._run_batch_command(outcome, line, yaml_out, results)
+            except SystemExit as stop:
+                # EXIT and Q end the shell with SystemExit(0): the batch ends
+                # there, and its verdict and the YAML report still follow.
+                if stop.code not in (None, 0):
+                    raise
+                break
         self._close_trace("batch ended")
         if yaml_out and results:
             try:
@@ -2466,6 +2477,42 @@ class ShellDispatcher:
                 print(
                     f"{Config.Colors.FAIL}[!] Failed to write YAML: {e}{Config.Colors.ENDC}"
                 )
+        return outcome.ok
+
+    def _run_batch_command(
+        self,
+        outcome: BatchOutcome,
+        line: str,
+        yaml_out: Optional[str],
+        results: list,
+    ) -> None:
+        """Run one batch command under the batch verdict; with ``yaml_out`` its output is kept for the report."""
+        with outcome.command(line):
+            if yaml_out:
+                old_stdout = sys.stdout
+                sys.stdout = mystdout = io.StringIO()
+                try:
+                    self._exec_line(line)
+                except Exception as e:
+                    print(f"[!] Error: {e}")
+                finally:
+                    sys.stdout = old_stdout
+                captured = mystdout.getvalue()
+                ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+                clean = ansi_escape.sub("", captured).strip()
+                sensitive = self._history_line_is_sensitive(line)
+                report_output = clean
+                if sensitive:
+                    report_output = "[sensitive command output redacted]"
+                results.append(
+                    {
+                        "command": self._redact_command_line_for_display(line),
+                        "output": report_output,
+                    }
+                )
+                print(captured, end="")
+            else:
+                self._exec_line(line)
 
     def run_script(self, arg_line: str):
         # Scripted runs share the buffer used by the interactive shell;
@@ -2865,7 +2912,7 @@ class ShellDispatcher:
 
                 if is_invalid:
                     print(
-                        f"{Config.Colors.FAIL}Unknown command: {cmd}{Config.Colors.ENDC}"
+                        f"{Config.Colors.FAIL}[!] Unknown command: {cmd}{Config.Colors.ENDC}"
                     )
         finally:
             self._update_prompt_state()
@@ -3599,7 +3646,7 @@ class ShellDispatcher:
 
     def _set_defaults(self):
         print(
-            f"{Config.Colors.WARNING}[!] Resetting configuration to defaults...{Config.Colors.ENDC}"
+            f"{Config.Colors.WARNING}[*] Resetting configuration to defaults...{Config.Colors.ENDC}"
         )
         self.config["KEYS"] = Config.DEFAULT_KEYS.copy()
 
@@ -3761,7 +3808,7 @@ class ShellDispatcher:
 
         if is_inactive:
             print(
-                f"{Config.Colors.WARNING}[!] No active secure session.{Config.Colors.ENDC}"
+                f"{Config.Colors.CYAN}[*] No active secure session.{Config.Colors.ENDC}"
             )
         if is_active:
             self._set_prompt_context_from_gp_target()
@@ -3810,25 +3857,12 @@ class ShellDispatcher:
             print(
                 f"{Config.Colors.CYAN}[*] Starting SCP80 Module...{Config.Colors.ENDC}"
             )
-            import sys
-            import os
-            import importlib
+            # Imported by package name. SCP80's own directory on ``sys.path``
+            # would shadow the top-level ``main`` package, and its argument
+            # parser would read this shell's command line.
+            from SCP80.cli import OtaShell
 
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            scp80_root = os.path.abspath(os.path.join(current_dir, "../../SCP80"))
-
-            is_missing = False
-            if scp80_root not in sys.path:
-                is_missing = True
-
-            if is_missing:
-                sys.path.insert(0, scp80_root)
-
-            import main as scp80_main
-
-            importlib.reload(scp80_main)
-
-            scp80_main.run_standalone()
+            OtaShell().run()
 
         except SystemExit:
             pass
@@ -3936,7 +3970,7 @@ class ShellDispatcher:
             return
         if self.transport.session and self.transport.session.is_authenticated:
             print(
-                f"{Config.Colors.WARNING}[!] The STK bootstrap resets the card, which closes "
+                f"{Config.Colors.WARNING}[!] Warning: The STK bootstrap resets the card, which closes "
                 f"the active secure session; authenticate again afterwards and it stays "
                 f"open alongside STK.{Config.Colors.ENDC}"
             )
@@ -4008,7 +4042,7 @@ class ShellDispatcher:
                 was_authenticated = True
         if was_authenticated:
             print(
-                f"{Config.Colors.WARNING}[!] Entering STK mode will close the active secure session "
+                f"{Config.Colors.WARNING}[!] Warning: Entering STK mode will close the active secure session "
                 f"and use plain APDUs.{Config.Colors.ENDC}"
             )
 

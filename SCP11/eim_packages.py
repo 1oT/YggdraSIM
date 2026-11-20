@@ -55,6 +55,8 @@ TAG_ECO_LIST = bytes([0xA1])
 # Eco alternatives that rewrite the eUICC's eIM configuration list: addEim [8],
 # deleteEim [9], updateEim [10]. listEim [11] only reads the list back.
 ECO_CONFIGURATION_MUTATING_TAGS = (bytes([0xA8]), bytes([0xA9]), bytes([0xAA]))
+# Psmo enable [3] and disable [4] (SGP.32 v1.3 section 2.11.1.1).
+PSMO_ENABLED_PROFILE_TAGS = (bytes([0xA3]), bytes([0xA4]))
 
 # Package type names for dispatch
 TYPE_BOUND_PROFILE_PACKAGE = "boundProfilePackage"
@@ -411,7 +413,11 @@ def _extract_outer_eim_id(raw: bytes) -> str:
 
 
 def _extract_eim_transaction_id(value: bytes) -> bytes:
-    """Extract eimTransactionId [2] (wire tag 0x82) from a BF54 SEQUENCE value."""
+    """Extract eimTransactionId [2] (wire tag 0x82) from the members of a SEQUENCE.
+
+    ProfileDownloadTriggerRequest (SGP.32 v1.3 section 2.11.1.3) and
+    EuiccPackageSigned (section 2.11.1.1) both carry it there.
+    """
     offset = 0
     while offset < len(value):
         try:
@@ -487,6 +493,38 @@ def eco_operation_tags(raw: bytes) -> Tuple[bytes, ...]:
         tags.append(tag_bytes)
         offset = next_offset
     return tuple(tags)
+
+
+def psmo_operation_tags(raw: bytes) -> Tuple[bytes, ...]:
+    """Return the Psmo CHOICE tags a psmoList package carries, in wire order."""
+    try:
+        choice_tag, choice_value = _euicc_package_list_tlv(raw)
+    except Exception:
+        return ()
+    if choice_tag != TAG_PSMO_LIST:
+        return ()
+    tags: list[bytes] = []
+    offset = 0
+    while offset < len(choice_value):
+        try:
+            tag_bytes, _, _, next_offset = _read_tlv(choice_value, offset)
+        except ValueError:
+            break
+        tags.append(tag_bytes)
+        offset = next_offset
+    return tuple(tags)
+
+
+def package_changes_enabled_profile(raw: bytes) -> bool:
+    """True when the package carries a PSMO enable or disable.
+
+    Those two mark a Profile and are completed after the REFRESH, or the reset
+    that stands in for it (SGP.32 v1.3 section 3.3.1 steps 8a and 8b).
+    """
+    for tag_bytes in psmo_operation_tags(raw):
+        if tag_bytes in PSMO_ENABLED_PROFILE_TAGS:
+            return True
+    return False
 
 
 def package_changes_eim_configuration(raw: bytes) -> bool:
@@ -575,6 +613,7 @@ def _parse_eim_package_validated(raw: bytes) -> ParsedEimPackage:
             root_tag=root_tag,
             card_request=card_request,
             eim_id=eim_id,
+            eim_transaction_id=_extract_eim_transaction_id(_extract_outer_sequence_value(root_value)),
         )
 
     if root_tag in (TAG_EUICC_CONFIGURATION_A3, TAG_EUICC_CONFIGURATION_BF52):
@@ -591,6 +630,8 @@ def _parse_eim_package_validated(raw: bytes) -> ParsedEimPackage:
             euicc_package_result_seq_number=metadata.euicc_package_result_seq_number,
             eim_id=_extract_outer_eim_id(raw),
             euicc_ci_pkid_to_be_used=metadata.euicc_ci_pkid_to_be_used,
+            # IpaEuiccDataRequest carries its eimTransactionId at [3] (SGP.32 v1.3 section 2.11.1.2).
+            eim_transaction_id=metadata.request_token,
         )
     if root_tag in (TAG_PROFILE_DOWNLOAD_TRIGGER_A4, TAG_PROFILE_DOWNLOAD_TRIGGER_BF54):
         download_choice, activation_code, smds_address = _decode_profile_download_data(root_value)

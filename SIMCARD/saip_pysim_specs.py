@@ -30,6 +30,7 @@ literal ``_FILE_SPECS`` table alone.
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,17 +83,23 @@ class FileTemplateSnapshot:
 
 
 _REGISTRY_CACHE: dict[str, tuple[FileTemplateSnapshot, ...]] | None = None
+# Whether the imported pySim carries the pinned fork's fixes, decided once.
+_PINNED_FIXES_OK: bool | None = None
+_LOGGER = logging.getLogger(__name__)
 
 
 def _import_pysim_templates() -> Any:
     """Return the pySim ``templates`` module, or ``None`` if absent."""
     try:
-        import pySim.esim.saip.templates as templates_module  # noqa: WPS433
+        from yggdrasim_common.pysim_saip_import import import_saip_templates  # noqa: WPS433
+
+        templates_module = import_saip_templates()
     except ImportError:
         return None
-    except Exception:
+    except Exception as error:
         # pySim's import side-effects can raise on malformed installs;
-        # treat any failure the same as "not available".
+        # treat any failure the same as "not available", and say so.
+        _LOGGER.warning("pySim SAIP templates unavailable: %s", error)
         return None
     return templates_module
 
@@ -160,10 +167,10 @@ def _build_registry() -> dict[str, tuple[FileTemplateSnapshot, ...]]:
     templates_module = _import_pysim_templates()
     if templates_module is None:
         return {}
-    # The compat installs register templates upstream lacks (the IoT Minimal
-    # Profile files among them); enumerate after them, or the snapshot
-    # depends on which surface decoded a package before the cache filled.
-    _ensure_pysim_saip_compat()
+    # A pySim without the pinned fixes lists wrong FIDs and lacks the IoT
+    # Minimal Profile templates; the engine then runs without pySim's view.
+    if not _ensure_pysim_saip_compat():
+        return {}
     registry_cls = getattr(templates_module, "ProfileTemplateRegistry", None)
     if registry_cls is None:
         return {}
@@ -195,8 +202,9 @@ def pysim_file_template_registry() -> dict[str, tuple[FileTemplateSnapshot, ...]
 
 def reset_registry_cache() -> None:
     """Drop the cached registry; intended for tests."""
-    global _REGISTRY_CACHE
+    global _REGISTRY_CACHE, _PINNED_FIXES_OK
     _REGISTRY_CACHE = None
+    _PINNED_FIXES_OK = None
 
 
 def _select_snapshot(
@@ -335,7 +343,7 @@ class FcpAttributes:
 def _decode_link_path_from_descriptor(descriptor: Any) -> tuple[str, ...]:
     """Extract the SAIP ``Fcp.linkPath`` PRIVATE 7 octet string.
 
-    See SAIP / TCA Profile Interoperability v2.3.1 §8.3.5: the OCTET
+    See TCA SAIP v3.4.1 §8.3.2 (``Fcp`` type): the OCTET
     STRING is a concatenation of 2-byte FIDs from the MF down to the
     target. Empty payload denotes "turn the templated link file into
     an independent file"; malformed (odd length) payloads are dropped
@@ -357,61 +365,47 @@ def _decode_link_path_from_descriptor(descriptor: Any) -> tuple[str, ...]:
     )
 
 
-def _ensure_pysim_saip_compat() -> None:
-    """Apply the SAIP compatibility fixes this module's callers depend on.
+def _pysim_carries_pinned_fixes() -> bool:
+    """Whether the imported pySim has the fixes of the pinned fork, decided once.
 
-    ``File.file_content_from_tuples`` linearises through an ``io.BytesIO``,
-    which grows with NUL, so a gap left by ``fillFileOffset`` arrives as '00'
-    where the card holds the erased state -- TCA SAIP §8.3.5 makes the offset a
-    pointer move that writes nothing and §9.10 pads the default EF-ARR image
-    with 'FF...FF'. The GUI and TUI surfaces install the fix through
-    ``ensure_workspace_pysim_on_path``; the card engine reaches pySim directly,
-    so it installs it here. Evidence is in
-    ``upstream_patches/osmocom-pysim-saip-fill-file-offset-erased-state/``.
-    ``install_extra_profile_elements`` adds the PE-IoT / PE-OPT-IoT,
-    cdmaParameter and nonStandard classes upstream lacks
-    (``upstream_patches/osmocom-pysim-saip-extra-profile-elements/``).
-    ``install_proprietary_efinfo_without_descriptor`` reads a template file's
-    fill or repeat pattern when its Fcp names no ``fileDescriptor``
-    (``upstream_patches/osmocom-pysim-saip-proprietary-efinfo-without-descriptor/``).
-    ``install_gfm_mf_creation`` lets a PE-GenericFileManagement create the MF
-    and registers the IoT Minimal Profile templates
-    (``upstream_patches/osmocom-pysim-saip-gfm-mf-creation/``); it runs here,
-    not only when a GFM package is decoded, so the file-template registry
-    this module caches holds the same files whichever surface fills it first.
-    ``install_phonebook_pbc_template`` names the DF.PHONEBOOK template rows
-    EF.PBC (``upstream_patches/osmocom-pysim-saip-implicit-template-ppath/``,
-    bug 2) here for the same reason: the JSON codec installs it as well, and
-    without it a registry built before the codec ran has no ``ef-pbc`` on
-    stock pySim.
-    ``install_optional_security_domain_key_list`` lets a PE-SecurityDomain
-    omit its optional ``keyList``
-    (``upstream_patches/osmocom-pysim-saip-sd-optional-key-list/``), and
-    ``install_object_identifier_arc2_decoding`` decodes an object identifier
-    under arc 2 with a second arc above 39
-    (``upstream_patches/eerimoq-asn1tools-oid-arc2/``).
+    YggdraSIM no longer works around the ``upstream_patches/osmocom-pysim-*``
+    defects, so a pySim without the fixes describes profiles wrongly. This
+    module is imported when ``SIMCARD`` is, so raising here would stop the
+    simulator, not just SAIP: the card engine treats such a pySim as absent
+    instead, with one warning, and the SAIP tools refuse it with the same
+    message (``ensure_workspace_pysim_on_path``).
     """
-    from yggdrasim_common.asn1tools_compat import install_object_identifier_arc2_decoding
-    from Tools.ProfilePackage.saip_pysim_compat import (
-        install_erased_state_file_fill,
-        install_extra_profile_elements,
-        install_gfm_mf_creation,
-        install_optional_security_domain_key_list,
-        install_phonebook_pbc_template,
-        install_proprietary_efinfo_without_descriptor,
-        install_record_aware_fill_pattern,
-        install_record_aware_template_default,
-    )
+    global _PINNED_FIXES_OK
+    if _PINNED_FIXES_OK is None:
+        from Tools.ProfilePackage.saip_pysim_compat import (
+            PinnedPySimFixesMissing,
+            require_pinned_pysim_fixes,
+        )
 
-    install_object_identifier_arc2_decoding()
-    install_optional_security_domain_key_list()
-    install_erased_state_file_fill()
-    install_record_aware_fill_pattern()
-    install_record_aware_template_default()
-    install_proprietary_efinfo_without_descriptor()
-    install_extra_profile_elements()
-    install_gfm_mf_creation()
-    install_phonebook_pbc_template()
+        try:
+            require_pinned_pysim_fixes()
+        except PinnedPySimFixesMissing as error:
+            _PINNED_FIXES_OK = False
+            _LOGGER.warning("SIMCARD: pySim skipped: %s", error)
+            try:
+                sys.stderr.write(f"[SIMCARD] WARNING: pySim skipped: {error}\n")
+                sys.stderr.flush()
+            except OSError:
+                pass
+        else:
+            _PINNED_FIXES_OK = True
+    return _PINNED_FIXES_OK
+
+
+def _ensure_pysim_saip_compat() -> bool:
+    """Whether this module may use pySim.
+
+    The GUI and TUI surfaces go through ``ensure_workspace_pysim_on_path``;
+    the card engine reaches pySim directly, so it decides here: ``False`` for a
+    pySim without the pinned fixes (:func:`_pysim_carries_pinned_fixes`),
+    otherwise ``True``.
+    """
+    return _pysim_carries_pinned_fixes()
 
 
 def _import_pysim_file_class() -> Any:
@@ -421,7 +415,8 @@ def _import_pysim_file_class() -> Any:
         return None
     except Exception:
         return None
-    _ensure_pysim_saip_compat()
+    if not _ensure_pysim_saip_compat():
+        return None
     return getattr(saip_module, "File", None)
 
 
@@ -525,8 +520,9 @@ def _import_pysim_saip_module() -> Any:
     except Exception:
         return None
     # ``FsProfileElement._post_decode`` builds File objects from the decoded
-    # tuples, so the wrappers this returns need the same fix as the walker.
-    _ensure_pysim_saip_compat()
+    # tuples, so the wrappers this returns need the same pySim as the walker.
+    if not _ensure_pysim_saip_compat():
+        return None
     return saip_module
 
 
@@ -690,9 +686,9 @@ def _gfm_collect_link_path(file_elements: Any) -> tuple[str, ...]:
     """Pull the PRIVATE 7 ``linkPath`` extension from a GFM tuple list.
 
     pySim's ``File.from_fileDescriptor`` does not yet recognise the
-    SAIP §8.3.5 ``linkPath`` extension; we mirror the FCP-decoder's logic
-    against the same descriptor blob so GFM-routed EFs still surface
-    their explicit link target.
+    ``Fcp.linkPath`` member (TCA SAIP v3.4.1 §8.3.2); we mirror the
+    FCP-decoder's logic against the same descriptor blob so GFM-routed
+    EFs still surface their explicit link target.
     """
     if isinstance(file_elements, list) is False:
         return ()
@@ -792,7 +788,8 @@ def pysim_gfm_walk(decoded: dict[str, Any]) -> tuple[GfmEntry, ...]:
     Replicates pySim's ``ProfileElementGFM.pe2files`` walk while
     keeping iteration in caller-controlled scope:
 
-      * ``filePath b''`` rewinds to MF (TS 102 222 §6.5.4).
+      * ``filePath b''`` rewinds to MF (SAIP v3.4.1 §8.3.5 Generic
+        File management PE: a zero-length filePath selects the MF).
       * ``filePath 7F20...`` resets the parent chain to MF + decoded
         FIDs.
       * Each ``createFCP`` flushes the previous file (if any) and

@@ -86,14 +86,7 @@ def _image(transaction: list[tuple[str, Any]], cmd_index: int = 0) -> Any:
 class GfmFileImageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from Tools.ProfilePackage.saip_pysim_compat import (
-            install_erased_state_file_fill,
-            install_record_aware_fill_pattern,
-        )
-
         saip_module._ensure_pysim_importable()
-        install_erased_state_file_fill()
-        install_record_aware_fill_pattern()
 
     def test_fill_pattern_opens_every_record(self) -> None:
         # Four 5-byte records, fillPattern '00FF'.

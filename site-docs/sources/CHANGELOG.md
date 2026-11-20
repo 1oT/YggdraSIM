@@ -17,6 +17,1179 @@ SAIP wrappers) may change without notice between minor releases.
 
 ## [Unreleased]
 
+## [2.3.0] -- 2026-11-20
+
+### Added
+
+- eSIM Management IPA: a profile download trigger with contactSmds starts an
+  Event Retrieval where it was refused (GSMA SGP.32 v1.3 §2.11.1.3, §3.9.2).
+  The SM-DS is the one the trigger names, else the eUICC's Root SM-DS
+  (rootDsAddress); with neither the trigger is answered invalidPackageFormat.
+  The IPA asks the SM-DS over ES11 in the LPA's role (GSMA SGP.22 v3.1
+  §3.6.2) and downloads each Event Record in the order received, with the
+  EventID as Matching ID, until one installs no Profile. The eIM gets one
+  ProfileDownloadTriggerResult: the last download tried, or
+  profileDownloadError when the SM-DS held no record for the eUICC.
+  `YGGDRASIM_IPA_INDIRECT_DOWNLOAD` routes the retrieval through the eIM
+  (§3.9.2.2). Not followed: a record that leads to another SM-DS, further
+  Root SM-DS addresses and signed Event Records. With the Local eIM, `QUEUE
+  DOWNLOAD <eid> contact_smds=on` with or without `indirect=on`, then
+  `EIM-DOWNLOAD` in the eSIM Management shell (Run the download (IPAd) on the
+  Local eIM page), runs end to end against the local SM-DS.
+  A download asked for directly (`FLOW`, `DOWNLOAD-PROFILE`, `--flow`) whose
+  server turns out to be an SM-DS fails with the Event Records named, where
+  it reported an incomplete AuthenticateClient answer.
+- Local eIM: the service runs an SM-DS of its own beside the SM-DP+. `SMDS
+  REGISTER <eid> [<eventId>]` puts an Event Record on file for an eUICC
+  (ES12.RegisterEvent, GSMA SGP.22 v3.1 §5.9.1), and an Event Retrieval finds
+  it: ES11.InitiateAuthentication and AuthenticateClient (§5.8) are answered
+  on the ES9+ paths of the JSON binding and in the same 'A2' wrapper of the
+  ASN.1 binding (§6.5.2 Table 57, §6.6.2.6), a request being the SM-DS's when
+  it names the SM-DS address or a transactionId the SM-DS handed out. The
+  SM-DS verifies the eUICC certificate chain, the EID against the EUM's EINs,
+  euiccSignature1 and the serverChallenge before it answers the records of
+  that EID. A download queued with `contact_smds=on indirect=on` reaches it in
+  process (GSMA SGP.32 v1.3 §3.9.2.2), another YggdraSIM process by its name,
+  and a card's own IPAe over a new card-facing listener that serves CERT.DS.TLS
+  (`SERVE start smds_tls_port=`, four ports above the service port by
+  default). The local SM-DP+ deletes a record when the download it led to
+  ends (§3.1.3.3 step 10). `SMDS LIST`, `DELETE` and `ADDRESS`, the Command
+  Center actions Local SM-DS, Register SM-DS event, Delete SM-DS event and
+  SM-DS address, and GUIDE section 6.4.6 cover the rest. The certificates are
+  the SGP.26 test ones, so only an eUICC that trusts the SGP.26 test eSIM CA
+  accepts it; signed Event Records, Event Checking, the Push Service, ES12
+  and ES15 over HTTP and cascade to a root SM-DS are not built.
+- Local eIM: Notifications go on to their Notification Receivers. What an IPA
+  hands over with an eUICC Package Result or with ESipa.HandleNotification,
+  or lists in an IPA data response, is acknowledged, kept on the eUICC's
+  record and sent to the SM-DP+ its metadata names with
+  ES9+'.HandleNotification (GSMA SGP.32 v1.3 §3.7, §5.7.4, §5.14.6,
+  §5.14.7): after `DELIVER` and `INJECT`, by the running service after its
+  answer, and again on a schedule for a receiver that did not answer. The
+  eIM holds none back: one it cannot deliver (refused, out of attempts, or
+  not sendable as it stands) ends as failed with the reason, and one waits
+  only for an eUICC or EUM certificate its record lacks. The
+  ProfileInstallationResult of an indirect download joins the list when its
+  SM-DP+ call fails. `NOTIFICATIONS [<eid>]` lists them, and
+  `NOTIFICATIONS SEND [<eid>] [<seqNumber> ...]` sends the pending ones or
+  the ones named. A Notification is sent only when its eUICC signature
+  verifies under the eUICC certificate on its record and its address is a
+  host name; a name reserved for tests is never contacted. The Local eIM
+  page lists them per eUICC, below the event log, with Send; the GUI
+  actions are Notifications and Send Notifications. A failed one, and one
+  kept by an earlier version, goes again only when named.
+- Local eIM: an ES9+ session a card's IPAe opens on the eIM's own address
+  for another SM-DP+, naming it in InitiateAuthentication, is passed through
+  to that SM-DP+ over HTTPS in the ASN.1 binding when a download trigger the
+  eIM served and still has open names the address; the later steps follow
+  their transactionId and each step is noted on the trigger's timeline. Any
+  other address is refused with invalidDpAddress.
+- Local eIM: `LIST-PROFILES` asks for every member of the ProfileInfo
+  (Profile Policy Rules, Profile Owner, Notification configuration, Fallback
+  Attribute among them) instead of the eUICC's default set (`tags=default`
+  sends the bare request). The members are those of the SGP.32 version the
+  eUICC declares in EUICCInfo2: §4.4 of v1.3 adds iotSpecificProfileInfo to
+  the members of v1.2, and a card of v1.2 answered the list of v1.3 with
+  incorrectInputValues. A list the eIM chose and the eUICC refused that
+  way is asked again without a tagList, and the eUICC's record keeps the
+  refusal, so the next list goes without one at once; `tags=all` sends the
+  full list again. `IPA-DATA tags=all` asks for every data item of SGP.32 v1.3
+  §2.11.1.2, the Notifications and stored eUICC Package Results included.
+  `OP <id> --decode` and a "Decoder reading" fold in the GUI's operation view
+  show the Decoder's reading of a package and a result, every data object by
+  name and value.
+- GUI: the eIM section of a Local eIM eUICC page has "Add an eIM (addEim)",
+  which opens New operation on Add eIM; before, only "Link this eIM"
+  (AddInitialEim after a reset) was offered there.
+- GUI: a Local eIM pill in the top bar, beside HIL bridge and Remote, shows
+  whether the service runs and starts it with the defaults or stops it with a
+  click.
+- Local eIM: `ADD-EIM config=<name>` queues an Add eIM operation from an eIM
+  configuration saved in the AddInitialEim builder. The eCO carries the entry
+  AddInitialEim would put on a card for the same configuration; a field given
+  beside `config=` wins, and the operation keeps the fields, not the name.
+  The New operation form of the Local eIM page offers the saved names.
+- eIM Package Injection between the Local eIM and the eSIM Management IPAd
+  (GSMA SGP.32 v1.3 §3.1.1.2, ESipa.TransferEimPackage §5.14.4). `INJECT
+  [<eid>] [target=http://127.0.0.1:<port>] [binding=asn1|json] [--once]` in
+  the eIM-local shell sends an eUICC's queue to an IPA, one eIM Package per
+  call, and takes the eIM Package Result from the answer; what the eIM
+  acknowledges goes out as an EimAcknowledgements package in the next call.
+  `EIM-LISTEN [port=<n>] [calls=<n>] [idle=<seconds>]` in the eSIM Management
+  console is the IPAd that answers, on `127.0.0.1:8746`, in the ASN.1 and the
+  JSON binding. An unreachable target costs nothing, a lost answer is
+  recovered from the eUICC's stored results before anything new is served,
+  and an answer for another eUICC is not kept. `TRAFFIC` lists the calls,
+  and the GUI has Inject to IPA on the Local eIM's Operations tab and Listen
+  for injected eIM packages in eSIM Management (loopback, plain HTTP; the
+  listener's form stays reachable, with Cancel, while it runs). An action or
+  verb that would open the reader a listener holds is refused as reader
+  busy; queueing for a named eUICC needs no reader, and `QUEUE` without an
+  EID then takes the one eUICC that has an inject target.
+  `EIM-LISTEN notifications=keep` leaves the card's pending Notifications on
+  the eUICC instead of delivering them after each package. Over HTTPS the
+  listener binds any address: `EIM-LISTEN host=<address> cert=<pem> key=<pem>
+  client-ca=<pem>` takes a call only from a client certificate that verifies
+  against `client-ca` (the eIM is the side that is authenticated, SGP.32 v1.3
+  §3.1.2.1), `EIM-LISTEN-CERT` makes the listener's certificate, `INJECT-CERT`
+  (GUI: Injection client certificate) the one the Local eIM presents, and
+  `INJECT` takes `target=https://<address>:<port>`. After an injected enable
+  or disable the listener resets the card, so the state change is complete
+  while it stays up.
+  Limits: without TLS, plain HTTP on the loopback; with TLS the roles are the
+  reverse of §2.6.3.2 (the eIM is the TLS client); no profile download, no
+  CoAP, no ProfileRollback when an answer cannot be written back.
+  `SCP11/shared/esipa_transfer.py` holds the request and response codec for
+  both sides, all seven response alternatives included.
+- Local eIM: a TLS leaf's subject and extensions can be written out and are
+  built as written. `TLS-SETUP LEAF <setup> NEW <leaf>` takes
+  `subject=<RFC 4514 name>`, one `ext.<extension>=` per extension in order
+  (`keyUsage`, `extKeyUsage`, `subjectAltName` with several names,
+  `basicConstraints`, key identifiers, policies, CRL and access locations, or
+  any object identifier as `DER:<hex>`), `extensions=none` and
+  `text=<file>`; `{host}` and `{eim_id}` stand for the setup's FQDN and the
+  eimId. `LEAF <setup> TEXT <leaf>` and `TLS-SETUP TEXT <certificate>` decode
+  a leaf or any certificate into the same text without loss: a value keeps
+  its octets as DER where the line form cannot carry it, and a leaf issued
+  from text is read back against it. `out=<file>` writes the text to a new
+  file and `text=<file>` issues from one; only a shell line names a file. The
+  GUI has a Certificate text field on New leaf, the action Certificate text,
+  and a Leaf editor on the Local eIM page with a row per subject attribute
+  and a block per extension.
+- `yggdrasim_common/x509_tables.py`: the RFC 5280 extension, key usage, key
+  purpose, general name and name attribute tables in one place; the
+  certificate views read them, and now name Subject Directory Attributes and
+  Subject Information Access.
+- Local eIM: a TLS setup takes further leaves under its own CA
+  (`TLS-SETUP LEAF <setup> NEW | LIST | SHOW | USE | REMOVE`, GUI actions New
+  leaf, Leaves, Show leaf, Use leaf, Remove leaf). A leaf sets the certificate
+  options (`cn`, `san`, `registered_id`, `layout`, `validity`, `ski`,
+  `server_auth`, `curve`) and what the listener sends with it; the setup's
+  name, CA and trust stay, so a card that trusts the root or the intermediate
+  (SGP.32 v1.3 §2.11.1.1.1) meets the next leaf without a new AddInitialEim.
+  A setup that told the card to trust the leaf itself asks for `--associate`
+  or `--serve-only` before it swaps.
+- Local eIM: every handshake on a card-facing listener is recorded with the
+  server name asked for, the setup picked, the SHA-256 of the leaf served and
+  its outcome: completed (resumed or not, requests that followed), refused
+  with the client's alert (RFC 8446 §6.2), ended by this side, or lost.
+  `TLS-SETUP RESULTS [<setup>] [--rows] [--json]` and the GUI action TLS
+  results count them per leaf; exchange records carry the leaf's fingerprint.
+  The store keeps the newest 2000 handshakes.
+- A user manual: `guides/USER_MANUAL.md` (the modules, installing and
+  starting, the concepts the GUI and the CLI share, work on a real card,
+  what to do when something fails) with a chapter per surface,
+  `guides/USER_MANUAL_GUI.md` and `guides/USER_MANUAL_CLI.md`, the modules
+  in sidebar order in both. The GUI's About list and the launcher's Guides
+  menu (`U`, `UG`, `UC`) open it, and the docs site lists it under
+  Overview.
+- `DERIVE-TOPC <TOP> <K> [Keccak iterations]` in the SCP03 shell: the TUAK
+  TOPc (3GPP TS 35.231 v19 §6.1), until now reachable only from the GUI's Offline
+  Tools. Both run one function, so they take and refuse the same input; the
+  MCP shell tool refuses the verb, as it does `DERIVE-OPC`, because K would
+  reach a transcript.
+- GUI: Advanced, YggdraCore. The 5G core stub's actions (subscriptions, the
+  Open5GS bridge, diagnostics) and the AKMA actions had no place in the
+  sidebar; they are one module with four tabs, because the stub AUSF writes
+  the AAnF store the AKMA actions read. The action ids are unchanged. Open5GS
+  Remove subscriber and Purge YggdraSIM-managed docs ask before they run.
+- The env-flag registry lists `YGGDRASIM_CARD_RELAY_TOKEN_FILE`, the MCP
+  server's `YGGDRASIM_MCP_ACCESS`, `_ALLOW_CARD`, `_ALLOW_SCRIPT_FILES` and
+  `_UPSTREAM_LOG_LEVEL`, and the 5G core launcher's `YGGDRASIM_5GCORE_MODE`,
+  `_HOST`, `_PORT`, `_ALLOW_NONLOOPBACK`, `_TOKEN_FILE` and `_NO_TOKEN`. The
+  MCP and 5G core flags are session-scoped, since neither process reads the
+  persisted overrides. The inline `YGGDRASIM_CARD_RELAY_TOKEN` stays out: the
+  Configuration page shows every value it lists.
+
+- The Local eIM module of the GUI opens on a page centred on the cards the
+  eIM knows (action `eim_local.overview`, read-only). The eUICCs tab lists
+  them; an eUICC shows its Profiles, eUICC information, linked eIMs and event
+  log, with buttons that queue an operation or open its form, quick controls
+  (immediate enable, default SM-DP+, fallback attribute, rollback on Enable),
+  a New operation form built from the operation catalogue, an operation view
+  (parameters editable until the operation is taken, the package and the
+  result as named rows) and a delivery report after Deliver now. The eIM
+  configuration tab shows the identity and the TLS setups with their
+  certificates. An action tagged `ipae-deliver` adds a "Deliver (IPAe)"
+  button beside "Deliver now (IPAd)" (plugin contract, *Local eIM delivery
+  route*).
+- A Local eIM TLS setup carries its own eIM FQDN, a certificate layout taken
+  from a reference certificate (`layout=`, `ca_layout=`: subject attribute
+  order, extensions, serial length and hash, with fresh keys), the
+  registeredID and CN choices, client authentication
+  (`client_auth=none|optional|required`, `TLS-SETUP CLIENT-CERT <name>`) and
+  an SNI rule. The card-facing listener serves every setup at once and picks
+  the chain by the ClientHello's server name. `ASSOCIATE [setup=<name>]`
+  gives a card the FQDN and trust of a setup and remembers it per card,
+  `ASSOCIATE CHOICES` lists what can be picked, and `ASSOCIATE HANDOVER`
+  binds a card to another eIM from stored certificates. The Local eIM answers
+  names of the form `eim*.yggdrasim.local` only, so the name of any other
+  eIM always reaches that eIM.
+- A card action in the GUI shows what it is doing while it runs: one line per
+  command under the action (a STORE DATA sequence once), or the raw exchanges
+  under the global debug flag, sent over `/api/events/trace` and replaced by
+  the answer when it arrives.
+- A stream action can post its output as a terminal prints it
+  (`_stream_console(terminal=True)`): the colours arrive as palette roles,
+  blank lines are kept and the view follows the bottom while the reader is
+  there (plugin contract, *Terminal output of a stream action*).
+- The Local SM-DP+ panel takes a profile package dropped on it, loads it and
+  reads the card overview again.
+- The SAIP lint checks a Security Domain's keys and protocols: YRL-SDM-010
+  (FAIL) for a key type GlobalPlatform Card Specification v2.4 Table 11-16
+  reserves, YRL-SDM-011 (WARN) for a type the table does not define,
+  YRL-SDM-012 (WARN) when the protocols in the install parameters and in the
+  Card Recognition Data differ, and YRL-SDM-013 (INFO) for a protocol
+  declared without a key set in its version range.
+- The context decoder and the eSIM actions read the Profile Package
+  Interpreter's EUICCResponse (SGP.22 v3.1 §2.5.6) and say which profile
+  element failed, with what status and where.
+- A Command Center action whose id is not in the page's tab lists names its
+  tab with the tag `tab:<group id>`, and opens a tab of its own with
+  `tab-label:<label>` (plugin contract, *Tab of a Command Center action*).
+- The MCP server's `shell_run` knows the Local eIM shell's `TRAFFIC` verb as
+  a read.
+- The Local eIM records every exchange its listeners answer (the peer and its
+  port, the TLS setup the server name picked, the bodies, the HTTP status, the
+  operation served or closed) in its store, the newest 4000 kept, and shows
+  them by name and value: `TRAFFIC [n] [eid=] [op=] [--brief|--hex]` on the
+  shell, the "Traffic" action in the GUI, and the decoded rows under `OP
+  <id>`'s served package and result (GetEimPackage, ProvideEimPackageResult
+  and HandleNotification, SGP.32 v1.3 §5.14.5 to §5.14.7; the PSMO and eCO
+  alternatives of §2.11.1.1 by name). A record is found by the peer's port,
+  so a terminal that carries a card's channels to the service can print each
+  exchange in its own trace as an `eIM:` line where the answer arrives, with
+  the decoded rows and both bodies.
+- The Local eIM queues the three device-side functions as operations of their
+  own (`QUEUE ROLLBACK | EXECUTE-FALLBACK | RETURN-FALLBACK [refresh=off]`,
+  labelled "(device)"): `ES10b.ProfileRollback`,
+  `ES10b.ExecuteFallbackMechanism` and `ReturnFromFallback`. `DELIVER`
+  executes them on the reader and an IPA polling over ESipa is never served
+  one. The identity's signing key can be rotated and taken back
+  (`identity.prepare_signing_key_rotation`, `commit_signing_key_rotation`,
+  `restore_previous_signing_key`).
+- `EIM-SETTINGS tls_keylog=on` makes the Local eIM's card-facing listeners
+  write their TLS session secrets to `tls-keylog.txt` in the store directory
+  (NSS key log format, mode 0600) so Wireshark can decrypt a capture of the
+  sessions; read at service start, off by default.
+- The Local eIM retrieves SM-DS events for a card (SGP.32 v1.3 §3.9.2.2): a
+  download queued with `contact_smds=on` and `indirect=on` makes the relay run
+  ES11'.InitiateAuthentication and AuthenticateClient against the SM-DS
+  (`smds_address`, or the root SM-DS on record), close the operation with the
+  Event Records, queue one indirect download per record at the front of the
+  queue with the EventID as its Matching ID (SGP.22 v3.1 §3.1.3, §3.6.2) and
+  answer the IPA with authenticateClientOkDSEsipa carrying the SM-DS
+  transactionId and the first download's trigger (§6.3.2.2). Before, such an
+  operation was refused.
+- A Local eIM download operation takes `confirmation_code=<code>` (`QUEUE
+  DOWNLOAD`, or More parameters in the GUI). When the SM-DP+ requires a
+  Confirmation Code the eIM hands the IPA its hash in ESipa.AuthenticateClient
+  (SGP.32 v1.3 §5.14.3; SHA256(SHA256(code) | TransactionID) per SGP.22 v3.1
+  §3.1.3.2) and restores a compact PrepareDownload answer with it; without a
+  code on the operation the IPA supplies hashCc itself, and the operation's
+  history says so. Listings mask the code.
+- Local eIM runs an operation queue per eUICC (`SCP11/eim_local/engine`):
+  PSMOs, eCOs (`ADD-EIM`, `DELETE-EIM` among them), IPA eUICC data requests
+  and profile download triggers are queued, edited, moved, copied,
+  cancelled and delivered from the eIM-local shell (`QUEUE`, `OPS`, `OP`,
+  `EDIT`, `MOVE`, `CANCEL`, `COPY`, `DELIVER`, `RESULT`), the Local eIM GUI
+  module (New operation, Operations, eUICCs and delivery) and the MCP
+  server, signed when an IPA takes them, with results and history kept in
+  the store (`YGGDRASIM_LOCAL_EIM_STORE`, `YGGDRASIM_LOCAL_EIM_HISTORY_CAP`).
+  `SERVE` runs the eIM as a service on 127.0.0.1:8743 with ESipa in the
+  ASN.1 binding (SGP.32 v1.3 §6.3) and the JSON binding (§6.4,
+  `/gsma/rsp2/esipa/`, the §6.4.1 status codes); the eSIM Management
+  `DOWNLOAD` routes to it by eIM FQDN or SM-DP+ address, and every EID
+  YggdraSIM reads registers with it. The indirect profile download
+  (§3.2.3.2) is relayed between IPA and SM-DP+ (`QUEUE DOWNLOAD ...
+  indirect=on`, `YGGDRASIM_IPA_INDIRECT_DOWNLOAD`): the IPA capabilities
+  are asked per download (§2.11.1.3), the compact forms of §5.14 are
+  restored from what the eIM holds, the metadata is verified before the
+  BPP is fetched (§5.14.3, §3.2.3.2 step 15) and the download is closed by
+  the ProfileInstallationResult the IPA forwards (§3.2.3.2 step 23). The
+  ISD-R add/delete-eIM paths, the BF58/BF59 session paths and the handshake
+  mode are retired; `ADD-EIM` / `DELETE-EIM` queue the eCO.
+- Card readers are held across processes. A local PC/SC reader in use by
+  one YggdraSIM process -- a card command in the eSIM Management console, a
+  GUI card action or stream, the HIL bridge, an MCP card session or
+  `pcsc_transmit` -- is locked against the others
+  (`yggdrasim_common/reader_locks.py`: one `flock` per reader under
+  `~/.yggdrasim/run/reader-locks`, `msvcrt.locking` on Windows, released by
+  the kernel when the holder exits). A holder that runs until stopped is
+  refused to the others at once and a short one is waited for, with
+  "reader busy: <what runs> (pid <n>) has held '<reader>' since <time>"
+  naming the holder, instead of one program resetting or powering down the
+  card under the other (SCARD_W_RESET_CARD, 0x80100068) or an exclusive
+  connect failing with a sharing violation. The HIL bridge holds its reader
+  for its whole life, across its own reconnects and resets, and its
+  supervisor starts no session (no SIMtrace2 reset, no modem reset pulse)
+  while another process holds the reader, reporting state `reader-busy`
+  with the holder.
+- The raw APDU console's presets gain SELECT MNO-SD
+  (`00A4040008A000000151000000`, the default Issuer Security Domain AID of
+  GPC v2.3.1 Annex H.1.3, the instance AID the MNO-SD carries in the SAIP
+  v3.4.1 example profile) beside SELECT ISD-R and SELECT ECASD.
+- AddInitialEim builder. Offline Tools gains AddInitialEim build
+  (`tool.eim_builder.add_initial_eim`), which composes the ES10b
+  AddInitialEimRequest of GSMA SGP.32 v1.3 §5.9.4 from stored certificates and
+  typed EimConfigurationData members, reads the encoded request back member by
+  member, and returns the APDU script of the run: TERMINAL CAPABILITY declaring
+  the IPAd, MANAGE CHANNEL, SELECT ISD-R, eUICCMemoryReset with
+  resetEimConfigData and resetImmediateEnableConfig (§5.9.5), then AddInitialEim
+  in 255-byte STORE DATA blocks. The eIM certificate store
+  (`tool.eim_builder.certificates`) imports PEM, DER, base64 or hex
+  certificates, several concatenated DER certificates included, and drops any
+  private key block; each build saves the eimId, eimFqdn and euiccCiPKId it
+  used, and the form offers them as suggestions and starts from the last build
+  (`tool.eim_builder.saved_values` lists or forgets them). The store is per
+  user and never tracked (`YGGDRASIM_EIM_BUILDER_STORE`, default
+  `~/.yggdrasim/eim_builder/`). The build touches no card; AddInitialEim send,
+  next to it (`tool.eim_builder.send`) and in the SGP.32 IoT (IPA-d) tab of
+  eSIM Management (`scp11_live.add_initial_eim`), takes the same form, a
+  reader and the confirm checkbox, and streams the decoded answers. The eSIM
+  Live shell's `ADD-INITIAL-EIM` asks for the same members in a wizard (options
+  take shorthand such as `oid` or `cert`; the eimId is free text, never read
+  from a certificate, and offered from the last build), holds no card
+  transport while it waits, and once confirmed sends the reset and the request
+  and decodes both answers; `EIM-CERT-STORE` manages the store from a
+  terminal. eimIdTypeOid is refused for an eimId that is not an OID (SGP.32
+  v1.3 §4.3). Saved entries edit in place: a certificate renames (the saved
+  values and configurations follow it) and a saved value changes without a
+  forget and retype. Configurations (`tool.eim_builder.configurations`, the
+  wizard's first and last prompts, `EIM-CERT-STORE CONFIGS`) keep whole forms
+  under a name: tick Save beside a Configuration name to store one, pick it to
+  fill the form.
+- TERMINAL PROFILE decoder and builder (`yggdrasim_common/terminal_profile.py`).
+  Every bit and count field of bytes 1-39 is named from ETSI TS 102 223
+  V18.3.0 clause 5.2, with the 3GPP TS 31.111 V19.4.0 clause 5.2 reading of
+  the bits TS 102 223 reserves for 3GPP. A decode reports RFU, deprecated and
+  reserved bits that are set, byte 32 b7, a soft-key count of 'FF', non-zero
+  bytes past byte 39, a facility whose TS 31.111 bits are set only in part,
+  and the byte 33 NOTE. Offline Tools gains TERMINAL PROFILE decode
+  (`tool.tp.decode`, with a two-profile comparison) and TERMINAL PROFILE build
+  (`tool.tp.build`, from the maximal profile, an empty one or a pasted one);
+  the context decoder, `python -m Tools.Asn1TlvDecode --context` and the
+  `context_decode` MCP tool name the facilities of a TERMINAL PROFILE APDU; and
+  `python -m yggdrasim_common.terminal_profile` decodes, compares, builds and
+  lists from a terminal. The file imports nothing outside the standard
+  library, so it also runs as a script on its own. Its maximal preset equals
+  `MAXIMAL_TERMINAL_PROFILE` byte for byte (`tests/test_terminal_profile.py`).
+- `yggdrasim-hil-modem-diag` (`Tools/HilBridge/modem_diag.py`) mirrors the
+  modem's own SIM interface log into the HIL GSMTAP stream. It reads
+  `LOG_UIM_DATA_C` (0x1098, or 0x14CE on dual-SIM builds) from a Qualcomm
+  DIAG port through a minimal in-tree DIAG client (`Tools/HilBridge/qcdiag.py`),
+  rebuilds the T=0 exchanges (ETSI TS 102 221 V18.4.0 clause 7.2.2.3) and
+  sends them in the bridge's frame layout on GSMTAP antenna 1 from
+  `127.0.0.2`, next to the bridge's or SIMtrace2's antenna-0 frames for the
+  same exchanges. NULL bytes, long holds, the PPS exchange and an exchange
+  cut short by a reset follow as libosmocore log records. `GsmtapTap` and
+  `build_gsmtap_packet` take an `antenna` (default 0, so the bridge's frames
+  are unchanged), and the live-decode state machine skips antenna-1 rows so
+  a second view of an exchange is never paired twice. With
+  `YGGDRASIM_HIL_MODEM_DIAG` set (`auto` finds the modem's DIAG port), the HIL
+  supervisor runs the mirror for the whole session as a separate child on
+  its own backoff (`--modem-diag-device`, state field `modemDiag`), outside
+  the bridge, the REMSIM client and the session status. The Wireshark a HIL
+  session opens starts with the profile in
+  `YGGDRASIM_HIL_WIRESHARK_PROFILE` (default `YggdraSIM-HIL`), to which
+  `Tools/HilBridge/wireshark_profile.py` adds SIM-side / modem-side filter
+  buttons and coloring rules as two marked files it never writes over once
+  the marker is gone.
+- The context decoder (Offline Tools Decoder, `python -m Tools.Asn1TlvDecode
+  --context`, the `context_decode` MCP tool) decodes the request and response
+  types SGP.22 v3.1 added -- `EuiccConfiguredData`, `LoadRpmPackage`,
+  `VerifySmdsResponse`, `PrepareDeviceChange`, `VerifyDeviceChange`,
+  `VerifySmdpResponse`, `VerifyProfileRecovery`, `AlertData`, `CheckEvent`,
+  `ConfirmDeviceChange`, `CheckProgress` -- with the SGP.22 v3.1 module the
+  pinned pySim carries (`pySim.esim.rsp.asn1_v3`), and names the module that
+  decoded each payload. With a pySim without that module it decodes as before.
+- The HIL Wireshark profile gains an **STK** filter button for the toolkit
+  traffic of ETSI TS 102 221 V18.4.0 clause 14.6, on both sides: TERMINAL
+  PROFILE, ENVELOPE, FETCH and TERMINAL RESPONSE with the BIP commands and
+  events they carry, STATUS (proactive polling), and every exchange answered
+  `91 XX`, `62 F2` or `63 F2`, a proactive command pending. It reads the
+  stock `gsm_sim` fields, so it works with or without the APDU dissector, and
+  keeps to GSMTAP APDU records: stock `gsm_sim` reads an ATR record as an
+  APDU, a T0 byte `12` as FETCH.
+- The ASN.1/TLV decoder reads a BF-tagged GSMA RSP object against the
+  SGP.22 / SGP.32 modules before showing the BER tree, in `yggdrasim-asn1`,
+  the GUI's ASN.1/TLV decode action and the MCP `asn1_decode` tool: field
+  names, named bits and numbers (`profileState = 1 (enabled)`), versions
+  (`'020300'H (v2.3.0)`), and the members a tag list selects -- an
+  IpaEuiccDataRequest's tagList names its IpaEuiccData items
+  (SGP.32 v1.3 §2.11.1.2), a ProfileInfoListRequest's the ProfileInfo data
+  objects (SGP.22 v3.1 §5.7.15). A field of a type with named bits or numbers
+  lists every one the type names, the taken ones marked (`[x]`, `(*)`) and the
+  rest greyed on a terminal, so `uiccCapability` or `ipaMode` shows what a
+  card supports against what the specification defines; sibling values line
+  up in one column. Certificates read as their subject,
+  issuer, validity, key, RSP role and extensions, `DeviceInfo` `tac` and
+  `imei` as digits (SGP.22 v3.1 §4.2), `extCardResource` as installed
+  applications and free memory (ETSI TS 102 226 v19.0 §8.2.1.7.2). The
+  reading is the notation: the BER tree moved to `berNotation` in the JSON and
+  to `--ber` on the command line, and `asn1Notation` no longer carries it. A
+  terminal gets the reading in the CLI theme's colours (`--color`,
+  `NO_COLOR`). `--each` decodes every input line on its own into one JSON
+  object per line, taking a leading label as the type name, so an ES9+ or
+  ESipa JSON member such as `smdpSigned2` reads as its type.
+
+### Changed
+
+- GUI top bar: with the Local eIM pill beside HIL bridge and Remote, the
+  pills' values (stopped, running) and the backend switch's label give way
+  at 1760 px instead of 1400 px, the crumb at 1300 px on every page (before,
+  only while a plugin pill showed), and the pill's label drops the word
+  Local at 1240 px; the dot keeps the state and the title the whole text.
+- Local eIM: `DELIVER` and `INJECT` end with a pass that sends the pending
+  Notifications to their SM-DP+ (see Added); before, the Notifications a
+  `DELIVER` took from the card stayed in the store. The result line of an
+  added eIM names the association token (`addEimResult: associationToken
+  2`). The eUICC and EUM certificates of an IPA data response are taken only
+  when an operation of this eIM asked for the data.
+- The APDU dissector's tree follows Wireshark's `gsm_sim` more closely. A
+  command is named the way the specifications print it (`READ BINARY`,
+  `STORE DATA`, an unknown instruction `INS AB`) in the tree, the Info
+  column and `yapdu.command_name`, so a saved filter on the underscore form
+  (`yapdu.command_name == "STORE_DATA"`) has to be rewritten. The header
+  lines read `Class`, `Instruction`, `Parameter 1`, `Parameter 2` and one
+  `Status Word: 9000 Success` line; a TLV is one line, its tag, length,
+  class and constructed bit kept as filter fields without rows; the
+  `Framing` node follows the response. No field abbreviation changed.
+- The Wireshark profile a HIL session opens colours its rows in the
+  Catppuccin Mocha palette: every GSMTAP row on the dark base, the text
+  colour by kind (session, read, write, authentication, toolkit, ATR,
+  warning and error status words, modem side, modem notes, TLS failures).
+  The rules still read stock `gsm_sim`, `tls` and `udp` fields. The rest of
+  the window follows on request: `python -m Tools.HilBridge.wireshark_profile
+  --stylesheet <profile>` writes a Qt style sheet in the same palette into
+  the profile, and the HIL menu then starts Wireshark with it. Without that
+  file Wireshark keeps the desktop's own palette, as before.
+- The SCP80 shell names a PoR status code from the table the context decoder
+  reads (`yggdrasim_common/secured_packet.py`; ETSI TS 102 225 V19.0.0 Table 5
+  with '0B' and '0C' of 3GPP TS 31.115 V19 clause 7) and keeps no table of its
+  own. Four codes read differently on the `[POR]` line: '04' is "CNTR Blocked"
+  and '09' "TAR Unknown", as the table spells them; '08' is "more time: the
+  Receiving Entity needs more time to process the Command Packet" where it was
+  "More time required"; '0C' names the ProcessUnstructuredSS-Request invoke
+  component beside SEND USSD.
+- The context decoder takes several commands at once, one per row. That is
+  the script file the SCP03 shell's `RUN` and the SCP80 shell's `script` read
+  (a row that starts with `#` is a comment, a row of hex is one command); each
+  row is decoded as its own command, numbered by the row it stands on. Before, every second row
+  was read as the answer to the row above it. A row without a marker now
+  starts a new exchange when it is a well-formed command of a known
+  instruction, and answers the command above it otherwise; the `apdu` context
+  takes every row as a command and `response` every row as an answer. A row
+  that holds no hex is left unread and counted by row number, never quoted.
+  The Decoder panel has an Open file button and takes a dropped file, read in
+  the page, and decodes the first 1000 exchanges of an input, saying how many
+  it holds; `--file` reads UTF-8 and UTF-16 by their byte order marks; an MCP
+  answer over 60000 characters comes back as the text view of as many whole
+  exchanges as fit.
+- The context decoder reads more forms and reads further into what it names
+  (the Decoder of Offline Tools, `python -m Tools.Asn1TlvDecode --context`,
+  the `context_decode` MCP tool). Hex stays the first reading, and an input it
+  already reads into a domain reads as before, apart from rows without a
+  marker (next entry). New forms: `AT+CSIM`, `+CRSM`,
+  `+CGLA` and `+CRLA` lines (3GPP TS 27.007 V19.6 §8.17, §8.18, §8.43, §8.44;
+  a restricted-access line names the file whose content it returns), PEM
+  certificates, a JSON body with base64 RSP objects, base64, an EID, ICCID or
+  IMSI in digits with its check digits (SGP.29 v1.1 §10, ITU-T E.118 §6), an
+  ATR, a PC/SC return code, TLS records (RFC 5246 §6.2.1), a bare DER
+  certificate, a profile package by its elements, and the `ef` context for the
+  content of one file. New depth: the SMS TPDU with the secured command or
+  response packet (ETSI TS 102 225 V19.0.0 §5.1, §5.2; 3GPP TS 31.115 V19
+  §4.2, §4.4), BIP channel data followed across a trace as one stream per
+  channel (TLS records and handshake messages, DNS, HTTP lines), the PUT KEY
+  data field and the Key Information Template (GlobalPlatform Card
+  Specification v2.4 §11.8.2.3, §11.3.3.1), TERMINAL CAPABILITY (ETSI TS 102 221 V18.4 §11.1.19.2 with the
+  bits of SGP.22 v3.1 §3.4.2 and SGP.32 v1.3 §3.8.2), the SUCI of GET IDENTITY
+  (3GPP TS 31.102 V19.5 §7.5.2.1) and the SCP11 commands of GlobalPlatform
+  Amendment F v1.2 §6.4 to §6.6. An ES10 data field under secure messaging is
+  no longer read as a clear object.
+- Local eIM: `TLS-SETUP NEW <name> --replace` and `TLS-SETUP REMOVE <name>`
+  refuse a setup that has further leaves or cards associated under it unless
+  `--force` is given (GUI: Force), because both take the setup's CA with them.
+- GUI: Offline Tools lists seven entries in place of seventeen. Tools that
+  share an input or a store are one entry with a tab per tool: Decoder (the
+  Decoder and ASN.1/TLV decode), TERMINAL PROFILE (Decode, Build),
+  AddInitialEim (Build, Send, Configurations, Certificate store, Saved values)
+  and SUCI keys (Use key file, Generate, Dump public key, under a line naming
+  the key file and the `suci-keytool` command in use). eIM package lint, TUAK
+  -- derive TOPc and the GSMA error-code reference stand alone, and a tool the
+  page does not name, a plugin's included, still gets an entry of its own. A
+  tab keeps what was typed while another one is open and reads the saved names
+  and values again when it is shown. The action ids that remain, the shell
+  verbs and the MCP tools are unchanged.
+- GUI: the action list of the Local eIM has five tabs in place of eleven, one
+  per store the actions work on: Operations (the queue, delivery, its rules),
+  eUICCs (records, association, handover), eIM configuration (identity,
+  service, traffic, TLS setups, leaves and handshake results), Direct card
+  commands (profile state and load, metadata, memory reset, AddInitialEim)
+  and Package files (package files, hotfolder, notification hygiene). A tab
+  draws its buttons in the order of the workflow, Queue operation first, and
+  the Leaf editor's own data action is no longer listed as a button.
+- The context decoder (`tool.decoder.context`,
+  `python -m Tools.Asn1TlvDecode --context`, the `context_decode` MCP tool)
+  heads a ProfileInstallationResult with the outcome its EUICCResponse
+  reports: every PE ok, or each failing PE with its status and offset (TCA
+  eUICC Profile Package V3.4.1 section 8.11). It reads an EUICCResponse pasted
+  on its own, names the rspCapability bits past the four the SGP.22 v2 text
+  names (from EuiccRspCapability, GSMA SGP.22 v3.1 §4.3) and carries the
+  SGP.32 check of an IoT eUICC's EUICCInfo2 as a note (GSMA SGP.32 v1.3
+  §5.9.2). Result data or an EUICCInfo2 that does not decode against the
+  schema is read by its tags instead: the outcome with bppCommandId and
+  errorReason, the EUICCInfo2 members by name with the check.
+- GUI: Environment > Configuration asks before it writes a sensitive flag,
+  as the launcher's `[E]` menu does. Set shows the flag's name and its note
+  with Confirm and Cancel, Confirm writes what the field and the persist box
+  held when Set was pressed, and a change to either withdraws the question.
+  Clearing a flag is not asked about on either editor, and neither is a
+  request sent to `/api/env_flags/{name}/set` directly. Only the field of
+  `YGGDRASIM_GUI_TOKEN` is masked while it is typed; the other sensitive
+  fields are readable, as their values already were in the row.
+- `YGGDRASIM_SUCI_TOOL` and `YGGDRASIM_SAIP_TOOL` are sensitive flags: each
+  names a command YggdraSIM runs, so both editors ask before writing one.
+
+- The macOS arm64 bundles are built on the macOS 15 runner image. GitHub
+  retired the macOS 14 image on 2026-11-02.
+- A finished stream action that printed a failure line reads Failed, and its
+  error frames show without the debug flag. Before, every finished stream
+  read Completed. The download form that ran over its own WebSocket flow is
+  no longer offered; a profile download queued on the Local eIM page points
+  at the eSIM Management download action.
+- The AddInitialEim builder follows SGP.32 v1.3 §4.3 and §2.11.1.1.1 for
+  `eimIdTypeFqdn`: the host is the eimId and no eimFqdn goes with it. A host
+  typed as eimFqdn becomes the eimId with a warning, two different hosts are
+  refused, and the linter reports an entry that carries both.
+- A Key Version Number between '40' and '4F' reads as SCP81 (SGP.02 v4.2
+  §2.2.5.1) in the SAIP decoder and shell.
+- The Local eIM holds a package that enables or disables a Profile until its
+  result arrives, and its ESipa listener reads chunked request bodies.
+- Card actions started from the GUI take turns on a reader. Each call claims
+  the reader it drives (its reader field, or the reader of the File system
+  or Applications session it targets) for as long as it runs: a call on a
+  reader a short action holds waits for it, up to a minute, and a call on a
+  reader a stream or a profile download holds is refused at once with
+  "reader busy: <action> has held '<reader>' since <time>". Before, the eSIM
+  Management, Local SM-DP+ and OTA actions ran side by side, and an SCP11
+  action powers the card down when it finishes, so two overlapping on one
+  card could cut each other off. An open File system session between two
+  commands holds no claim, the CLI shells and the MCP server run in other
+  processes, and a plugin console takes the claim itself
+  (`yggdrasim_common/reader_claims.py`, see the plugin contract).
+- The raw APDU console (APDU ribbon tab of File system and Applications)
+  takes one APDU per line, with '#' starting a comment as in the SCP03
+  shell's RUN scripts, and the input grows with its lines. The breakdown
+  table gives every line a row, and its Command column reads the command
+  with the Offline Tools context decoder: instruction, what P1/P2 select and
+  the named data fields, such as "SELECT FILE · selection by DF name (AID) ·
+  AID A000000151000000 (MNOSD)". Decoded commands below the table unfolds
+  the decoder's full reading, with header semantics and their clauses. Send
+  ("Send N APDUs") transmits the lines in order, each answer numbered and
+  named. A run stops at a failed send, a transport failure or an ended
+  secure channel, and, with "stop at error SW" ticked (the default), at the
+  first status word ETSI TS 102 221 v18.4 §10.2.1 classes as postponed
+  processing or an execution, checking or application error; normal endings
+  and warnings go on. A preset is added as a line of its own; the history
+  Load key still replaces the input.
+- The pinned pySim moves to hampushellsberg-dev/pysim `3322531`, seven
+  commits past `f2db3ab`: the SGP.22 v3.1 members of `EUICCInfo1` and
+  `EUICCInfo2` (a v3 eUICC's `highestSvn` and v3 CI key list no longer
+  vanish from a decode), the SGP.22 v3.1 ASN.1 module, the `OperatorId` name
+  the SGP.32 module imports, secure-channel log lines printed once,
+  `fillFileOffset` kept within its UInt16 range, a security domain key's
+  `keyAccess` and `keyCounterValue` kept on re-encode, and profiles with an
+  rfu PE loading. The SAIP tools refuse a pySim without the three SAIP fixes,
+  as they refuse one without the earlier fixes, and the SCP02 / SCP03
+  sessions refuse a pySim that would print a secure-channel line twice.
+- The pinned asn1tools moves to hampushellsberg-dev/asn1tools-loop-fix
+  `2a06a6d`: osmocom/asn1tools master (`44277cd`, the asn1tools pySim
+  installs) with three fixes, one commit each, also offered to
+  eerimoq/asn1tools as #201, #209 and #210. A circular chain of tagged type
+  references no longer hangs the compiler, and a malformed SEQUENCE OF / SET
+  OF element raises a decode error instead of hanging; an OBJECT IDENTIFIER
+  under arc 2 past 2.39 decodes as it was
+  encoded in every binary codec (`2.999.1` read as `26.39.1` before); a
+  tagged reference to a tagged CHOICE is compiled with one tag.
+- The GUI has a skin beside its colour theme. The new default skin, Bench,
+  sets the interface in IBM Plex Sans Condensed and the data in IBM Plex
+  Mono (vendored, SIL OFL 1.1), draws square keys and flat panels separated
+  by rules instead of rounded cards, shadows and gradients, puts the top
+  bar, the event log and the status line on the code surface, and lights
+  the current entry like a pressed key. Capitals are kept for UI legends,
+  so names keep their case (the sidebar groups read "eSIM (SCP11)", not
+  "ESIM (SCP11)"). A module workbench lays out three panes: its actions
+  listed one per row with the open one lit and every label in full (the
+  icon tiles cut them at 82 px), the output, and an inspector with the
+  card or module overview; its head names its Command Center group and
+  shows the bound reader and its action count. In eSIM Management the
+  list leaves out Enable, Disable and Delete profile: each profile card in
+  the inspector carries those buttons for its own profile. The File system and SAIP
+  Tool ribbons are rows of keys under group legends. The Skin control in
+  the top bar switches back to Classic, the previous look; every skin
+  renders in all 22 themes, two of them new: Bench · dark and Bench · light,
+  the palettes the skin was drawn in (achromatic accent, colour kept for
+  ok / warn / fail and the data). The terminal palettes
+  (`YGGDRASIM_CLI_THEME`) carry both.
+- The Command Center sidebar collapses to a rail of keys, one per module
+  with a short legend (FS, MGMT, SAIP, ...), instead of disappearing; the
+  sidebar mode menu keeps Hidden and Auto-hide. A collapsed event log keeps
+  one line with the latest row, a module's action list and inspector each
+  collapse to a labelled strip, and the status line carries pane keys for
+  the sidebar, the actions, the inspector and the log (Alt+1 to Alt+4).
+  Keys 2 and 3 take the name of the pane in the current view (Actions,
+  Files for the File system tree, Packages for the SAIP Tool's package
+  drawer, Inspector) and are disabled where the view has none; each of
+  those panes collapses to a labelled strip. The status line also shows
+  the EID and ICCID the last card overview or File system scan read for
+  the active reader, and its "viewing:" text follows every view switch.
+- The SAIP Tool's ribbon shows one command group at a time behind a tab
+  per group (Package, Actions, Element, File system, Tokens, Lint,
+  Advanced, Reference) instead of one long scrolling strip; the chosen tab
+  stays while the workbench re-renders.
+- eSIM Management reads the card overview when the module is entered (a
+  sidebar or Overview click, or picking its reader), so the profile cards
+  and their Enable / Disable / Delete buttons are there without a click on
+  Load. It reads once per entry: a reader pill click, a sibling leaf or a
+  reset shows the last read with its time ("Card read at ..."), and Refresh
+  reads again. It does not read a card a File system session, a running
+  stream action (a profile download, for one), the HIL bridge or a remote
+  consumer holds -- the read selects ISD-R on the basic channel and powers
+  the card down when it releases it -- and says which; Load still reads it
+  on request. An action started while the read is in flight waits for it
+  instead of opening a second connection to the card.
+- The SAIP Tool's profile element list has a Compact switch: one line per
+  element (glyph, name, label, FS / APP and lint chips, index), so a
+  17-element package fits the pane. The choice is kept in the browser.
+- The File system key strip puts Delete, Resize and Suspend UICC in a
+  Danger group at its end, apart from Create file, Lifecycle and Search
+  rec.
+- The FCP of the file picked in the File system tree is a card that starts
+  folded, so the file body is the first thing under the file actions. Its
+  summary line gives what the kind chip does not: the file size (records x
+  record length for a record file, the total file size for a DF), the SFI,
+  the life cycle status and the EF ARR record the access rules come from.
+  Once opened it stays open from file to file until it is folded again; the
+  result of the "Select file (no read)" and "Select + read file" action
+  forms, where the FCP is the answer asked for, shows it open. Opened, it
+  puts the short parameters in a grid of cells, as many across as the pane
+  holds, the raw bytes, the access rules and any nested template on
+  full-width rows after them, and names the parameters without a value once
+  ("No value") on the toolbar line instead of a "null" row each. Each
+  parameter of the FCP and of the decoded body (the file preview, each
+  record card, the READ ribbon result) has a Copy key, shown on the row
+  under the pointer (in the FCP grid it lies over the cell's right end),
+  that copies its value: hex as one contiguous string (no byte grouping, no
+  byte count), a list one entry per line, a structured value as JSON. Copy
+  body beside Update body, and Copy record beside Update record, copy the
+  bytes read as one hex string; the dump below them carries offsets and an
+  ASCII column. Other views that show decoded values are unchanged.
+- Remote Bridge shows one section at a time behind three tabs: Host (where
+  the rig runs and how to reach it), Rig (Start / Stop full rig, the manual
+  stages and the rig status) and Status (the bridge connection, the live
+  probe and the latency history). The tab is kept in the browser. The
+  Remote GUI and bridge URLs stay on one line, whole on hover, instead of
+  breaking mid-string.
+- The Overview's module cards carry a line of live state: an open File
+  system session and its reader, open SAIP packages, the last eSIM card
+  read with its profile count, and the module's last action and error
+  count from the event log. It is read from what the GUI already holds,
+  never from a card, and follows the log while the Overview is open.
+  Entering a module from the Overview or another Meta view counts as
+  opening it, so eSIM Management reads the card again.
+- Local eIM's category tabs sit at the top of its action list and count
+  the actions they list; a category whose actions all live in the eIM
+  overview is not offered.
+- Offline Tools lists each tool as its own entry under the Offline Tools
+  navigation leaf instead of a grid of cards; an entry shows that one tool,
+  and the leaf itself opens the Decoder. The entries show while Offline Tools
+  is open.
+- The Offline Tools decoder opens empty. It used to save the last input in
+  the browser's storage and decode it again every time Offline Tools opened,
+  so an old result filled the surface above the actions; that input is no
+  longer kept, and the copy earlier builds left behind is removed.
+- The Wireshark a HIL session opens shows the UTC time of day each frame
+  was captured in its Time column (`-t u`) instead of seconds since the
+  first frame. `YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT` takes any Wireshark
+  `-t` value (`ud` adds the date, `a` / `ad` are local time, `u.6` sets six
+  decimals); `off` leaves the format the profile last used, and a value
+  Wireshark would refuse counts as `off`, so a typo cannot stop it from
+  starting.
+- The APDU dissector names a TLS alert in the Detail column of its BIP
+  row: the card's own in SEND DATA (`SEND DATA: channel 1, 7 bytes, fatal
+  TLS alert bad_certificate (42)`), the peer's in the TERMINAL RESPONSE to
+  RECEIVE DATA, and a ciphered one as `encrypted TLS alert`. The name was
+  only in the packet tree, Expert Information and Info before, so a
+  certificate rejection read like any other SEND DATA in the packet list.
+  The HIL Wireshark profile adds a **TLS alerts** filter button and shows a
+  certificate alert (RFC 5246, RFC 6066 and RFC 8446 codes, at any level)
+  or any fatal alert in dark red. The dissector guide no longer calls an
+  installed copy interchangeable with the `-X lua_script:` one: Wireshark
+  loads the personal plugin folder first, so the installed copy is the one
+  that runs until `install` is re-run.
+
+### Removed
+
+- The Offline Tools actions `tool.tlv.decode`, `tool.sw.lookup`,
+  `tool.euicc_info2.decode` and `tool.sima_response.decode`. The Decoder reads
+  each of their inputs: a bare TLV under its Raw BER-TLV context, a status
+  word, an EUICCInfo2, and an EUICCResponse alone or inside a
+  ProfileInstallationResult. The `/api/tools/*` routes are unchanged.
+- The Offline Tools action `suci.set_tool_command` ("Set suci-keytool
+  command"). It never had an effect in the GUI: every action builds its own
+  bridge to the tool, so the command it set was gone before Generate or Dump
+  ran. The command is set with `YGGDRASIM_SUCI_TOOL` (Environment >
+  Configuration), which those actions already read, and the state line over
+  the SUCI keys tabs now names the command in use, where it comes from and
+  where to set it. The `TOOL` verb of the SUCI shell is unchanged.
+
+- `SCP11/rsp_v3_schema.py`. It declared the SGP.22 v3.1
+  `StoreMetadataRequest` members for a pySim that lacked them; the pinned
+  hampushellsberg-dev/pysim declares them itself. With another pySim the
+  metadata encoders refuse a v3.1 field instead of encoding it, as they
+  already did whenever a member was missing.
+- The workarounds the new pySim pin makes unnecessary: the security domain
+  key field restorer and the `fillFileOffset` splitter in
+  `Tools/ProfilePackage/saip_pysim_compat.py`, the SAIP GUI's
+  `ProfileElement` constructor patch, the log gate's own deduplication and
+  the context decoder's `OperatorId` supplement.
+- The asn1tools workarounds the new asn1tools pin makes unnecessary: the
+  OBJECT IDENTIFIER decoder wrapper (`yggdrasim_common/asn1tools_compat.py`)
+  and the schema reading's tagged CHOICE repair, with its
+  `taggedChoiceRepair` status.
+
+### Fixed
+
+- The local SM-DP+ answered an InitiateAuthentication that named another
+  SM-DP+'s address, signing serverSigned1 for that address under its own
+  certificate; an eUICC refused it (ciPKUnknown) and the download ended in
+  undefinedError. It now refuses such a request with invalidDpAddress (8.8.1 /
+  3.8 in the JSON binding, GSMA SGP.22 v3.1 §5.6.1).
+- A shell batch (`--cmd`, `--stdin`) in which a command failed ended with
+  exit code 0 in the SCP03, SCP80, SUCI, eSIM Management, Local SM-DP+ and
+  Local eIM shells, and `yggdrasim --scp03 --cmd` swallowed the code. Those
+  batches now end with 1 after a `[-]` line, a `[!]` line other than a
+  warning, an unknown verb or a caught error; `EIM-LISTEN` and a verb that
+  runs until it is stopped are judged by their own outcome. Notes that read as failures were re-marked
+  (`LOGOUT` without a session, an empty ARA or registry answer, a reset the
+  scan continues past). The SCP03 `--out` report is written when the batch
+  ends with `EXIT`, where it was skipped before.
+- `yggdrasim-gui`, `yggdrasim-web-server` and `yggdrasim --gui` ignored
+  `--card-backend`, the `--sim-*` options, `--sim-import-profile` and
+  `--debug`.
+- The simulator refused to start on a fresh runtime root: the quirks file
+  seeded there is the shipped template, which defines nothing, and the
+  loader sent it through the `YGGDRASIM_ALLOW_QUIRKS` gate anyway. An
+  unedited template is now skipped; an edited file still needs the gate.
+- GUI: card-changing actions ran as soon as Run was pressed, among them Set
+  status, Unlock, the install actions, the Local SM-DP+ profile and metadata
+  actions, the Local eIM's direct card commands, Deliver to card, Deliver
+  now and the OTA sends. Each now asks: a required acknowledgement in its
+  form, or a question line with Confirm and Cancel for the buttons without
+  one.
+- eSIM Management in the GUI read a profile command as failed when any line
+  of its trace held "failed" or "error", so a DISABLE the card had carried
+  out showed Status `failed` because the Notification sync after it could
+  not reach the SM-DP+. The verdict comes from the `[-]` and `[!]` lines; the
+  sync is reported apart (`notification_sync`, and a Note when it did not
+  complete). The page also put "<operation> ok" over an answer that said
+  `ok: false`; it reads "<operation> failed" now.
+- The first SAIP request could fail with "partially initialized module
+  'pySim.esim.saip.templates' ... has no attribute 'FileTemplate'" when a
+  second request imported pySim's SAIP templates module at the same moment (a
+  pySim import race between the package and that module; seen once in the
+  GUI, reproduced every time with a forced order on Python 3.11 and 3.13).
+  Every direct import of the module now goes through
+  `yggdrasim_common/pysim_saip_import.py`, which imports the package first.
+  The pySim fix and its repro are prepared for the pinned fork.
+- eSIM Management IPA: the eIM's answer to an Event Retrieval it ran itself
+  (authenticateClientOkDSEsipa, GSMA SGP.32 v1.3 §3.9.2.2 step 14) was read
+  as a failed download. The IPA printed a failure, sent the eIM a
+  ProfileDownloadTriggerResult with profileDownloadError for a retrieval that
+  had succeeded, and dropped the download trigger in the answer; the download
+  still ran, from the queue, a poll round later. The flow now ends at that
+  answer, the trigger in it is run and reported under its own
+  eimTransactionId, and no eIM Package Result is sent for the retrieval. The
+  Local eIM notes a download result that arrives for a retrieval it closed
+  and keeps the Event Records it stored as the operation's result.
+- Local SM-DP+: an encrypted segment of a Bound Profile Package was 1036 bytes
+  long where GSMA SGP.22 v3.1 §2.5.3 allows 1020 (tag, length field and MAC
+  included), because the profile was cut every 1008 bytes and the padding then
+  added a block. An eUICC that holds to the limit answered the first profile
+  segment with bspStructureError. Segments now carry 1007 bytes of the profile,
+  a package with a longer segment is refused before it is sent
+  (`BspSegmentTooLong`), and the simulated eUICC's own segment builder follows
+  the same limit.
+- Local SM-DP+: on an eUICC that enables ES10 only for a declared IPAd, a
+  command died at its first ES10 exchange with `69 85` (`LOAD-PROFILE` at
+  GetEUICCInfo1, right after SELECT ISD-R), because the session never sent
+  TERMINAL CAPABILITY. It now declares IPAd support (tag '84', GSMA SGP.32
+  v1.3 §3.8.2) once per card session, before the first application
+  selection, and again after a card reset, as the eSIM Management and Local
+  eIM shells do. The Command Center's Local SM-DP+ actions and the Local
+  eIM's direct ISD-R actions run on the same session and send it too. A card
+  that refuses the command is noted and the command goes on.
+- Local SM-DP+: the EID is read with ES10c.GetEID on the ISD-R (GSMA SGP.22
+  v3.1 §5.7.20; ES10b.GetEID of SGP.32 v1.3 §5.9.19). The session read it
+  with GET DATA '5A' on the ECASD, the retrieval of SGP.02 v4.2 §2.2.2,
+  which a later eUICC need not answer: on such a card `LOAD-PROFILE` stopped
+  after PrepareDownload with `6D 00`, where the session keys need the EID,
+  and the Command Center's Get EID and Discover and the card overview of
+  the Local SM-DP+ and Local eIM (`SCAN` / `INFO`) failed the same way. The
+  read no longer leaves the ISD-R inside an open session. The ECASD read
+  remains for a card that refuses GetEID, and a card that gives no EID
+  either way is reported with both answers.
+- eSIM Management: the EID is read with ES10 GetEID once the connect phase
+  has run (GSMA SGP.22 v3.1 §5.7.20, SGP.32 v1.3 §5.9.19), asked once and
+  with no recovery cascade of its own, with GET DATA '5A' on the ECASD
+  behind it for a card that refuses GetEID. On an eUICC that answers no GET
+  DATA on its ECASD the Command Center's Get EID returned nothing, Status
+  showed no EID, `EIM-LISTEN` refused to start and the IPAd poll had no EID
+  for its GetEimPackage request. Get EID and Status now run the connect
+  phase before the read, so the IPAd declaration leads the card session;
+  Status used to select the ECASD ahead of it. Where no connect phase has
+  run the read is the ECASD one alone, as before.
+- eSIM Management transport: a card reset reconnected to the PC/SC reader of
+  the same index when the simulated card backend was selected, so commands
+  meant for the simulated card could reach a real one. The reset now
+  reconnects to the simulated card.
+- Local SM-DP+: `LOAD-PROFILE` refuses a file that is no profile package
+  before the session opens. A variable template (`.varder`, hex text with
+  `{name:TYPE:length}` fields still unset) was wrapped as it stood and failed
+  after PrepareDownload with "TLV value overruns input"; the refusal now names
+  the unset fields and `MATERIALIZE-TEMPLATE`. Hex text behind a UTF-8 byte
+  order mark is read as hex, and when the legacy BF36/BF23 wrapper stands in
+  for a session-bound package the debug lines give the metadata field that
+  was missing.
+- GUI: Set, Clear and Reset persisted overrides under Environment >
+  Configuration were refused by the server (HTTP 422). The page sent its
+  content-type header twice in two spellings, which arrives as one doubled
+  value that is not read as JSON; the page's request helper now adds the
+  header only when the caller gave none in any spelling.
+- GUI: Generate SUCI key and Dump public key reported "suci-keytool exited
+  with code 1" after a run that succeeded, because exit code 0 was read as a
+  missing one. A finished run now says what it did, and the public key is
+  shown whole.
+- The context decoder no longer splits a GUI event-log line that carries
+  answer data into two exchanges, keeps a status word written on a row
+  (`sw=9000`) with the command or the data beside it, reads the raw exchange
+  lines of the eSIM Management shells' `--debug`, and ends a response still to
+  be fetched when a command other than GET RESPONSE follows (ETSI TS 102 221
+  V18.4 §12.1.1.1).
+- The SGP.32 check of an EUICCInfo2 no longer warns about a missing eCall
+  flag: ecallSupported is an OPTIONAL NULL whose absence says the eUICC lacks
+  the mechanism (GSMA SGP.32 v1.3 §5.9.2). An empty iotVersion list is
+  reported instead of passing, since the same clause asks for at least one
+  version.
+- `suci.status` reports the SUCI key file chosen last. It read a new tool
+  bridge on every call and always answered "(not selected)".
+- The context decoder no longer shows an EUICCInfo2 the response type refuses
+  as an empty GetEuiccInfo2Request: a type that reads no member of a
+  non-empty object is not taken as its reading.
+- The wheel and the source distribution contain `SCP11.eim_local.engine`. The
+  package was missing from the reviewed package list, so an installed
+  `yggdrasim-scp11-eim-local` failed at import and a successful EID read
+  raised `ModuleNotFoundError` in the admin shell, the eSIM Management
+  console and the local-access shell. A packaging test now refuses a tracked
+  subpackage the list does not name.
+- SCP03 admin shell: plugins extend the shell after its command table exists.
+  The hook ran first, so a verb a plugin added to the table was never there.
+- SCP03 admin shell: `OTA` starts the SCP80 shell by package name. It put the
+  `SCP80` directory on `sys.path` and imported `main`, which is the launcher
+  package inside the launcher and the GUI, and let SCP80 parse the admin
+  shell's own command line.
+- SCP80 shell: `set kic`, `set kid` and their older spellings stay out of
+  `~/.scp80_history`, lines already in the file are dropped at the next
+  save, and the file is readable by its owner only.
+- GUI: the action catalogue carries `requires_auth`, so the Card
+  Administration page asks for authentication before it opens a form that
+  needs a secure channel. The catalogue model dropped the field.
+- GUI: "Explain eIM package" answers with the payload of the shell's
+  `EIM-PACKAGE-EXPLAIN`. It imported a class that does not exist and always
+  failed.
+- `yggdrasim-profile-autoload` watches the profile store the simulator
+  writes to: the configured store, or the `profiles` directory of the eUICC
+  store when the root holds one. It imported a module that does not exist
+  and always watched `Workspace/SIMCARD/profile_store`.
+- `yggdrasim-eum-diag decode-bpp` prints the BF36 layout and the number of
+  ES10b segments. It imported a pySim module that does not exist and always
+  reported pySim as missing.
+
+- The HIL supervisor no longer stops on a host whose PC/SC service is not
+  running. The reader lookup it makes before a session raised the PC/SC
+  library's own error (`0x8010001D`, service not available); it now reads as
+  "no reader", which the bridge child reports itself.
+- The simulated eUICC's updateEim changes the members the request carries and
+  keeps the rest (SGP.32 v1.3 §2.11.1.1.2); it replaced the whole entry. Its
+  ListEimResult codes the list as 'A0' (§2.11.2.1) instead of '30'.
+- The certificate store no longer repeats a warning about serial number 0
+  for the SGP.26 test CI in every trace that scans it.
+- A desktop window left open no longer grows without limit. Qt WebEngine
+  6.11.1 does not collect the garbage a page leaves in its renderer (an idle
+  window reached 3.5 GB in 42 hours), so the window now starts V8 with
+  `--expose-gc` and the page asks for a collection once a minute; a
+  QtWebEngine window whose `--js-flags` were replaced says so in the event
+  log. The background polls (readers, health, Remote Lab sessions, plugin
+  pills) drop to one per 30 s while the window is shown without focus and
+  run again at once when it gets focus. Evidence and the release check are
+  in `upstream_patches/qt-qtwebengine-renderer-gc/`.
+- DeviceInfo follows SGP.22 v3.1 wherever it is sent. The IPA eUICC data
+  answer (with `IPA_INCLUDE_DEVICE_INFO_IN_EIM_DATA` set) carried it with
+  universal tags ('04' TAC, '30' capabilities) where the RSP module's
+  AUTOMATIC TAGS give tac '80', deviceCapabilities 'A1' and each member the
+  tag of its position; it is now the DeviceInfo of the AuthenticateServer
+  ctxParams1 under IpaEuiccData's 'A9'. ctxParams1 and the AuthenticateServer
+  request are encoded with pySim's SGP.22 v3.1 module instead of the v2 one:
+  all DeviceInfo (6) and DeviceCapabilities (15) members, the v2 name
+  `eutranSupportedRelease` read as `eutranEpcSupportedRelease`, a name v3.1
+  does not define refused instead of dropped, and the SM-DP+'s ServerSigned1
+  keeps the v3 members the v2 module dropped when it re-encoded the signed
+  data (bytes unchanged for a v2 SM-DP+). The asn1crypto fallback used without
+  pySim wrote universal tags across all of CtxParams1 and now gives the pySim
+  bytes.
+- The Local eIM restored a compact AuthenticateServerResponse (SGP.32 v1.3
+  §5.14.3) with the eUICC and EUM certificates only, so an SGP.22 v3 eUICC
+  whose certificate chain is not Variant O lost its `otherCertsInChain`
+  (SGP.22 v3.1 §4.5.2.0a, §5.7.13) on the way to the SM-DP+, which could then
+  not verify the chain. The relay now appends the chain it holds for the
+  eUICC (learnt from a full answer of that eUICC, or set with `EUICC SET <eid>
+  other_certs_in_chain=<hex>`), omits it for a Variant O chain, and refuses
+  the answer when the EUM certificate is not issued by the selected CI and no
+  chain is on record.
+- The simulated eUICC's eUICCMemoryReset answered an empty `BF64 00` and,
+  under resetEimConfigData, put its own default eIM back. SGP.32 v1.3 §5.9.5
+  (p.130-132) removes all eIM Configuration Data and answers resetResult, with
+  resetEimResult and resetImmediateEnableConfigResult for their bits; the
+  simulator now does both (`BF64 09 80 01 00 81 01 00 82 01 00` for a reset of
+  the eIM data and the immediate enable configuration, resetEimResult
+  nothingToDelete once no eIM is left), and the emptied list survives a restart.
+- An eIM added to the simulated eUICC without trustedPublicKeyDataTls (OPTIONAL,
+  SGP.32 v1.3 §2.11.1.1.1) was given a generated certificate in its place; the
+  member now stays absent. Only the simulator's own default eIM still gets one.
+- The simulated eUICC listed its stored eUICC Package Results under
+  RetrieveNotificationsList's `A2` as bare `A0` alternatives; SGP.32 v1.3
+  (p.40, p.43, p.134) makes the list a SEQUENCE OF EuiccPackageResult, the
+  `BF51` CHOICE, which is what LoadEuiccPackage answered with. Each element is
+  now that `BF51`, by list and by seqNumber, stores saved earlier included.
+- GetEimConfigurationData on the simulated eUICC answered eimPublicKeyData and
+  trustedPublicKeyDataTls of the eIMs it seeds itself as a bare certificate,
+  and its legacy entries as an `A1` around a whole certificate. Both are now the
+  CHOICE alternative SGP.32 v1.3 §2.11.1.1.1 defines (`A1` Certificate or `A0`
+  SubjectPublicKeyInfo in place of the SEQUENCE tag), and the signature check
+  reads the wrapped legacy form instead of rebuilding a nested SEQUENCE.
+- The AddInitialEim build and send forms remember their whole form. Every
+  build or send keeps it as the last build (`last_configuration.json` in the
+  builder store) and the forms open with it, eimIdType, the key forms,
+  counterValue, associationToken, the eimSupportedProtocol bits and
+  indirectProfileDownload included; before, only the typed eimId, eimFqdn,
+  euiccCiPKId and certificate names came back unless the form was saved as a
+  named configuration. The eSIM Live `ADD-INITIAL-EIM` wizard starts from the
+  same last build. The build shows the request as one STORE DATA APDU, with an
+  extended Lc past 255 bytes, in place of its bare TLV hex (which the result
+  labelled "Raw response").
+- The schema reading decodes the RSP types whose members reference a tagged
+  CHOICE with a tag of their own: a ProvideEimPackageResult carrying its
+  IpaEuiccDataResponse, an EuiccPackageResult with a listProfileInfoResult,
+  CancelSessionRequestEsipa, the ESipa message alternatives. asn1tools gives
+  such a reference an explicit tag of its own and took the single 'BF52' or
+  'BF2D' an eUICC sends for a mismatch; X.680 (02/2021) §31.2.7 makes the tag
+  implicit and X.690 (02/2021) §8.14.4 puts it in place of the CHOICE's own.
+  The pinned asn1tools carries the fix
+  (`upstream_patches/osmocom-asn1tools-tagged-choice/`). The reading's JSON
+  carries certificate validity times and BIT STRING contents, which asn1tools
+  hands over as `datetime` and `bytearray`, as text and hex; an object holding
+  a certificate no longer fails to serialise.
+- The context decoder read an IpaEuiccDataRequest (SGP.32 v1.3 §2.11.1.2)
+  as IpaEuiccDataResponse (§2.11.2.2), both 'BF52', and showed
+  `IpaEuiccDataResponse[0] = None`: asn1tools accepts the response's
+  extensible CHOICE with an unknown alternative. A type now counts only when
+  it reads every byte and its outer CHOICE matches. The generic tree no
+  longer names one-byte context tags ('81', 'A0') from specification tables,
+  whose rows gave names such as `ASN1_A0_ASN1_CHOICE_OPTION_1`, and prints a
+  tag list as its tags instead of a dump of names and aliases; 'BF52' is
+  named `IPA_EUICC_DATA` (`PACKAGE_DATA` stays an alias).
+- The simulated eUICC's setFallbackAttribute follows SGP.32 v1.3 §3.4.6 step
+  by step: a Profile whose fallbackAllowed is absent or FALSE is refused
+  with fallbackNotAllowed (§4.4: only if set to TRUE it SHALL be possible to
+  set the fallbackAttribute), the Emergency Profile with undefinedError, a
+  Profile that already carries the attribute is answered ok before any other
+  check, and an eUICC without the Fallback Mechanism answers
+  processingTerminated (unknownOrDamagedCommand) instead of
+  fallbackNotAllowed. After a processingTerminated result the rest of the
+  eUICC Package is no longer executed (§5.9.1). The disabled lab Profile,
+  Lab (EU 02), is seeded with fallbackAllowed TRUE and stays a valid
+  fallback target; a saved simulator store that holds no value for it takes
+  the seed's on load, while a TRUE or FALSE the store holds is kept. The
+  enabled Lab (EU 01) now gets fallbackNotAllowed, as on a card.
+- With BACKEND set to SIM, the reader-backed modules (File system,
+  Applications, Over-the-Air, eSIM Management, Local SM-DP+, Local eIM)
+  still listed only the PC/SC readers, so the simulated card could not be
+  picked, and a real reader picked there was answered by the simulator under
+  that reader's name. The SIM backend now lists one reader, YggdraSIM
+  Simulator, with the simulated card's ATR; the SCP03, SCP11 and SCP80
+  actions bind it, and the reader list follows a backend switch at once
+  instead of on its next poll.
+- Card Administration: once the inline action panels outgrew the module
+  column (Applications: Apps, Sec. domains and AIDs), the session box above
+  them shrank to nothing and the panels were laid out over the ribbon and
+  the APDU console it still painted, which showed as soon as another ribbon
+  tab was picked. The session keeps its floor (the ribbon at its height, the
+  file panes at 220 px) and the column scrolls; the file panes still scroll
+  inside themselves.
+- The raw APDU console's GET STATUS presets carried three stray bytes after
+  their data and no '4F' search criterion; they now send `80F2xx02024F0000`
+  (GPC v2.3.1 §11.4.2.3, Table 11-35), the command the Registry ribbon
+  sends, and the ISD one is labelled ISD (80) after Table 11-33.
+- The context decoder raised IndexError on a command shorter than its four
+  header bytes; it now reports the line as an APDU header that could not be
+  parsed.
+- Over-the-Air: Concatenated SMS offered Off, On, False and True, and a
+  stored ON matched none of them, so the page added a fifth choice. It
+  offers On and Off, the two values SCP80/config.py stores, and shows an
+  older true / yes / 1 or false / no / 0 as the value it stands for.
+- SCP03 Run script from the GUI refuses a line carrying `--log <file>` or a
+  `TRACE` command, which the shell's line executor turned into a file
+  written on the server host; the SCP11 console's GUI path already refused
+  `--log` for that reason.
+- The File system preview laid a decoded FCP out as a two-column grid of
+  whole fields, so the `raw` value got a 73 px column and printed one byte
+  per line; the FCP block's key/value grid no longer applies to the
+  decoded object.
+- SAIP Tool: Security Domain parameter names wrap instead of being cut,
+  the profile element list no longer repeats its pane's heading, and the
+  TAR value fields and the Configuration inputs carry accessible names.
+- The simulated eUICC answered GetProfilesInfo only in its bare `BF2D00`
+  form and refused a search criterion or a tag list with '6A 80', so every
+  overview of it read Fallback "not reported". It now takes
+  ProfileInfoListRequest as SGP.22 v3.1 §5.7.15 defines it (isdpAid, ICCID or
+  Profile Class criterion, tag list '5C'), answers the requested data
+  objects in ProfileInfo order including SGP.32 v1.3 §4.4 ecallIndication,
+  fallbackAttribute and fallbackAllowed, and answers a malformed request
+  with incorrectInputValues. The listProfileInfo PSMO goes through the same
+  path with its own default list (§2.11.1.1.3). A simulated Profile carries
+  fallbackAllowed when its metadata set it (StoreMetadataRequest '9F67' or
+  the profile manifest). The PSMO's profileChangeOngoing error was encoded
+  `02 01 0B`; the module's automatic tagging makes it `81 01 0B`, which is
+  what pySim encodes.
+- The simulated eUICC's GetEuiccConfiguredData answer (SGP.22 v3.1 §5.7.3)
+  tagged each additional root SM-DS address `82` instead of UTF8String
+  `0C` and each ciList entry as a bare `84` key identifier instead of
+  `SEQUENCE { ciPKId, ciName }`, so the card overview printed the
+  additional SM-DS addresses as one hex string and a strict decoder refused
+  the answer. Both follow the v3.1 module now (pySim decodes it); a ciList
+  entry is named after its eSIM CA RootCA certificate's common name.
+- The eSIM card overview's profile cards show Fallback and Fallback allowed
+  (SGP.32 v1.3 section 4.4 `fallbackAttribute` / `fallbackAllowed`) for
+  every Profile, reading "not reported" when the eUICC refused the tag
+  list. The overview payload dropped both values, so the card's former
+  "Used as: Fallback" row never appeared. A failed overview read showed an
+  empty inspector; it now shows the reason the read gave.
+- The simulated card's EF.ARR coded every key-reference condition as
+  `A4 03 83 01 <ref>`, without the usage qualifier `95 01 08` that
+  TS 102 221 v18.4 §9.5.1 and Table 9.3 put in every CRT, and pySim refused
+  the records. The SAIP EF.ARR encoder, which generated that table and builds
+  every rule the ARR record picker creates from a condition name, now emits
+  `A4 06 83 01 <ref> 95 01 08`; the simulator's records grow from 21 to 27
+  bytes, the length the PIN1 record's two CRTs need.
+- GetProfilesInfo is an ES10c function (SGP.22 v3.1 §5.7.15), as are
+  EnableProfile, DisableProfile and DeleteProfile (§5.7.16 to §5.7.18). The
+  eSIM Management "List profiles" action, its Local SM-DP+ twin, the eIM
+  shells' merged profile-state result table and the SGP.22 Consumer tab hint
+  called them ES10b.
+- The Local eIM shell's AddInitialEim and AddEim packages encoded a
+  counterValue or an explicit associationToken from 128 to 255 in one octet,
+  which DER reads as a negative INTEGER (X.690 (02/2021) §8.3), and an
+  eimSupportedProtocol with no bit set as `08 00`, a BIT STRING with eight
+  unused bits; they now share the builder's DER encoders.
+- The HIL bridge never answers a TPDU the modem has abandoned.
+  osmo-remsim-client-st2 hands the card's next answer to whatever command
+  the modem is on, so an answer to a command sent before a modem reset
+  landed on the first command after it, and every answer after that was
+  one command late: `6F00` on the first SELECT, then reset after reset. Each
+  modem TPDU now records its card session (one per reset) and a sequence
+  number; the card's answer to anything but the latest TPDU of the current
+  session stays off the modem, a superseded TPDU still queued never reaches
+  the card, and a FETCH, TERMINAL RESPONSE or GET RESPONSE arriving as the
+  first TPDU after a reset is dropped unanswered. The usual source is the
+  SIMtrace2 firmware: since 2019 it ends a 128-, 192- or 256-byte USB
+  message without a zero-length packet, so a modem command with 114, 178
+  or 242 data bytes (a RECEIVE DATA that returns 160 bytes, for one) reaches
+  the host only after the modem has waited 120 s and reset the UICC.
+  `upstream_patches/osmocom-simtrace2-cardem-zlp/` carries the firmware
+  patch, a journal scan and an `AT+CSIM` check; the bridge's warning names
+  the USB message size when a dropped command matches.
+- A card that holds a command longer than 5 s no longer resets the HIL
+  session. The PC/SC wait per APDU (`DEFAULT_APDU_TIMEOUT_MS`, shared by the
+  HIL bridge and the Card Bridge) is now 30 s: the SIMtrace2 board keeps the
+  modem waiting with NULL procedure bytes (ETSI TS 102 221 V18.4.0 clause
+  7.2.2.3.1), while a timeout tore the bridge session down and the modem saw
+  a card reset. `YGGDRASIM_HIL_APDU_TIMEOUT_MS` is now a registered setting
+  that the launcher and the GUI pass to the supervisor as `--apdu-timeout-ms`.
+- With a local reader, osmo-remsim-client-st2 is started with the card's ATR
+  (`-a`, read from the relay marker the bridge child publishes), as it already
+  was for a remote card. Unseeded, the client put its `3B 00` placeholder on
+  the board at start-up and after every bankd reconnect, and a modem that
+  activated in that gap read the placeholder instead of the card.
+- The HIL bridge no longer closes both RSPRO links when one side fails.
+  osmo-remsim-client-st2 sends the same `connectClientReq` on its control and
+  bankd links, and a link answered with the other role is closed and not
+  re-dialled on its own. A card failure used to close both links, the client
+  re-dialled them together, and when its bankd link arrived first the bridge
+  answered each link with the other role. Now a card failure closes the bankd
+  link and re-opens the reader, a lost link is closed alone, and a connection
+  that arrives before the control link has answered `configClientIdReq` is
+  closed unanswered, so the client re-dials it.
+- The simulated eUICC no longer accepts an RSP Server certificate chain it
+  cannot verify when `conformance_strict` is off. A CERT.DPauth.SIG or
+  CERT.DPpb.SIG that named a CI the card holds was accepted without that CI's
+  signature, any certificate passed once `otherCertsInChain` was present, a
+  self-signed certificate without an authorityKeyIdentifier was accepted, and
+  a chain could end, unverified, at a configured CI the card held no key for.
+  In both modes the chain is now verified up to a CI key the card holds
+  (SGP.22 v3.1 §5.7.13, §2.4.2): a forged copy is invalidCertificate(1), and a
+  chain to a CI without a held key, or a certificate without an
+  authorityKeyIdentifier, is ciPKUnknown(7). Without `conformance_strict` the
+  card still skips the keyUsage and role OID checks. A CI the card should
+  trust is held through `ci_certificates_der_hex` in `isdr_config.json` or the
+  eUICC store. A CI held there but missing from the configured CI PKIDs now
+  anchors a chain in default mode as well; it used to answer ciPKUnknown(7).
+- The simulated eUICC's euiccChallenge is random (SGP.22 v3.1 §5.7.7). It was
+  a hash of the EID and the APDU count, so every fresh card answered the
+  same sequence of challenges.
+- The simulated eUICC refuses a Profile Package outside the SAIP V3.4.1
+  framing (complete TLVs, one ProfileHeader first, one PE-End last) with
+  installFailedDueToPEProcessingError(12) and the interpreter's
+  invalid-request-format(5) in ppiResponse (SGP.22 v3.1 §2.5.6.1); random
+  bytes, a truncated package or one without PE-End used to install. A BPP
+  section member that runs past the length its section header declared is
+  bspStructureError(7) instead of counting as a complete section.
+- The live LPA no longer reports an install as complete when the last
+  LoadBoundProfilePackage segment is answered without data. It looks for the
+  session's ProfileInstallationResult among the card's pending notifications
+  (SGP.22 v3.1 §2.5.6), uses it when one carries the session's transactionId,
+  and fails the install otherwise.
+- HandleNotification keeps the configured ES9+ base URL, port included, when
+  a notification's notificationAddress names the configured SM-DP+ host. The
+  address is an FQDN and carries no port, so the notifications of an SM-DP+
+  on a non-default port went to port 443.
+- The SCP80 shell answers a SET UP EVENT LIST the card raises behind a PoR.
+  An OTA command that switches a toolkit applet on or off changes the
+  registered event list, and the CAT Runtime sends the new list at once
+  (TS 102 241 V18.1 §6.7.1.2); the shell fetched it and left it unanswered,
+  which held the proactive session open on the connection the next send
+  reuses. It now gets TERMINAL RESPONSE (OK), as at bring-up (TS 102 223
+  V18.3 §6.4.16), and the shell prints the new list. Any other command
+  behind a PoR still stays unanswered and is printed.
+- The context decoder lost the SGP.32 v1.3 module whenever pySim's
+  `asn1/rsp` directory listed `rsp.asn` before the two PKIX files, an order
+  the file system decides: the `OperatorId` declaration SGP.32 imports went
+  before the last `END` of the joined text, into a PKIX module, the joint
+  compile failed, and SGP.32 types fell back to the generic BER tree with
+  only a "SGP.32 module skipped" status note. The pinned pySim now declares
+  `OperatorId` in `RSPDefinitions` itself, and the decoder compiles its files
+  as they are.
+
 ## [2.2.0] -- 2026-10-18
 
 ### Added
@@ -1463,7 +2636,7 @@ SAIP wrappers) may change without notice between minor releases.
   own exceptions and the transport's PC/SC link errors -- because a status
   word means the card is talking and declined, and a reset would end a
   session that was never broken. TERMINAL PROFILE is no longer replayed
-  mid-session either: ETSI TS 102 223 §5.4 scopes it to the start of a card
+  mid-session either: ETSI TS 102 223 §5.1 scopes it to the start of a card
   session, and the minimal body the ladder sent is narrower than the profile
   STK bring-up negotiates, so a card that accepted it silently lost
   proactive features.
@@ -2177,7 +3350,8 @@ exposes a frozen v1 footprint; the v2 staging continues on `main`.
   values; pushing them to a shared remote was a foot-gun. The
   `reports/.gitkeep` placeholder documents the intended layout.
 
-[Unreleased]: https://github.com/1oT/YggdraSIM/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/1oT/YggdraSIM/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/1oT/YggdraSIM/releases/tag/v2.3.0
 [2.2.0]: https://github.com/1oT/YggdraSIM/releases/tag/v2.2.0
 [2.1.0]: https://github.com/1oT/YggdraSIM/releases/tag/v2.1.0
 [2.0.0]: https://github.com/1oT/YggdraSIM/releases/tag/v2.0.0

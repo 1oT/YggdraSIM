@@ -96,6 +96,12 @@ def test_esim_action_rails_hide_get_all_data_duplicates() -> None:
     helper = helper.split("function ccEsimActionFlavor", 1)[0]
     assert 'if (suffix === "get_all_data") return true;' in helper
     assert "CC_ESIM_CONSOLIDATED_READ_SUFFIXES[suffix]" in helper
+    # Enable / Disable / Delete run from the profile cards of the card
+    # overview, so the action list leaves them out.
+    assert "if (CC_ESIM_PROFILE_CARD_SUFFIXES[suffix]) return false;" in helper
+    card_map = js.split("var CC_ESIM_PROFILE_CARD_SUFFIXES = {", 1)[1].split("};", 1)[0]
+    for suffix in ("enable_profile", "disable_profile", "delete_profile"):
+        assert suffix + ": true" in card_map
 
     filter_block = js.split('if (subsystem === "eSIM Management") {', 1)[1]
     filter_block = filter_block.split('} else if (subsystem === "SCP11 Local")', 1)[0]
@@ -374,19 +380,12 @@ def test_esim_action_runs_stay_in_flow_pane_not_popout() -> None:
     assert 'runBtn.textContent = action.streams ? "Restart" : "Re-run"' in pane_window
 
 
-def test_streaming_flow_error_frames_are_debug_gated() -> None:
+def test_streaming_flow_shows_error_frames_and_reports_failure() -> None:
     js = _read("app.js")
-    for token in (
-        'var CC_GLOBAL_DEBUG_FLAG = "YGGDRASIM_GLOBAL_DEBUG"',
-        "function ccRefreshGlobalDebugFlag()",
-        "function ccShouldShowStreamFrame(level)",
-    ):
-        assert token in js
-
-    helper = js.split("function ccShouldShowStreamFrame(level)", 1)[1]
+    helper = js.split("function ccShouldShowStreamFrame(_level)", 1)[1]
     helper = helper.split("function ccSubsystemRequiresReaderSession", 1)[0]
-    assert 'String(level || "info").toLowerCase() !== "error"' in helper
-    assert "ccIsGlobalDebugEnabled()" in helper
+    # Error frames are never held back: they carry the reason a flow failed.
+    assert "return true;" in helper and "ccIsGlobalDebugEnabled()" not in helper
 
     stream_start = js.index(
         "function runStreamingAction(action, inputs, statusEl, resultEl, card, form)"
@@ -394,13 +393,14 @@ def test_streaming_flow_error_frames_are_debug_gated() -> None:
     stream_window = js[stream_start : js.index("function renderReportSummary", stream_start)]
     for token in (
         "ccRefreshGlobalDebugFlag().then(function ()",
-        "var hiddenErrorCount = 0",
-        "var showFrame = ccShouldShowStreamFrame(level)",
-        "hiddenErrorCount += 1",
-        'if (showFrame) {\n              ccSetActionStatus(statusEl, "error");',
-        "Flow stopped before completion. Enable debug for details.",
+        "var failed = msg.ok === false && !msg.cancelled;",
+        'failed ? "Failed" : ""',
+        'ccSetActionStatus(statusEl, "error");',
+        'streamControls.classList.add("cc-action-stream-controls--foot");',
     ):
         assert token in stream_window
+    assert "hiddenErrorCount" not in stream_window
+    assert "Enable debug for details" not in stream_window
 
 
 def test_command_center_modules_use_frameless_workbench_chrome() -> None:

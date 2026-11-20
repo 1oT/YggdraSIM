@@ -45,27 +45,23 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         Uses pySim's own encoder so the bytes stay in sync with whatever
         version of the schema the workspace ships.
         """
-        from pySim.esim.saip import ProfileElement
+        from pySim.esim.saip import asn1
 
-        pe = ProfileElement()
-        pe.type = "end"
-        pe.decoded = {"end-header": {"mandated": None, "identification": 0}}
-        return pe.to_der()
+        return asn1.encode(
+            "ProfileElement", ("end", {"end-header": {"mandated": None, "identification": 0}})
+        )
 
     def _header_pe_tlv(self) -> bytes:
         """Return a minimal ProfileHeader PE; a neighbour that is not ``end``."""
-        from pySim.esim.saip import ProfileElement
+        from pySim.esim.saip import asn1
 
-        pe = ProfileElement()
-        pe.type = "header"
-        pe.decoded = {
+        return asn1.encode("ProfileElement", ("header", {
             "major-version": 2,
             "minor-version": 3,
             "iccid": bytes.fromhex("988802214365870921F3"),
             "eUICC-Mandatory-services": {},
             "eUICC-Mandatory-GFSTEList": [],
-        }
-        return pe.to_der()
+        }))
 
     def _gfm_first_profile_der(self) -> bytes:
         """Header, a GFM that creates the MF and EF.ARR below it, then end.
@@ -475,8 +471,8 @@ class TolerantLoaderHelperTests(unittest.TestCase):
         """A profile whose MF comes from PE-GenericFileManagement opens strictly.
 
         Upstream pySim dereferences ``pe_sequence.mf`` for every GFM file;
-        ``Tools/ProfilePackage/saip_pysim_compat.install_gfm_mf_creation``
-        roots the MF the GFM creates.
+        the pinned pySim roots the MF the GFM creates
+        (``upstream_patches/osmocom-pysim-saip-gfm-mf-creation/``).
         """
         import tempfile
 
@@ -510,12 +506,11 @@ class OpenPackageResponseTests(unittest.TestCase):
 
         saip_actions._ensure_pysim_importable()
         # Build an end-PE package on the fly.
-        from pySim.esim.saip import ProfileElement
+        from pySim.esim.saip import asn1
 
-        pe = ProfileElement()
-        pe.type = "end"
-        pe.decoded = {"end-header": {"mandated": None, "identification": 0}}
-        der = pe.to_der()
+        der = asn1.encode(
+            "ProfileElement", ("end", {"end-header": {"mandated": None, "identification": 0}})
+        )
 
         import tempfile
 
@@ -575,12 +570,11 @@ class HexTextLoaderTests(unittest.TestCase):
         self.saip._ensure_pysim_importable()
 
     def _build_end_pe_der(self) -> bytes:
-        from pySim.esim.saip import ProfileElement
+        from pySim.esim.saip import asn1
 
-        pe = ProfileElement()
-        pe.type = "end"
-        pe.decoded = {"end-header": {"mandated": None, "identification": 0}}
-        return pe.to_der()
+        return asn1.encode(
+            "ProfileElement", ("end", {"end-header": {"mandated": None, "identification": 0}})
+        )
 
     def test_sniff_recognises_ascii_hex_payloads(self) -> None:
         der = self._build_end_pe_der()

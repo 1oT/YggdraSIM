@@ -574,25 +574,73 @@ def test_action_popout_auto_runs_without_manual_fields() -> None:
     assert "runActionFromForm(action, form, status, result)" in popout
 
 
-def test_reader_scoped_dashboard_refresh_is_manual_and_uses_active_reader() -> None:
-    """eSIM dashboards stay passive on open; manual refresh uses the active reader."""
+def test_esim_card_overview_reads_on_module_entry_only() -> None:
+    """eSIM Management reads the card once when the module is entered.
+
+    A reader pill's re-render, a sibling leaf and a reset show the stored
+    read; a reader another session holds is skipped with the reason; an
+    action waits for a read in flight. The other dashboards stay manual.
+    """
     js = _read("app.js")
     css = _read("app.css")
     block = js.split("function renderCompactWorkbench(container, subsystem, actions, leaf)", 1)[1]
     block = block.split("function stopHilWorkbenchRuntime", 1)[0]
-    manual_tail = block.split("// --- Manual dashboard refresh ---", 1)[1]
-    manual_tail = manual_tail.split("container.appendChild(wb);", 1)[0]
+    entry_tail = block.split("// --- Card overview: read on module entry, Refresh, or after an action ---", 1)[1]
+    entry_tail = entry_tail.split("container.appendChild(wb);", 1)[0]
 
     assert "var scopedReader = ccSubsystemRequiresReaderSession(subsystem)" in block
     assert "function renderDashboardPlaceholder(message, options)" in block
     assert "Load card overview" in block
     assert "refreshEsimSurface({ manual: true })" in block
-    assert "card overview not loaded" in manual_tail
-    assert "refreshDashboard();" not in manual_tail
+    assert "card overview not loaded" in entry_tail
     assert "scanInputs.reader = scopedReader" in block
     assert "commandState.activeSubsystem !== subsystem" in block
+    # The read starts from the entry marker for eSIM Management only, never
+    # from a plain render, and goes through the one-read-per-reader loader.
+    assert "refreshDashboard();" not in entry_tail
+    assert 'subsystem === "eSIM Management"' in entry_tail
+    assert "&& moduleEntry" in entry_tail
+    assert "ccCardOverviewStored(subsystem, scopedReader)" in entry_tail
+    assert "ccCardOverviewSkipReason(scopedReader)" in entry_tail
+    assert "ccLoadCardOverview(subsystem, scopedReader, scanActionId, scanInputs)" in block
+    assert "!dashBody.isConnected" in block
+    assert "await ccWhenCardOverviewIdle(scopedReader)" in block
+
+    open_fn = js.split("function openCommandSubsystem(subsystem, options)", 1)[1]
+    open_fn = open_fn.split("function ccHighlightLeaf", 1)[0]
+    assert "commandState.moduleEntry = opts.entry" in open_fn
+    assert "commandState.moduleEntry = null;" in open_fn
+    # Sidebar leaf, Overview card and the reader gate's pick are entries ...
+    wire = js.split("function wireCommandCenter()", 1)[1].split("\n  function ", 1)[0]
+    assert "entry: true," in wire
+    gate = js.split("function renderReaderSessionGate(", 1)[1].split("function renderCommandSubsystem", 1)[0]
+    assert 'entry: "fresh",' in gate
+    # ... the reader bar's re-renders are not: a pill binds the reader and reads nothing.
+    for name in (
+        "async function readerBarRefresh(opts)",
+        "function readerBarActivate(readerName)",
+        "async function readerBarCloseSessionFor(readerName)",
+    ):
+        body = js.split(name, 1)[1].split("\n  function ", 1)[0].split("\n  async function ", 1)[0]
+        assert "entry:" not in body, name
+
+    skip = js.split("function ccCardOverviewSkipReason(readerName)", 1)[1].split("\n  }\n", 1)[0]
+    for guard in (
+        "readerBarHasScp03Session(readerName)",
+        "ccCardStreamOn(readerName)",
+        "readerBarHasHilSession(readerName)",
+        "probe.leased_by",
+        "no card in the reader",
+    ):
+        assert guard in skip, guard
+    stream = js.split("function runStreamingAction(action, inputs, statusEl, resultEl, card, form)", 1)[1]
+    stream = stream.split("function renderReportSummary", 1)[0]
+    assert "ccTrackCardStream(inputs && inputs.reader, action)" in stream
+    assert "releaseCardStream();" in stream
+
     assert ".cc-dash-placeholder" in css
     assert ".cc-dash-load-btn" in css
+    assert ".cc-dash-stamp" in css
     assert ".cc-esim-flow-body .cc-action-tree" in css
     assert ".cc-esim-flow-body .cc-action-datasheet-main > .cc-log-inline" in css
     assert "max-height: none" in css
@@ -1209,6 +1257,42 @@ def test_card_bridge_remote_rig_promotes_one_click_start() -> None:
     assert ".cb-rig-manual .cb-rig-actions" in css
 
 
+
+def test_remote_bridge_page_is_split_into_host_rig_and_status_tabs() -> None:
+    """Remote Bridge shows one section at a time; no element id moved out."""
+    html = _read("index.html")
+    view = html.split('<section data-view="card_bridge" class="view">', 1)[1].split("</section>", 1)[0]
+    assert 'role="tablist" aria-label="Remote Bridge sections"' in view
+    for name in ("host", "rig", "status"):
+        assert f'id="cb-tab-{name}" aria-controls="cb-tabpanel-{name}"' in view
+        assert f'id="cb-tabpanel-{name}" aria-labelledby="cb-tab-{name}"' in view
+
+    def panel(name: str) -> str:
+        body = view.split(f'data-cb-tabpanel="{name}"', 1)[1]
+        return body.split('<div class="cb-tabpanel"', 1)[0]
+
+    host, rig, status = panel("host"), panel("rig"), panel("status")
+    for element_id in ("cb-rig-hosts", "cb-rig-ssh-target", "cb-rig-gui-port", "cb-rig-service-name"):
+        assert f'id="{element_id}"' in host, element_id
+    for element_id in ("cb-rig-refresh", "cb-rig-start-all", "cb-rig-start-local", "cb-rig-gui-url", "cb-rig-note"):
+        assert f'id="{element_id}"' in rig, element_id
+    for element_id in ("cb-status-badge", "cb-run-probe", "cb-history-chart"):
+        assert f'id="{element_id}"' in status, element_id
+    assert 'class="cb-probe-value cb-mono cb-url" id="cb-rig-gui-url"' in rig
+    assert 'class="cb-status-value cb-mono cb-url" id="cb-status-url"' in status
+
+    js = _read("app.js")
+    wire = js.split("function wireCardBridgePanel()", 1)[1].split("\n  function ", 1)[0]
+    assert "cbWireTabs();" in wire
+    select = js.split("function cbSelectTab(name, focus)", 1)[1].split("\n  function ", 1)[0]
+    assert "window.localStorage.setItem(CB_TAB_KEY, name);" in select
+    assert 'panel.hidden = panel.getAttribute("data-cb-tabpanel") !== name;' in select
+    assert 'cbSetUrlText("cb-rig-gui-url"' in js
+    assert 'cbSetUrlText("cb-status-url"' in js
+    css = _read("app.css")
+    assert '.cb-tab[aria-selected="true"]' in css
+    assert ".cb-status-value.cb-url" in css
+
 def test_card_bridge_start_full_rig_forwards_rpi_gui() -> None:
     """The one-click Card Bridge start should include the GUI tunnel."""
     js = _read("app.js")
@@ -1664,3 +1748,47 @@ def test_the_statusbar_names_the_card_it_is_watching() -> None:
     # An unread identifier renders no chip rather than an empty one.
     assert "if (identity.iccid)" in statusbar
     assert "if (identity.imsi)" in statusbar
+
+
+def test_overview_module_cards_carry_live_state_without_card_reads() -> None:
+    """Each Overview card shows what the GUI already holds for its module.
+
+    Open File system sessions, open SAIP packages, the last card overview,
+    the module's last action and its errors from the event log -- and no
+    request: the facts are computed from client state only.
+    """
+    js = _read("app.js")
+    card = js.split("function renderOverviewModuleCard(leaf, subsystems)", 1)[1]
+    card = card.split("\n  function ", 1)[0]
+    assert 'state.className = "overview-module-card-state";' in card
+    launcher = js.split("function renderOverviewModuleLauncher(catalogue)", 1)[1]
+    launcher = launcher.split("\n  function ", 1)[0]
+    assert "ccRefreshOverviewModuleStates();" in launcher
+    assert "logBus.subscribe(" in launcher
+    facts = js.split("function ccOverviewModuleFacts(leaf, activity)", 1)[1]
+    facts = facts.split("\n  function ", 1)[0]
+    for source in (
+        "commandState.scp03Workbench",
+        "commandState.saipWorkbench",
+        "ccCardOverviewStored(subsystem, ccActiveReaderName())",
+        "entry.errors",
+    ):
+        assert source in facts, source
+    activity = js.split("function ccOverviewActivity()", 1)[1].split("\n  function ", 1)[0]
+    assert "apiFetch" not in activity and "apiFetch" not in facts
+    assert "logBus.snapshot(bucket)" in activity
+    topbar = js.split("function wireTopbar()", 1)[1].split("\n  function ", 1)[0]
+    overview = topbar.split('} else if (view === "overview") {', 1)[1].split("} else if", 1)[0]
+    assert "ccRefreshOverviewModuleStates();" in overview
+    css = _read("app.css")
+    assert '.overview-module-card-fact[data-state="error"]' in css
+
+
+def test_entering_a_module_from_a_meta_view_is_a_fresh_entry() -> None:
+    """The Meta views keep the last module active; re-entry still reads."""
+    js = _read("app.js")
+    open_fn = js.split("function openCommandSubsystem(subsystem, options)", 1)[1]
+    open_fn = open_fn.split("function ccHighlightLeaf", 1)[0]
+    assert 'var moduleOnScreen = sameSubsystem && ccCurrentActiveViewName() === "command_center";' in open_fn
+    assert 'fresh: !moduleOnScreen || opts.entry === "fresh"' in open_fn
+    assert open_fn.index("var moduleOnScreen") < open_fn.index('showView("command_center"')

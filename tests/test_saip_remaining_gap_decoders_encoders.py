@@ -7,7 +7,8 @@ for the ``_PASSTHROUGH_BYTES_FIELD_NAMES`` entries that were previously
 hex-only on the editor surface:
 
 * ``restrictParameter``                (SAIP §8.6.6 / GP Amd F §A.4)
-* GP memory quotas (C7/C8/reserved/cumulative; GP Amd A §5.1.2)
+* GP memory quotas (C7/C8/reserved/cumulative; TCA SAIP v3.4.1 §8.7.3,
+  GPC v2.3.1 §11.5.2.3.7 Table 11-49 INSTALL parameter tags)
 * ``ts102226SIMFileAccessToolkitParameter`` (ETSI TS 102 226 V19.0.0
   §8.2.1.3.2.1: the access domain, then the toolkit resources)
 * ``uiccAccessApplicationSpecificParametersField`` and the

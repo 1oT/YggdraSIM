@@ -329,3 +329,98 @@ def test_replace_child_sites_guarded_against_hierarchy_error() -> None:
         "expected at least two renderScp03Tabs fallbacks after replaceChild guards; "
         f"found {fragments_with_guard}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The flag has to survive the catalogue route, and the page has to act on it
+# ---------------------------------------------------------------------------
+
+
+def _catalogue_answer() -> dict:
+    from yggdrasim_common.gui_server.routes.actions import list_actions
+
+    return list_actions().model_dump()
+
+
+def test_catalogue_route_carries_requires_auth_for_every_action() -> None:
+    from yggdrasim_common.gui_server.actions.registry import ensure_builtin_actions_loaded
+
+    registry = ensure_builtin_actions_loaded()
+    answer = _catalogue_answer()
+    served = {
+        entry["id"]: entry
+        for entries in answer["subsystems"].values()
+        for entry in entries
+    }
+    gated = [spec.id for spec in registry.all() if spec.requires_auth]
+
+    assert len(gated) > 0
+    for spec in registry.all():
+        assert served[spec.id]["requires_auth"] is spec.requires_auth, spec.id
+
+
+_GATE_HARNESS = """
+var commandState = {catalogue: %s};
+var prompts = [];
+var answer = %s;
+function scp03EnsureAuthed(tab, options) {
+  prompts.push(options.actionTitle);
+  return Promise.resolve(answer);
+}
+%s
+%s
+var ran = [];
+var tab = {sessionId: "s1", authStatus: {authenticated: false}};
+scp03GateOpen(tab, %s, function () { ran.push("handler"); })();
+Promise.resolve().then(function () {
+  console.log(JSON.stringify({prompts: prompts, ran: ran}));
+});
+"""
+
+
+def _run_gate(action_id: str, *, prompt_answer: bool) -> dict:
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    source_path = Path(__file__).resolve().parents[1] / "gui_frontend" / "src" / "js" / "command-center.js"
+    source = source_path.read_text(encoding="utf-8")
+    lookup_start = source.index("  function scp03LookupActionSpec(")
+    lookup_end = source.index("  function scp03UpdateTabAuthFromResponse(", lookup_start)
+    gate_start = source.index("  function scp03GateOpen(")
+    gate_end = source.index("  function scp03RenderTrace(", gate_start)
+    script = _GATE_HARNESS % (
+        json.dumps(_catalogue_answer()),
+        json.dumps(prompt_answer),
+        source[lookup_start:lookup_end],
+        source[gate_start:gate_end],
+        json.dumps(action_id),
+    )
+    # The whole catalogue is too long for an argument, so the script goes in on stdin.
+    result = subprocess.run([node, "-"], input=script, capture_output=True, text=True, timeout=30, check=True)
+    return json.loads(result.stdout)
+
+
+def test_page_gate_prompts_before_a_gated_action_on_the_served_catalogue() -> None:
+    outcome = _run_gate("scp03.put_key", prompt_answer=True)
+
+    assert len(outcome["prompts"]) == 1
+    assert outcome["ran"] == ["handler"]
+
+
+def test_page_gate_keeps_the_form_closed_when_the_prompt_is_cancelled() -> None:
+    outcome = _run_gate("scp03.put_key", prompt_answer=False)
+
+    assert len(outcome["prompts"]) == 1
+    assert outcome["ran"] == []
+
+
+def test_page_gate_passes_an_ungated_action_straight_through() -> None:
+    outcome = _run_gate("scp03.auth_status", prompt_answer=False)
+
+    assert outcome == {"prompts": [], "ran": ["handler"]}

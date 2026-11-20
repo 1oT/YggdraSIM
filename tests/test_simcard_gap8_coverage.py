@@ -13,14 +13,14 @@ Round-8 closes the following:
   §6.4.33 GET SERVICE INFORMATION (proactive 0x46) with TR-side
   latching into ``state.toolkit.last_service_search_result`` /
   ``last_service_information``.
-* ETSI TS 102 223 §6.4.11..14 multi-card terminal proactives:
+* ETSI TS 102 223 v18.3 §6.4.17-§6.4.20 multi-card terminal proactives:
   PERFORM CARD APDU (0x30), POWER OFF CARD (0x31), POWER ON CARD
   (0x32), GET READER STATUS (0x33). Successful TRs update
   ``state.toolkit.powered_card_readers``,
   ``last_card_apdu_response`` and ``last_reader_status``.
-* ETSI TS 102 223 §7.4.10 / §7.4.12 Event Download additions: SS
-  (0x0A), USSD (0x0B), Local Connection (0x0C). Latch the
-  data / DCS / connection status into ``state.toolkit``.
+* ETSI TS 102 223 v18.3 §7.5.14 Local Connection event download
+  (event '0D'). Latches the connection status into
+  ``state.toolkit``.
 """
 
 from __future__ import annotations
@@ -113,9 +113,10 @@ class UpdateBinaryBySfiTests(_EngineHarness):
     def test_update_binary_via_sfi_implicitly_selects_ef(self) -> None:
         self._select_mf()
         self.engine.transmit(bytes.fromhex("00D6850001") + b"x")
-        # After UPDATE BINARY by SFI the simulator follows ETSI TS 102 221
-        # §11.1.3.4 by making the resolved EF the current EF, so a
-        # subsequent SFI-less read returns the same data.
+        # After UPDATE BINARY by SFI the simulator follows the implicit
+        # selection of ETSI TS 102 221 v18.4 §8.4.3 (Short File Identifier)
+        # by making the resolved EF the current EF, so a subsequent
+        # SFI-less read returns the same data.
         data, sw1, sw2 = self.engine.transmit(bytes.fromhex("00B0000002"))
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         self.assertEqual(data, b"xn")
@@ -248,7 +249,7 @@ class GetServiceInformationTests(_ToolkitHarness):
 
 
 class PerformCardApduTests(_ToolkitHarness):
-    """ETSI TS 102 223 §6.4.11 PERFORM CARD APDU."""
+    """ETSI TS 102 223 v18.3 §6.4.17 PERFORM CARD APDU."""
 
     def test_queue_payload_carries_card_apdu_under_a4(self) -> None:
         card_apdu = bytes.fromhex("00A40004023F00")
@@ -324,7 +325,7 @@ class PowerCardLifecycleTests(_ToolkitHarness):
 
 
 class GetReaderStatusTests(_ToolkitHarness):
-    """ETSI TS 102 223 §6.4.14 GET READER STATUS."""
+    """ETSI TS 102 223 v18.3 §6.4.20 GET READER STATUS."""
 
     def test_terminal_response_latches_reader_status_records(self) -> None:
         result = self.toolkit.queue_get_reader_status()

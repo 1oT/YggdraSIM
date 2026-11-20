@@ -71,7 +71,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 14px 16px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   gap: 12px;

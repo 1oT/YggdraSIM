@@ -78,7 +78,10 @@
   flex-wrap: wrap;
 }
 
-.cc-fcp-block dl {
+/* Plain key/value lists only: the decoded FCP object is a dl too
+   (.cc-pv-object), and as a two-column grid it paired whole fields side
+   by side, leaving the raw hex a 73px column (one byte per line). */
+.cc-fcp-block dl:not(.cc-pv-object) {
   display: grid;
   grid-template-columns: minmax(100px, auto) 1fr;
   gap: 4px 12px;

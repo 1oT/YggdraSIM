@@ -58,6 +58,18 @@ class HilBridgeMainTests(unittest.TestCase):
 
         self.assertEqual(config.apdu_timeout_ms, 15000)
 
+    def test_bridge_config_waits_thirty_seconds_by_default(self) -> None:
+        # A card holding a command for seconds must not cost the session; the
+        # board keeps the modem waiting with NULL bytes meanwhile.
+        parser = argparse.ArgumentParser()
+        add_bridge_runtime_arguments(parser, include_list_readers=False)
+        with mock.patch.dict("os.environ", {"YGGDRASIM_HIL_APDU_TIMEOUT_MS": ""}):
+            config = build_bridge_config_from_args(parser.parse_args([]))
+        self.assertEqual(config.apdu_timeout_ms, 30000)
+        with mock.patch.dict("os.environ", {"YGGDRASIM_HIL_APDU_TIMEOUT_MS": "45000"}):
+            config = build_bridge_config_from_args(parser.parse_args([]))
+        self.assertEqual(config.apdu_timeout_ms, 45000)
+
     def test_bridge_config_accepts_card_trace_flag(self) -> None:
         parser = argparse.ArgumentParser()
         add_bridge_runtime_arguments(parser, include_list_readers=False)

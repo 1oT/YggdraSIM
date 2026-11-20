@@ -15,6 +15,7 @@ import textwrap
 from contextlib import contextmanager, redirect_stdout
 from typing import Any, Callable, Iterable, Iterator, List, Optional, Tuple
 
+from yggdrasim_common.batch_outcome import BatchOutcome
 from yggdrasim_common.command_log import LOG_FLAG_HELP, run_with_command_log
 from yggdrasim_common.quit_control import quit_all, QuitAllRequested
 from yggdrasim_common.process_debug import (
@@ -1935,24 +1936,29 @@ class LocalAccessShell:
             self._finalize_recording_on_exit()
 
     def run_commands(self, cmd_line: str) -> None:
-        """Execute a semicolon-delimited command string non-interactively."""
+        """Execute a semicolon-delimited command string non-interactively.
+
+        Ends with ``SystemExit(1)`` when a command failed: an error it raised,
+        a ``[-]`` line or a ``[!]`` line other than a warning (an unknown
+        verb, a card that refused the command).
+        """
         self._build_session()
-        had_error = False
+        outcome = BatchOutcome()
         try:
             for raw_command in self._split_batch_commands(cmd_line):
-                try:
-                    keep_running = self._execute_command_line(raw_command, source="batch")
-                except QuitAllRequested:
-                    raise
-                except Exception as error:
-                    had_error = True
-                    print(f"[-] {self._format_error_message(error)}")
-                    continue
+                with outcome.command(raw_command):
+                    try:
+                        keep_running = self._execute_command_line(raw_command, source="batch")
+                    except QuitAllRequested:
+                        raise
+                    except Exception as error:
+                        print(f"[-] {self._format_error_message(error)}")
+                        continue
                 if keep_running is False:
                     break
         finally:
             self._finalize_recording_on_exit()
-        if had_error:
+        if not outcome.ok:
             raise SystemExit(1)
 
     def _execute_command_line(self, raw_line: str, *, source: str = "interactive") -> bool:

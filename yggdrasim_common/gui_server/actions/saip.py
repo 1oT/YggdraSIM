@@ -101,84 +101,15 @@ def _raise_if_action_cancelled(ctx: ActionContext | None) -> None:
 def _ensure_pysim_importable() -> None:
     """Delegate to the SAIP tool helper so we honour the same lookup order.
 
-    Also applies a one-shot compatibility patch against upstream pySim
-    so unknown PE types do not crash ``ProfileElementSequence.from_der``
-    -- see :func:`_patch_pysim_profile_element` for the details.
+    The helper also refuses a pySim without the pinned fork's fixes, among
+    them ``upstream_patches/osmocom-pysim-saip-empty-pe-body/`` (an rfu PE
+    used to abort the whole package load).
     """
     from Tools.ProfilePackage.saip_json_codec import (
         ensure_workspace_pysim_on_path,
     )
 
     ensure_workspace_pysim_on_path(_workspace_root())
-    _patch_pysim_profile_element()
-
-
-_PYSIM_PROFILE_ELEMENT_PATCHED = False
-
-
-def _patch_pysim_profile_element() -> None:
-    """Work around a pySim ``ProfileElement.from_der`` ordering bug.
-
-    For PE types not registered in ``ProfileElement.class_for_petype``,
-    upstream pySim executes::
-
-        inst = ProfileElement(decoded, pe_sequence=pe_sequence)
-        inst.type = pe_type
-
-    However ``ProfileElement.__init__`` dereferences ``self.header_name``
-    (which in turn reads ``self.type``) whenever ``decoded`` is falsy --
-    which happens for PEs whose ASN.1 body decodes to an empty dict.
-    ``self.type`` is only assigned on the NEXT line, so ``__init__``
-    raises ``AttributeError: 'ProfileElement' object has no attribute
-    'type'`` and the whole package load aborts.
-
-    This patch swaps in an ``__init__`` that treats the missing ``type``
-    attribute as "caller will set it" -- identical to how registered
-    subclasses behave (they carry ``type`` as a class attribute). All
-    other behaviour is preserved byte-for-byte.
-    """
-    global _PYSIM_PROFILE_ELEMENT_PATCHED
-    if _PYSIM_PROFILE_ELEMENT_PATCHED:
-        return
-
-    try:
-        from collections import OrderedDict
-        from pySim.esim.saip import ProfileElement
-    except Exception:  # noqa: BLE001 -- pySim not importable; nothing to patch
-        return
-
-    if getattr(ProfileElement.__init__, "_yggdrasim_patched", False):
-        _PYSIM_PROFILE_ELEMENT_PATCHED = True
-        return
-
-    def _patched_init(
-        self,
-        decoded=None,
-        mandated: bool = True,
-        pe_sequence=None,
-    ) -> None:
-        self.pe_sequence = pe_sequence
-        if decoded:
-            self.decoded = decoded
-            return
-        self.decoded = OrderedDict()
-        try:
-            header_key = self.header_name
-        except AttributeError:
-            # ``self.type`` is not set yet. ``ProfileElement.from_der``
-            # assigns it immediately after the ctor returns, so the
-            # header-bootstrap we skip here is redundant for the
-            # from-DER code path -- it only matters for from-scratch PE
-            # construction, which never reaches this branch.
-            return
-        if header_key:
-            self.decoded[header_key] = {"identification": None}
-            if mandated:
-                self.decoded[header_key] = {"mandated": None}
-
-    _patched_init._yggdrasim_patched = True  # type: ignore[attr-defined]
-    ProfileElement.__init__ = _patched_init  # type: ignore[assignment]
-    _PYSIM_PROFILE_ELEMENT_PATCHED = True
 
 
 # Suffixes that the SAIP GUI treats as ASCII hex-text rather than
@@ -262,12 +193,23 @@ def _looks_like_zip_archive(raw: bytes) -> bool:
         return False
 
 
+def _saip_choice_of(segment: bytes) -> str | None:
+    """The ProfileElement alternative pySim's SAIP module decodes *segment* as.
+
+    ``None`` for a tag that is none of its alternatives (for example ``50 00``).
+    """
+    from pySim.esim.saip import asn1 as saip_asn1
+
+    pe_type, _body = saip_asn1.decode("ProfileElement", segment)
+    return pe_type
+
+
 def _pe_has_usable_type(pe: Any) -> bool:
     """Return whether a decoded PE exposes a non-empty string type.
 
-    A pySim ``ProfileElement`` can be returned for an unrecognised BER tag
-    with ``type=None`` and an empty decoded body (for example ``50 00``).
-    Such an object is not a recoverable SAIP PE.  Non-empty types remain
+    An unrecognised BER tag (for example ``50 00``) decodes to no type; pySim
+    then fails building the PE, and a foreign PE wrapper may come back with
+    ``type=None``. Neither is a recoverable SAIP PE.  Non-empty types remain
     accepted even when pySim has no specialised class for them; that is an
     intentional compatibility path for valid newer/nonstandard ASN.1 choices.
     """
@@ -1236,8 +1178,15 @@ def _parse_pes_tolerant(
             break
 
         try:
-            pe = ProfileElement.from_der(first_tlv, pe_sequence=pes)
-            if _pe_has_usable_type(pe) is False:
+            try:
+                pe = ProfileElement.from_der(first_tlv, pe_sequence=pes)
+            except AttributeError:
+                # pySim builds a generic PE for a tag its SAIP module does not
+                # know and fails deriving a header name from the missing type.
+                if _saip_choice_of(first_tlv) is not None:
+                    raise
+                pe = None
+            if pe is None or _pe_has_usable_type(pe) is False:
                 pe_type = getattr(pe, "type", None)
                 raise ValueError(
                     "decoded ProfileElement has no usable non-empty string "
@@ -2801,7 +2750,9 @@ def _saip_pe_name_template_index() -> dict[str, list[tuple[Any, Any]]]:
     index: dict[str, list[tuple[Any, Any]]] = {}
     try:
         _ensure_pysim_importable()
-        from pySim.esim.saip.templates import ProfileTemplateRegistry
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        ProfileTemplateRegistry = import_saip_templates().ProfileTemplateRegistry
     except Exception:
         _FS_TREE_TEMPLATE_INDEX_CACHE["pe_name_index"] = index
         return index
@@ -2826,8 +2777,9 @@ def _saip_template_for_section_payload(
         return None
     try:
         _ensure_pysim_importable()
-        from pySim.esim.saip.templates import ProfileTemplateRegistry
-        return ProfileTemplateRegistry.get_by_oid(str(template_oid))
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        return import_saip_templates().ProfileTemplateRegistry.get_by_oid(str(template_oid))
     except Exception:
         return None
 
@@ -7465,7 +7417,9 @@ def _dispatch_list_pe_template(
         return response
 
     try:
-        from pySim.esim.saip.templates import ProfileTemplateRegistry
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        ProfileTemplateRegistry = import_saip_templates().ProfileTemplateRegistry
     except ImportError as error:
         raise RuntimeError(
             "pySim's saip templates module is unavailable; cannot resolve template catalog"
@@ -10057,10 +10011,6 @@ def _file_body_from_pe(
     rec_len_out = int(rec_len) if isinstance(rec_len, int) and rec_len > 0 else None
     nb_rec_out = int(nb_rec) if isinstance(nb_rec, int) and nb_rec > 0 else None
     size_out = int(size_val) if isinstance(size_val, int) and size_val > 0 else None
-    if rec_len_out is not None:
-        nb_rec_out, size_out = _record_count_from_declared_size(
-            pe_file, bytes(body), rec_len_out, nb_rec_out, size_out
-        )
     if gfm_file and size_out is not None and len(body) < size_out:
         # pySim ends the body at the last write when the Fcp declares no
         # pattern; the rest of the declared size is what the file was
@@ -10123,8 +10073,8 @@ def _gfm_file_for_path(pe: Any, field_path: str) -> Any:
     after an edit. :func:`_gfm_body_target` builds the ``File`` from the live
     entries instead -- the one the body editors write through -- so the image
     shown is the one a write starts from, Fcp fill or repeat pattern included
-    (ETSI TS 102 222 V17.1.0 §6.3.2.2.2, applied per record by
-    ``Tools/ProfilePackage/saip_pysim_compat.py``).
+    (ETSI TS 102 222 V17.1.0 §6.3.2.2.2, applied per record by the pinned
+    pySim).
 
     ``None`` for any other PE or address, for a DF, and for a ``createFCP``
     pySim cannot size (no usable descriptor, or record geometry without a
@@ -10142,38 +10092,6 @@ def _gfm_file_for_path(pe: Any, field_path: str) -> Any:
     if getattr(pe_file, "file_type", None) not in ("TR", "LF", "CY", "BT"):
         return None
     return pe_file
-
-
-def _record_count_from_declared_size(
-    pe_file: Any,
-    body: bytes,
-    rec_len: int,
-    nb_rec: int | None,
-    size_val: int | None,
-) -> tuple[int | None, int | None]:
-    """Record count that honours the profile's own file size.
-
-    pySim ``File.from_template`` copies the TCA template's record count and
-    ``from_fcp`` recomputes it from ``efFileSize`` only while it is still
-    ``None``, so a profile whose descriptor omits the count but declares a
-    larger size keeps the template default (EF.MSISDN: one record from
-    ``FilesUsimOptional`` against a 68-byte, two-record file). ETSI TS 102
-    222 sizes a linear fixed EF as record length times record count, so
-    the declared size decides here. The result is the largest of the
-    template count, the declared size and the body; it equals pySim's own
-    count once pySim honours the size, which is what
-    ``upstream_patches/osmocom-pysim-saip-record-count/`` asks for.
-    """
-    declared = getattr(pe_file, "_file_size", None)
-    candidates = [nb_rec or 0]
-    if isinstance(declared, int) and declared >= rec_len:
-        candidates.append(declared // rec_len)
-    if len(body) >= rec_len:
-        candidates.append(-(-len(body) // rec_len))
-    count = max(candidates)
-    if count <= 0:
-        return nb_rec, size_val
-    return count, max(size_val or 0, count * rec_len)
 
 
 def snapshot_saip_session(session_id: str) -> dict[str, Any]:
@@ -15040,9 +14958,9 @@ def _dispatch_add_pe(
     _assert_handle_sequence_allowed(handle, new_list)
     pes.pe_list = new_list
 
-    # Renumber identification across the whole sequence so the new
-    # PE picks up the lowest free integer (TCA SAIP §A.3 -- header
-    # identification fields are 1-based and contiguous).
+    # Renumber identification across the whole sequence; pySim numbers
+    # the PE headers 1..n in order. TCA SAIP v3.4.1 §8.1.3 only asks
+    # that each PE's identification be unique within the profile.
     try:
         pes.renumber_identification()
     except Exception:
@@ -17936,9 +17854,9 @@ def _dispatch_list_template_oids(
     Annex A where the OIDs are catalogued.
     """
     _ensure_pysim_importable()
-    from pySim.esim.saip.templates import ProfileTemplateRegistry
+    from yggdrasim_common.pysim_saip_import import import_saip_templates
 
-    registry = ProfileTemplateRegistry()
+    registry = import_saip_templates().ProfileTemplateRegistry()
     rows: list[dict[str, Any]] = []
     for oid, template in sorted(
         registry.by_oid.items(),
@@ -18188,7 +18106,7 @@ _PE_TYPE_DOCS: dict[str, dict[str, str]] = {
     "df-saip": {
         "title": "SAIP DF",
         "asn1": "PE-DF-SAIP",
-        "spec": "TCA SAIP v3.4.1 §8.3.4.4 / §9.5.12 / Annex D",
+        "spec": "TCA SAIP v3.4.1 §8.3.4.4.6 / §9.5.12 / §12 (Annex D)",
         "summary": (
             "DF.SAIP (6FD0). Holds SUCI calculation info "
             "(EF.SUCI_Calc_Info, AID 4F01) used by USIM-Service-Table "
@@ -23120,7 +23038,7 @@ SET_PIN_SHARED_CONTEXT_SPEC = ActionSpec(
     description=(
         "Switch a PE-PINCodes into shared-context mode by setting "
         "``filePath`` to the temporary FID of the directory whose "
-        "PIN context this PE inherits (TS 102 221 §8.3.5). Concatenated "
+        "PIN context this PE inherits (TCA SAIP v3.4.1 §8.3.5). Concatenated "
         "16-bit FIDs (e.g. '7F10' or '7F105F3A'); slashes are "
         "stripped. Empty path means MF."
     ),

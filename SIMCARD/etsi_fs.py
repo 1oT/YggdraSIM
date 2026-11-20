@@ -55,19 +55,21 @@ PROFILE_AID_SUFFIX_MAX = 0xFF00
 #
 # Generated with `Tools.ProfilePackage.saip_asn1_encode.encode_ef_arr_rules` and
 # pinned against its decoder by `tests/test_etsi_fs_default_arr.py`. ADM1 is key
-# reference 0x0A.
-_ARR_DENY_ALL_RECORD = bytes.fromhex("80017F9700FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+# reference 0x0A. Every CRT carries the usage qualifier next to the key
+# reference, A4 06 83 01 <ref> 95 01 08 (TS 102 221 v18.4 §9.5.1, Table 9.3);
+# the PIN1 record's two CRTs make it 27 bytes, the length every record is padded to.
+_ARR_DENY_ALL_RECORD = bytes.fromhex("80017F9700FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
 
 # read+update always; deactivate/activate/terminate/delete ADM1
-_ARR_RECORD_DEFAULT = bytes.fromhex("8001039000800178A40383010AFFFFFFFFFFFFFFFF")
+_ARR_RECORD_DEFAULT = bytes.fromhex("8001039000800178A40683010A950108FFFFFFFFFFFFFFFFFFFFFF")
 # read always; update PIN1; deactivate/activate/terminate/delete ADM1
-_ARR_RECORD_PIN1 = bytes.fromhex("8001019000800102A403830101800178A40383010A")
+_ARR_RECORD_PIN1 = bytes.fromhex("8001019000800102A406830101950108800178A40683010A950108")
 # read always; update never; deactivate/activate/terminate/delete ADM1
-_ARR_RECORD_NEVER = bytes.fromhex("80010190008001029700800178A40383010AFFFFFF")
+_ARR_RECORD_NEVER = bytes.fromhex("80010190008001029700800178A40683010A950108FFFFFFFFFFFF")
 # read always; every write ADM1
-_ARR_RECORD_ADM = bytes.fromhex("800101900080017AA40383010AFFFFFFFFFFFFFFFF")
+_ARR_RECORD_ADM = bytes.fromhex("800101900080017AA40683010A950108FFFFFFFFFFFFFFFFFFFFFF")
 # DF scope: create DF/EF, delete self/child, activate, deactivate, terminate ADM1
-_ARR_RECORD_CONTAINER = bytes.fromhex("80017FA40383010AFFFFFFFFFFFFFFFFFFFFFFFFFF")
+_ARR_RECORD_CONTAINER = bytes.fromhex("80017FA40683010A950108FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
 
 DEFAULT_ARR_RECORDS: tuple[bytes, ...] = tuple(
     {
@@ -172,7 +174,7 @@ def _encode_ef_ust_default() -> bytes:
     #  91 Support for SM-over-IP (PSISMSC - round 26),
     #  122 Subscription identifier de-concealing function (5G SUCI by ME),
     #  124 Subscription identifier de-concealing function support (5G),
-    #  125 SUCI calculation by the USIM (TS 31.102 §5.1.1.5),
+    #  125 SUCI calculation by the USIM (TS 31.102 v19.5 §5.3.48),
     #  126 EAP-AKA' authentication context support (TS 33.402 / TS 33.501),
     #  129 5GS Mobility Management,
     #  130 5GS Session Management.
@@ -1445,8 +1447,9 @@ def _default_profile_image(
             structure="linear-fixed",
             records=list(DEFAULT_ARR_RECORDS),
         ),
-        # 3GPP TS 31.102 §4.4.2 / TS 31.103 §4.4.3 phonebook tree
-        # rooted under DF.TELECOM. The DF.PHONEBOOK shell plus a
+        # 3GPP TS 31.102 v19.5 §4.6.2 phonebook tree rooted under
+        # DF.TELECOM, with the structure of the ADF.USIM DF PHONEBOOK
+        # (§4.4.2). The DF.PHONEBOOK shell plus a
         # default EF.PBR (Phone Book Reference) record let a modem
         # walking 7F10/5F3A/4F30 land on a deterministic stub
         # instead of 6A82. The PBR record advertises an empty
@@ -1832,11 +1835,11 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
                 path_index[image_node.path] = node.node_id
 
     # If the BPP already shipped an EF.DIR via the active profile image
-    # we must not clobber it: TCA Profile Interoperability §3.5 expects
-    # the issuer-provided record set (AIDs, labels, padding) to surface
-    # verbatim. The active image stores EF.DIR under a path-derived
-    # ``PROFILE::`` node_id, so the canonical lookup is via path_index
-    # rather than by raw FID.
+    # we must not clobber it: content a PE supplies replaces the template
+    # default (TCA SAIP v3.4.1 §8.3.3), so the issuer-provided record set
+    # (AIDs, labels, padding) surfaces verbatim. The active image stores
+    # EF.DIR under a path-derived ``PROFILE::`` node_id, so the canonical
+    # lookup is via path_index rather than by raw FID.
     ef_dir_path = ("MF", "EF.DIR")
     ef_dir_node_id = path_index.get(ef_dir_path)
     bpp_supplied_efdir = False
@@ -1935,9 +1938,11 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
 
     _ensure_default_local_arr_nodes(nodes, path_index)
 
-    # 3GPP TS 31.102 Annex H "EFs shared between SIM and USIM" /
-    # TCA Profile Interoperability §3.5.5: an issuer is free to
-    # ship a single physical copy of any of the listed EFs (FID
+    # EFs present under both DF.GSM and ADF.USIM, the convention this
+    # tree calls the "Annex H mirror". No library document states it:
+    # TS 31.102 v19.5 Annex H is the list of SFI values, and TCA SAIP
+    # v3.4.1 links files only through ``Fcp.linkPath`` (§8.3.2). An
+    # issuer may ship a single physical copy of such an EF (FID
     # 6Fxx -- IMSI, AD, ECC, LOCI, FPLMN, ...) under DF.GSM and
     # leave the same-FID EF under ADF.USIM empty. The card is
     # then expected to "share" the bytes between the two DF
@@ -1948,18 +1953,18 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
     # only when the ADF.USIM-side EF is genuinely empty (so an
     # operator that *did* ship distinct USIM-side content keeps
     # it intact).
-    # SAIP / TCA Profile Interoperability v2.3.1 §8.3.5 explicit
-    # ``Fcp.linkPath`` aliases. Operator BPPs commonly carve out a
-    # template EF inside ADF.USIM / ADF.ISIM whose ``linkPath``
-    # walks to the canonical EF under DF.GSM (7F20) or DF.TELECOM
-    # (7F10). Resolve those aliases first so the issuer's explicit
+    # TCA SAIP v3.4.1 §8.3.2 explicit ``Fcp.linkPath`` aliases. Operator
+    # BPPs commonly carve out a template EF inside ADF.USIM / ADF.ISIM
+    # whose ``linkPath`` walks to the canonical EF under DF.GSM (7F20)
+    # or DF.TELECOM (7F10). Resolve those aliases first so the issuer's explicit
     # intent always wins over the convention-based Annex H mirror
     # and the SAIP template defaults that follow.
     _apply_explicit_file_links_from_profile(nodes, path_index)
 
     _mirror_shared_efs_between_df_gsm_and_adf_usim(nodes, path_index)
 
-    # TCA Profile Interoperability §3.5 / pySim ``FilesUsimMandatoryV2``,
+    # TCA SAIP v3.4.1 §9.1 (Annex A templates, "Default Value" column) /
+    # pySim ``FilesUsimMandatoryV2``,
     # ``FilesUsimOptionalV3``, ``FilesIsimMandatory``, ``FilesAtMF``,
     # ``FilesTelecom`` etc. ship a default-content pattern for every
     # template-defined EF (e.g. ``EF.AD = 00000002``,
@@ -1974,7 +1979,8 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
     # bytes the spec says they should.
     _apply_saip_template_defaults_to_runtime(nodes, path_index)
 
-    # SAIP §5.5 / §5.6 / §5.7: project the issuer-supplied PIN/PUK
+    # TCA SAIP v3.4.1 §8.5 (PIN and PUK codes), §8.6.1 (Security Domain
+    # PE) and §8.8 (RFM Parameters): project the issuer-supplied PIN/PUK
     # table, GP Security Domain registry and OTA RFM bindings from the
     # active profile's image onto the runtime card state. Done here so
     # the same path that renders the file system also keeps the
@@ -2175,7 +2181,8 @@ def _resolve_link_path_target(
     path_index: dict[tuple[str, ...], str],
     link_path: tuple[str, ...],
 ) -> SimFileNode | None:
-    """Walk a SAIP §8.3.5 ``linkPath`` (sequence of 2-byte FIDs) from
+    """Walk a TCA SAIP v3.4.1 §8.3.2 ``linkPath`` (coded as a §8.3.5
+    ``filePath``: a sequence of 2-byte FIDs) from
     the MF down to the file it points at and return the matching
     ``SimFileNode``, or ``None`` if the path cannot be resolved.
 
@@ -2223,7 +2230,7 @@ def _apply_explicit_file_links_from_profile(
     """Resolve every node carrying a non-empty ``link_path`` and copy
     the target file's content into the source node.
 
-    SAIP / TCA Profile Interoperability v2.3.1 §8.3.5: an EF (or DF
+    TCA SAIP v3.4.1 §8.3.2: an EF (or DF
     in the ``dfLinkSupport`` capability) may declare ``Fcp.linkPath``
     to alias a file located elsewhere in the file system. Operator
     BPPs use this extensively to delegate the canonical content of
@@ -2331,7 +2338,9 @@ def _load_saip_template_defaults_registry() -> dict[tuple[str, str], object]:
         return _SAIP_TEMPLATE_DEFAULTS_CACHE
     registry: dict[tuple[str, str], object] = {}
     try:
-        import pySim.esim.saip.templates as saip_templates
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        saip_templates = import_saip_templates()
     except Exception:  # pragma: no cover - defensive: pySim missing
         _SAIP_TEMPLATE_DEFAULTS_CACHE = registry
         return registry
@@ -2497,12 +2506,13 @@ def _apply_chv_table_from_profile(
     """Populate ``state.chv_references`` from a SAIP ``pinCodes`` /
     ``pukCodes`` set.
 
-    Honours TS 102 221 §9.5.1 retry counter semantics: the SAIP
-    encoding stores both max-attempts and remaining attempts in a
-    single byte (high / low nibble). The ``pinAttributes`` byte's
-    bit-0 toggles the "PIN enabled" state; SAIP §5.6.1 reserves the
-    other bits for vendor flags so the simulator keeps them in
-    ``SimChvReference`` only as the ``enabled`` flag.
+    TCA SAIP v3.4.1 §8.5.1 (Pin Code PE) and §8.5.2 (PUK Code PE)
+    store the maximum and the remaining attempts in one byte (high /
+    low nibble); the remaining count is what VERIFY PIN reports as
+    '63CX' (TS 102 221 v18.4 §11.1.9.1.2). In ``pinAttributes``, b1 is
+    the PIN state (1 = enabled), b2 "PIN can be changed", b3 "PIN state
+    change allowed" and b4-b8 are RFU (§8.5.1); the simulator keeps
+    only b1, as ``SimChvReference.enabled``.
     """
     if len(pin_entries) == 0 and len(puk_entries) == 0:
         return
@@ -2806,6 +2816,9 @@ def build_default_state() -> SimCardState:
             ),
             profile_source="json",
             auth_config=copy.deepcopy(default_auth),
+            # The disabled lab Profile is the one its owner lets become the
+            # Fallback Profile (SGP.32 v1.3 §4.4); the enabled one is not.
+            fallback_allowed=True,
         ),
     ]
     state = SimCardState(
@@ -3226,7 +3239,7 @@ class EtsiFileSystem:
         return payload, 0x90, 0x00
 
     def _resolve_sfi_under_current(self, sfi: int) -> SimFileNode | None:
-        """ETSI TS 102 221 §11.1.3.4 SFI resolution.
+        """ETSI TS 102 221 v18.4 §8.4.3 Short File Identifier (SFI) resolution.
 
         The SFI is interpreted "in the currently selected DF". When
         the current node is itself an EF (because the previous APDU

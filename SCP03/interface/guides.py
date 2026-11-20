@@ -374,7 +374,7 @@ class ShellGuides:
 {Config.Colors.HEADER}=== Configuration Files & Persistence Guide ==={Config.Colors.ENDC}
 
 {Config.Colors.CYAN}1. Config Directory (CONFIG_DIR){Config.Colors.ENDC}
-   - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} SCP03 config files are read/written under the shared workspace directory (e.g. `Workspace/SCP03/keys.ini`, `Workspace/SCP03/aid.txt`, `Workspace/SCP03/fids.txt`, `Workspace/SCP03/binds.json`). SCP80 uses SCP80/ota_config.ini.
+   - {Config.Colors.BOLD}Source (Python):{Config.Colors.ENDC} SCP03 config files are read/written under the shared workspace directory (e.g. `Workspace/SCP03/keys.ini`, `Workspace/SCP03/aid.txt`, `Workspace/SCP03/fids.txt`, `Workspace/SCP03/binds.json`). SCP80 keeps its settings in the device inventory (`state/device_inventory.sqlite3`).
    - {Config.Colors.BOLD}Frozen executable:{Config.Colors.ENDC} These workspace files live under the chosen writable runtime root. Set `YGGDRASIM_RUNTIME_ROOT` to force a specific writable root. Default files are copied there on first run if missing.
    - {Config.Colors.BOLD}Shipped seeds:{Config.Colors.ENDC} The first-run defaults are bundled at `SCP03/seeds/{{keys.ini, fids.txt, aid.txt, binds.json}}` and copied (never overwritten) into the workspace. Delete a runtime file to force a re-seed.
 
@@ -385,7 +385,7 @@ class ShellGuides:
    - {Config.Colors.BOLD}Workspace/SCP03/binds.json:{Config.Colors.ENDC} Custom command macros. Keys = command names; values = shell input(s). Use {{0}}, {{1}} for arguments; `;` for multiple commands. Example: "adm": "manage-pin verify 0a {{0}}".
 
 {Config.Colors.CYAN}3. SCP80 OTA Configuration{Config.Colors.ENDC}
-   - {Config.Colors.BOLD}ota_config.ini:{Config.Colors.ENDC} In SCP80 module folder. [ota]: tar (3-byte hex), spi, key_enc, key_mac (KIC/KID keys), transport (SMS/HTTP), etc.
+   - {Config.Colors.BOLD}Inventory:{Config.Colors.ENDC} tar, spi, kic/kid with kic_indicator/kid_indicator, pid, dcs, cntr and transport per ICCID, set with `set <key> <value>` in the SCP80 shell. A legacy `SCP80/ota_config.ini` under the runtime root is read only while the inventory holds no SCP80 state.
 
 {Config.Colors.CYAN}4. SCP11 / SM-DP+ Simulation{Config.Colors.ENDC}
    SCP11 is now split into relay and local-access paths:
@@ -415,7 +415,7 @@ class ShellGuides:
    - {Config.Colors.BOLD}STORE DATA:{Config.Colors.ENDC} Multi-block or large payloads; chunking for SMS-PP size limits.
 
 {Config.Colors.CYAN}4. Configuration{Config.Colors.ENDC}
-   Configure TAR, SPI, KIC, KID, and keys in `ota_config.ini` (SCP80 module). Cipher and CC algorithm must match the card profile.
+   Configure TAR, SPI, KIC, KID, and keys with `set` in the SCP80 shell; the device inventory stores them per ICCID. Cipher and CC algorithm must match the card profile.
 """)
 
     @classmethod

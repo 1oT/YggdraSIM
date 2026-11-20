@@ -4,9 +4,9 @@
 """PE-IoT / PE-OPT-IoT, cdmaParameter and nonStandard through pySim.
 
 Upstream pySim leaves the four ``ProfileElement`` types unmapped in
-``class_for_petype``; ``install_extra_profile_elements`` maps them and
-registers the IoT Minimal Profile templates (TCA SAIP v3.4.1 §8.3.4.8,
-§9.10.1 and §9.10.2). The tests cover the mapping, the template rows
+``class_for_petype``; the pinned pySim maps them and registers the IoT
+Minimal Profile templates (TCA SAIP v3.4.1 §8.3.4.8, §9.10.1 and §9.10.2;
+``upstream_patches/osmocom-pysim-saip-extra-profile-elements/``). The tests cover the mapping, the template rows
 against the compiled ASN.1, the two-level file-system placement, the
 card-image loader, and the quick-add factory.
 """
@@ -19,7 +19,6 @@ from pathlib import Path
 from SIMCARD.saip_profile import _FILE_SPECS, decode_profile_image
 from SIMCARD.utils import encode_iccid_ef, encode_imsi_ef
 from Tools.ProfilePackage.saip_json_codec import ensure_workspace_pysim_on_path
-from Tools.ProfilePackage.saip_pysim_compat import install_extra_profile_elements
 
 _ICCID = "8988201234567890123"
 _IMSI = "001010000000001"
@@ -75,7 +74,6 @@ class ExtraProfileElementLookupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_extra_profile_elements()
 
     def test_lookup_maps_the_four_types(self) -> None:
         from pySim.esim.saip import ProfileElement
@@ -92,32 +90,6 @@ class ExtraProfileElementLookupTests(unittest.TestCase):
 
         self.assertIs(ProfileElement.class_for_petype("usim"), ProfileElementUSIM)
         self.assertIsNone(ProfileElement.class_for_petype("no-such-type"))
-
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import ProfileElement, ProfileElementSequence
-
-        lookup = ProfileElement.class_for_petype
-        grouping = ProfileElementSequence._rebuild_pes_by_naa
-        self.assertFalse(install_extra_profile_elements())
-        self.assertEqual(ProfileElement.class_for_petype, lookup)
-        self.assertIs(ProfileElementSequence._rebuild_pes_by_naa, grouping)
-
-    def test_upstream_still_lacks_the_four_types(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        from pySim.esim.saip import ProfileElement
-
-        upstream_lookup = ProfileElement.class_for_petype.__wrapped__
-        for pe_type in _EXTRA_TYPES:
-            with self.subTest(pe_type=pe_type):
-                self.assertIsNone(
-                    upstream_lookup(ProfileElement, pe_type),
-                    msg=(
-                        "upstream pySim now maps %r: delete "
-                        "install_extra_profile_elements() and "
-                        "upstream_patches/osmocom-pysim-saip-extra-profile-elements/"
-                        % pe_type
-                    ),
-                )
 
     def test_iot_templates_cover_every_file_member(self) -> None:
         """Every ``File`` member of PE-IoT / PE-OPT-IoT has a template row, and no more."""
@@ -153,7 +125,6 @@ class IotFileSystemPlacementTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_extra_profile_elements()
 
     def test_iot_creates_the_mf_and_the_usim_adf(self) -> None:
         from pySim.esim.saip import FsNodeMF, ProfileElementSequence
@@ -219,7 +190,6 @@ class IotCardImageLoaderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_extra_profile_elements()
 
     def _node(self, image, path: tuple[str, ...]):
         matches = [node for node in image.nodes if node.path == path]
@@ -265,7 +235,6 @@ class IotQuickAddTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_extra_profile_elements()
 
     def test_iot_factories_build_typed_elements(self) -> None:
         from Tools.ProfilePackage.saip_pe_quick_add import _factory_map

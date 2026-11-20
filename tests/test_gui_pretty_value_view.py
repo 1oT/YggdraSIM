@@ -140,7 +140,8 @@ class FcpDecodedMigrationJsContract(unittest.TestCase):
             'fcpPretty.className = "cc-fcp-fields cc-pv-object cc-pv-object--depth-0";',
             self.js,
         )
-        self.assertIn("dd.appendChild(renderPrettyValue(fcp[key], 0));", self.js)
+        self.assertIn("function scp03BuildFcpFieldRow(key, value, wide) {", self.js)
+        self.assertIn("dd.appendChild(renderPrettyValue(value, 0));", self.js)
         self.assertIn("buildDecodedToolbar(fcp, fcpPretty, fcpJson)", self.js)
 
     def test_decoded_block_now_uses_pretty_value_renderer(self) -> None:

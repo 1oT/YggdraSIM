@@ -19,6 +19,11 @@ tokens/github-dark.css
 tokens/github-light.css
 tokens/islands-light.css
 tokens/graphite-light.css
+tokens/bench-dark.css
+tokens/bench-light.css
+skins/fonts.css
+skins/bench.css
+skins/classic.css
 tokens/matrix-font-override.css
 layout/base-resets.css
 layout/shell.css
@@ -67,6 +72,9 @@ views/scp03-datasheet-chip.css
 views/inline-panels.css
 views/records-viewer.css
 views/remote-lab.css
+views/cli-output.css
+views/local-eim-page.css
+views/local-eim-leaf-editor.css
 views/plugin-console.css
 views/plugin-console-runs.css
 views/pretty-value-base.css

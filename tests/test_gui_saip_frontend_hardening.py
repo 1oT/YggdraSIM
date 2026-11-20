@@ -251,6 +251,14 @@ def test_saip_command_strip_preserves_workspace_height_and_accessibility() -> No
     assert 'group.setAttribute("aria-label", label + " commands")' in render
     assert "flex-wrap: nowrap" in css
     assert "overflow-x: auto" in css
+    # One command group at a time behind a tab per group.
+    assert "saipRibbonApplyTabs(ribbon);" in render
+    tabs = _between(body, "  function saipRibbonApplyTabs(", "\n  var SAIP_TOP_TABS")
+    assert 'tabs.setAttribute("role", "tablist")' in tabs
+    assert 'tab.setAttribute("role", "tab")' in tabs
+    assert 'group.setAttribute("role", "tabpanel")' in tabs
+    assert "wb.ribbonTab = labels[index];" in tabs
+    assert ".saip-ribbon--tabbed" in css
     assert ".saip-ribbon:focus-visible" in css
     assert ".saip-ribbon-btn:focus-visible" in css
 
@@ -613,3 +621,31 @@ def test_security_attrs_record_is_shown_in_decimal_and_hex() -> None:
     )
     assert 'if (spec.sub === "securityAttributesReferenced") {\n          // The record' in editor
     assert 'input.addEventListener("input", refreshRecordChip);' in editor
+
+
+def test_pe_list_has_a_compact_one_line_density() -> None:
+    """The element list switches to one line per element and remembers it."""
+    body = _body()
+    head = _between(
+        body,
+        '    var leftTitle = top === "file_system" ? "Files" : "Profile elements";',
+        "    leftPane.appendChild(peList);",
+    )
+    assert 'if (top !== "file_system") {' in head
+    assert "leftHead.appendChild(saipBuildPeDensityToggle(peList));" in head
+    pane = _between(
+        body,
+        "  function renderSaipPeListPane(scroll, pkg, peList, detail, validation) {",
+        "  function saipSelectPeRow(",
+    )
+    assert 'list.classList.toggle("saip-pe-cards--compact", saipPeListCompact());' in pane
+    toggle = _between(
+        body,
+        "  function saipBuildPeDensityToggle(peList) {",
+        "  function saipSelectPeRow(",
+    )
+    assert 'toggle.setAttribute("aria-pressed"' in toggle
+    assert "window.localStorage.setItem(SAIP_PE_DENSITY_KEY" in toggle
+    assert 'list.classList.toggle("saip-pe-cards--compact", compact);' in toggle
+    css = (_SOURCE.parents[1] / "css" / "views" / "saip" / "pe-card-list.css").read_text(encoding="utf-8")
+    assert ".saip-pe-cards--compact .saip-pe-card {" in css

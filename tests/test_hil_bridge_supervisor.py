@@ -401,7 +401,9 @@ class DeviceResetBeforeSessionTests(unittest.TestCase):
         with mock.patch("Tools.HilBridge.supervisor.reset_simtrace_device", _fake_reset):
             with mock.patch.object(HilBridgeSupervisor, "_sim_backend_active", lambda _self: False):
                 with mock.patch.object(HilBridgeSupervisor, "_cleanup_stale_bridge_marker"):
-                    supervisor.reconcile()
+                    # The reader lookup asks the host's PC/SC service.
+                    with mock.patch.object(HilBridgeSupervisor, "_local_reader_holder", lambda _self, _sim: None):
+                        supervisor.reconcile()
 
         self.assertEqual(order, ["reset", "start-bridge", "start-remsim"])
         # The REMSIM client must be pinned to the post-reset USB address.
@@ -472,7 +474,7 @@ class RemsimAtrSeedingTests(unittest.TestCase):
             remote_card_url="http://127.0.0.1:8642/apdu",
             extra_args=("-a", "3B00"),
         )
-        supervisor._remote_card_atr_hex = "3B9F9680"
+        supervisor._client_seed_atr_hex = "3B9F9680"
         command = supervisor._build_remsim_command()
         self.assertEqual(command.count("-a"), 1)
         self.assertNotIn("3B9F9680", command)
@@ -619,3 +621,256 @@ class ModemRefreshOnReconnectTests(unittest.TestCase):
             with mock.patch("subprocess.run") as runner:
                 supervisor._refresh_modem_sim_interface()
         self.assertEqual(runner.call_count, 0)
+
+
+class _ModemDiagChild:
+    """A fake mirror process: running until told an exit code, stoppable."""
+
+    def __init__(self, pid: int = 0) -> None:
+        self.pid = pid
+        self.return_code = None
+        self.terminated = False
+
+    def poll(self):
+        return self.return_code
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.return_code = -15
+
+    def wait(self, timeout=None):
+        return self.return_code
+
+    def kill(self) -> None:
+        self.return_code = -9
+
+
+class ModemDiagMirrorChildTests(unittest.TestCase):
+    """The modem-side DIAG mirror is optional and must never touch the bridge.
+
+    It runs as its own child for the supervisor's lifetime, restarts on its own
+    backoff, and none of its failures reach the bridge, the REMSIM client or
+    the state's status and reason.
+    """
+
+    def _supervisor(self, *, device: str = "auto", gsmtap_enabled: bool = True, popen=None, clock=None):
+        self.started: list[list[str]] = []
+        self.children: list[_ModemDiagChild] = []
+
+        def default_popen(command, **kwargs):
+            self.started.append(list(command))
+            self.children.append(_ModemDiagChild())
+            return self.children[-1]
+
+        self.state_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.state_dir.cleanup)
+        # Reader mode with no SIMtrace2: the bridge stays down, so every
+        # process started here is the mirror.
+        backend = mock.patch.object(HilBridgeSupervisor, "_sim_backend_active", lambda _self: False)
+        backend.start()
+        self.addCleanup(backend.stop)
+        return HilBridgeSupervisor(
+            config=HilBridgeSupervisorConfig(
+                bridge=BridgeConfig(gsmtap_enabled=gsmtap_enabled),
+                remsim_client=RemsimClientConfig(enabled=False),
+                bridge_python="python3",
+                state_path=os.path.join(self.state_dir.name, "state.json"),
+                modem_diag_device=device,
+            ),
+            usb_monitor=_ScriptedMonitor([UsbPresenceSnapshot(source="test", present=False)]),
+            popen_factory=popen or default_popen,
+            monotonic=clock or (lambda: 0.0),
+        )
+
+    def _state(self, supervisor) -> dict:
+        with open(supervisor.config.state_path, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def test_nothing_starts_without_a_device(self) -> None:
+        supervisor = self._supervisor(device="")
+        supervisor.reconcile()
+        self.assertEqual(self.started, [])
+        self.assertEqual(self._state(supervisor)["modemDiag"]["enabled"], False)
+
+    def test_nothing_starts_when_the_bridge_sends_no_gsmtap(self) -> None:
+        supervisor = self._supervisor(gsmtap_enabled=False)
+        supervisor.reconcile()
+        self.assertEqual(self.started, [])
+
+    def test_the_mirror_follows_the_bridge_gsmtap_destination(self) -> None:
+        supervisor = self._supervisor()
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 1)
+        command = self.started[0]
+        self.assertIn("Tools.HilBridge.modem_diag", command)
+        self.assertEqual(command[command.index("--device") + 1], "auto")
+        self.assertEqual(command[command.index("--gsmtap-port") + 1], "4729")
+        self.assertEqual(command[command.index("--gsmtap-host") + 1], "127.0.0.1")
+        self.assertTrue(self._state(supervisor)["modemDiag"]["running"])
+
+    def test_the_session_state_reads_the_same_with_and_without_the_mirror(self) -> None:
+        without = self._supervisor(device="")
+        without.reconcile()
+        expected = self._state(without)
+        with_mirror = self._supervisor()
+        with_mirror.reconcile()
+        actual = self._state(with_mirror)
+        for key in ("status", "reason", "bridgeRunning", "remsimClientRunning", "usbPresent"):
+            self.assertEqual(actual[key], expected[key], key)
+
+    def test_an_exit_waits_for_the_backoff_and_a_permanent_one_waits_longer(self) -> None:
+        from Tools.HilBridge import supervisor as sup
+
+        clock = {"t": 0.0}
+        supervisor = self._supervisor(clock=lambda: clock["t"])
+        supervisor.reconcile()
+        self.children[0].return_code = 1
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 1)
+        clock["t"] = sup.MODEM_DIAG_RESTART_BACKOFF_SECONDS - 1
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 1)
+        clock["t"] = sup.MODEM_DIAG_RESTART_BACKOFF_SECONDS
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 2)
+
+        self.children[1].return_code = sup.MODEM_DIAG_PERMANENT_EXIT_CODE
+        supervisor.reconcile()
+        clock["t"] += sup.MODEM_DIAG_RESTART_BACKOFF_SECONDS
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 2)
+        clock["t"] += sup.MODEM_DIAG_PERMANENT_BACKOFF_SECONDS
+        supervisor.reconcile()
+        self.assertEqual(len(self.started), 3)
+        self.assertEqual(self._state(supervisor)["status"], "waiting-usb")
+
+    def test_a_start_failure_is_contained(self) -> None:
+        def failing_popen(command, **kwargs):
+            raise OSError(2, "No such file or directory")
+
+        supervisor = self._supervisor(popen=failing_popen)
+        supervisor.reconcile()
+        state = self._state(supervisor)
+        self.assertEqual(state["status"], "waiting-usb")
+        self.assertFalse(state["modemDiag"]["running"])
+        self.assertIn("No such file", state["modemDiag"]["lastError"])
+
+    def test_an_unexpected_error_is_contained(self) -> None:
+        def exploding_popen(command, **kwargs):
+            raise KeyError("not an OSError at all")
+
+        supervisor = self._supervisor(popen=exploding_popen)
+        supervisor.reconcile()
+        self.assertEqual(self._state(supervisor)["status"], "waiting-usb")
+
+    def test_shutdown_stops_the_mirror(self) -> None:
+        supervisor = self._supervisor()
+        supervisor.reconcile()
+        with mock.patch.object(HilBridgeSupervisor, "_signal_child_process_group", lambda _self, pid, sig: False):
+            supervisor._stop_modem_diag_child_quietly("supervisor shutdown")
+        self.assertTrue(self.children[0].terminated)
+        self.assertIsNone(supervisor._modem_diag_child)
+
+
+class LocalReaderAtrSeedingTests(unittest.TestCase):
+    """A local reader's ATR seeds the REMSIM client too.
+
+    Unseeded, the client puts its '3B 00' placeholder on the board at start-up
+    and on every bankd reconnect, and a modem activating in that gap reads the
+    placeholder instead of the card.
+    """
+
+    CARD_ATR = "3B9F96803FC7828031E073FE211367274000B4000001A8"
+
+    def _supervisor(self, *, extra_args: tuple[str, ...] = ()) -> HilBridgeSupervisor:
+        supervisor = HilBridgeSupervisor(
+            config=HilBridgeSupervisorConfig(
+                bridge=BridgeConfig(),
+                remsim_client=RemsimClientConfig(enabled=True, extra_args=extra_args),
+                bridge_python="python3",
+            ),
+            usb_monitor=_IdleMonitor(),
+        )
+        supervisor._child = _RunningChild(pid=4321)
+        return supervisor
+
+    def _markers(self, *markers):
+        sequence = iter(markers)
+        last = {"value": {}}
+
+        def read():
+            last["value"] = next(sequence, last["value"])
+            return last["value"]
+
+        return mock.patch("Tools.HilBridge.supervisor.read_card_relay_marker", side_effect=read)
+
+    def test_the_bridge_childs_published_atr_reaches_the_command_line(self) -> None:
+        supervisor = self._supervisor()
+        with self._markers({"pid": 4321, "atr": self.CARD_ATR}):
+            self.assertEqual(supervisor.refresh_local_card_atr(), self.CARD_ATR)
+        command = supervisor._build_remsim_command()
+        self.assertEqual(command[command.index("-a") + 1], self.CARD_ATR)
+
+    def test_waits_for_the_marker_of_the_current_bridge_child(self) -> None:
+        supervisor = self._supervisor()
+        with self._markers({}, {"pid": 999, "atr": "3B00"}, {"pid": 4321, "atr": self.CARD_ATR}):
+            with mock.patch.object(supervisor._stop_event, "wait", return_value=False) as waits:
+                self.assertEqual(supervisor.refresh_local_card_atr(), self.CARD_ATR)
+        self.assertEqual(waits.call_count, 2)
+
+    def test_no_marker_in_time_leaves_the_client_unseeded(self) -> None:
+        supervisor = self._supervisor()
+        with self._markers({}):
+            with mock.patch.object(supervisor._stop_event, "wait", return_value=False):
+                self.assertEqual(supervisor.refresh_local_card_atr(), "")
+        self.assertNotIn("-a", supervisor._build_remsim_command())
+
+    def test_an_implausible_atr_leaves_the_client_unseeded(self) -> None:
+        supervisor = self._supervisor()
+        with self._markers({"pid": 4321, "atr": "9000"}):
+            self.assertEqual(supervisor.refresh_local_card_atr(), "")
+        self.assertNotIn("-a", supervisor._build_remsim_command())
+
+    def test_an_operator_supplied_atr_flag_is_not_duplicated(self) -> None:
+        supervisor = self._supervisor(extra_args=("-a", "3B00"))
+        with self._markers({"pid": 4321, "atr": self.CARD_ATR}):
+            supervisor.refresh_local_card_atr()
+        command = supervisor._build_remsim_command()
+        self.assertEqual(command.count("-a"), 1)
+        self.assertNotIn(self.CARD_ATR, command)
+
+    def test_a_remote_card_bridge_is_left_to_the_relay_path(self) -> None:
+        supervisor = HilBridgeSupervisor(
+            config=HilBridgeSupervisorConfig(
+                bridge=BridgeConfig(remote_card_url="http://127.0.0.1:8642/apdu"),
+                remsim_client=RemsimClientConfig(enabled=True),
+                bridge_python="python3",
+            ),
+            usb_monitor=_IdleMonitor(),
+        )
+        supervisor._child = _RunningChild(pid=4321)
+        with self._markers({"pid": 4321, "atr": self.CARD_ATR}) as reader:
+            self.assertEqual(supervisor.refresh_local_card_atr(), "")
+        self.assertEqual(reader.call_count, 0)
+
+    def test_the_client_start_uses_the_local_seed(self) -> None:
+        supervisor = self._supervisor()
+        started: list[list[str]] = []
+
+        def popen(command, **kwargs):
+            started.append(list(command))
+            return _RunningChild(pid=5555)
+
+        supervisor.popen_factory = popen
+        with tempfile.TemporaryDirectory() as state_dir:
+            supervisor.config = HilBridgeSupervisorConfig(
+                bridge=BridgeConfig(),
+                remsim_client=RemsimClientConfig(enabled=True),
+                bridge_python="python3",
+                state_path=os.path.join(state_dir, "state.json"),
+            )
+            with self._markers({"pid": 4321, "atr": self.CARD_ATR}):
+                with mock.patch.object(HilBridgeSupervisor, "_sim_backend_active", lambda _self: False):
+                    supervisor._start_remsim_child(_present_snapshot(bus=3, address=19))
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0][started[0].index("-a") + 1], self.CARD_ATR)

@@ -15,7 +15,7 @@
 
 .saip-edit-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   padding: 10px 12px;
   display: flex;
@@ -179,7 +179,9 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  overscroll-behavior: contain;
+  /* No scroll containment: at the end of the pane the wheel moves the PE
+     view, so the box at the top of a security domain does not hold the
+     reader. */
   padding: 10px;
 }
 
@@ -189,6 +191,9 @@
 
 .saip-sd-param-tree-row {
   display: grid;
+  /* A row in the tree's fixed-height column: without this it shrinks to
+     its 30px floor and a wrapped name runs into the next row. */
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
@@ -227,9 +232,10 @@
 
 .saip-sd-param-tree-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Parameter names are long ("Volatile memory quota", "Cumulative
+     granted non-volatile memory"); they wrap rather than lose their end. */
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .saip-sd-param-dot {
@@ -390,7 +396,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 
@@ -563,7 +569,7 @@ button.saip-chip:focus-visible {
   align-items: baseline;
   gap: 8px;
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -629,7 +635,7 @@ button.saip-chip:focus-visible {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -660,7 +666,7 @@ button.saip-chip:focus-visible {
   color: var(--fg-muted);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   vertical-align: middle;
 }
 

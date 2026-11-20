@@ -169,7 +169,7 @@
   max-width: 640px;
   margin: 20px auto;
   text-align: center;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .scp03-session-welcome h3 {
@@ -199,7 +199,7 @@
   padding: 14px 16px;
   border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--border));
   background: var(--warn-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   color: var(--fg);
   font-size: 13px;
   line-height: 1.4;

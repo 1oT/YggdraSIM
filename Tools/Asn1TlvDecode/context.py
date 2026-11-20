@@ -21,6 +21,7 @@ before the ES10 request is decoded.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,7 @@ from . import gsma_schema
 from .main import (
     DecodeError,
     TagRegistry,
+    _decode_universal_value,
     _json_safe,
     _lookup_apdu_command,
     _parse_apdu_body,
@@ -201,6 +203,70 @@ _AID_PREFIX_NAMES: tuple[tuple[str, str], ...] = (
     ("A0000000871004", "ISIM (3GPP)"),
 )
 
+# Java Card API packages, matched whole: the load files a GET STATUS of
+# Executable Load Files lists, and that INSTALL [for load] and DELETE name.
+_PACKAGE_AID_NAMES: dict[str, str] = {
+    # The AIDs in Oracle's export files (Java Card Development Kit 2.1.1 to
+    # 3.1), read with the JCVM 3.1 §5.5 layout.
+    "A0000000620001": "java.lang",
+    "A0000000620002": "java.io",
+    "A0000000620003": "java.rmi",
+    "A0000000620101": "javacard.framework",
+    "A000000062010101": "javacard.framework.service",
+    "A0000000620102": "javacard.security",
+    "A0000000620201": "javacardx.crypto",
+    "A0000000620202": "javacardx.biometry",
+    "A0000000620203": "javacardx.external",
+    "A0000000620204": "javacardx.biometry1toN",
+    "A0000000620205": "javacardx.security",
+    "A000000062020501": "javacardx.security.cert",
+    "A000000062020502": "javacardx.security.derivation",
+    "A000000062020503": "javacardx.security.util",
+    "A000000062020801": "javacardx.framework.util",
+    "A00000006202080101": "javacardx.framework.util.intx",
+    "A000000062020802": "javacardx.framework.math",
+    "A000000062020803": "javacardx.framework.tlv",
+    "A000000062020804": "javacardx.framework.string",
+    "A000000062020805": "javacardx.framework.event",
+    "A000000062020806": "javacardx.framework.nio",
+    "A000000062020807": "javacardx.framework.time",
+    "A0000000620209": "javacardx.apdu",
+    "A000000062020901": "javacardx.apdu.util",
+    # GPC v2.4 §A.1.2.
+    "A00000015100": "org.globalplatform",
+    # ETSI TS 102 241 v18.1 tables C.1a to C.7.
+    "A0000000090005FFFFFFFF8911000000": "uicc.access",
+    "A0000000090005FFFFFFFF8911010000": "uicc.access.fileadministration",
+    "A0000000090005FFFFFFFF8911020000": "uicc.access.bertlvfile",
+    "A0000000090005FFFFFFFF8912000000": "uicc.toolkit",
+    "A0000000090005FFFFFFFF8912010000": "uicc.toolkit.test",
+    "A0000000090005FFFFFFFF8913000000": "uicc.system",
+    "A0000000090005FFFFFFFF8917000000": "uicc.suspendresume",
+    "A0000000090005FFFFFFFF8918010000": "uicc.services.highupdatearray",
+    # ETSI TS 102 588 v17 table C.1.
+    "A0000000090005FFFFFFFF8914000000": "uicc.scws",
+    # ETSI TS 102 267 v19 table C.1.
+    "A0000000090005FFFFFFFF8915000000": "uicc.connection",
+    # ETSI TS 102 705 v18 tables C.1 to C.5.
+    "A0000000090005FFFFFFFF8916010000": "uicc.hci.framework",
+    "A0000000090005FFFFFFFF8916020100": "uicc.hci.services.cardemulation",
+    "A0000000090005FFFFFFFF8916020200": "uicc.hci.services.connectivity",
+    "A0000000090005FFFFFFFF8916020300": "uicc.hci.services.readermode",
+    "A0000000090005FFFFFFFF8916020400": "uicc.hci.services.cltobserver",
+    # 3GPP TS 31.130 v19.2 annex C.
+    "A0000000871005FFFFFFFF8913100000": "uicc.usim.access",
+    "A0000000871005FFFFFFFF8913200000": "uicc.usim.toolkit",
+    "A0000000871005FFFFFFFF8913300000": "uicc.usim.geolocation",
+    "A0000000871005FFFFFFFF8913400000": "uicc.usim.suci",
+    "A0000000871005FFFFFFFF8913500000": "uicc.usim.gba_u",
+    # 3GPP TS 43.019 v6.0.0 annex C: TS 03.19 v7.0.0 coded '70' where every
+    # later version codes '71'.
+    "A0000000090003FFFFFFFF8910700001": "sim.access",
+    "A0000000090003FFFFFFFF8910700002": "sim.toolkit",
+    "A0000000090003FFFFFFFF8910710001": "sim.access",
+    "A0000000090003FFFFFFFF8910710002": "sim.toolkit",
+}
+
 
 def _load_seeded_aids() -> list[tuple[str, str]]:
     seed = Path(__file__).resolve().parents[2] / "SCP03" / "seeds" / "aid.txt"
@@ -226,6 +292,9 @@ def aid_name(aid: bytes) -> str:
     for known, name in _SEEDED_AIDS:
         if aid_hex == known:
             return name
+    package = _PACKAGE_AID_NAMES.get(aid_hex)
+    if package is not None:
+        return package
     for prefix, name in _AID_PREFIX_NAMES:
         if aid_hex.startswith(prefix):
             return name
@@ -293,12 +362,34 @@ _GP_INS: dict[int, tuple[str, str]] = {
     0xE8: ("LOAD", "GPC v2.3.1 section 11.6"),
     0x50: ("INITIALIZE UPDATE", "GPC Amd D v1.1.2 section 7.1.1"),
     0x82: ("EXTERNAL AUTHENTICATE", "GPC Amd D v1.1.2 section 7.1.2"),
+    0x2A: ("PERFORM SECURITY OPERATION", "GPC Amd F v1.2 section 6.4"),
+    0x88: ("INTERNAL AUTHENTICATE", "GPC Amd F v1.2 section 6.6"),
 }
 
 
 def _gp_cla(cla: int) -> bool:
     # GPC v2.3.1 command tables: CLA '80'-'8F', 'C0'-'CF' or 'E0'-'EF'.
     return (cla & 0xF0) in (0x80, 0xC0, 0xE0)
+
+
+def _part_node(
+    name: str,
+    value: bytes,
+    *,
+    decoded: Any = None,
+    children: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A named part of a structure that is no TLV; a part with no octets of its own carries no length."""
+    node = _node("", name, value, decoded=decoded, children=children)
+    if not value:
+        del node["length"], node["valueHex"]
+    return node
+
+
+def _scp11_key_reference(value: int, what: str) -> str:
+    # GPC Amd F v1.2 sections 6.5.2 and 6.6.2: P1 and P2 name the key in bits 1 to 7; bit 8 is RFU.
+    text = f"{what} {value & 0x7F:02X} of SK.SD.ECKA"
+    return f"{text}; bit 8 is RFU and is set" if value & 0x80 else text
 
 
 def _iso_cla(cla: int) -> bool:
@@ -552,9 +643,31 @@ def classify_command(cla: int, ins: int, p1: int, p2: int, data: bytes) -> Comma
             ctx.header.append(_field("P1", f"{p1:02X}", "key version number ('00' = default key set)", spec="GPC Amd D v1.1.2 section 7.1.1"))
             ctx.payload_kind = "scp_host_challenge"
             ctx.response_kind = "scp_init_update_response"
+        elif ins == 0x82 and p2 != 0x00 and data[:1] == b"\xA6":
+            # GPC Amd F v1.2 section 6.5.2: the INS of EXTERNAL AUTHENTICATE, with a P2 that SCP02 and SCP03 keep at '00'.
+            ctx.name = "MUTUAL AUTHENTICATE"
+            ctx.spec = "GPC Amd F v1.2 section 6.5"
+            ctx.summary = "SCP11a or SCP11c key agreement: the ephemeral public key of the OCE in, the card's key and a receipt back"
+            ctx.header.append(_field("P1", f"{p1:02X}", _scp11_key_reference(p1, "Key Version Number"), spec="GPC Amd F v1.2 section 6.5.2"))
+            ctx.header.append(_field("P2", f"{p2:02X}", _scp11_key_reference(p2, "Key Identifier"), spec="GPC Amd F v1.2 section 6.5.2"))
+            ctx.payload_kind = "scp11_key_agreement"
+            from . import payload_readings
+
+            ctx.response_kind = payload_readings.mutual_authenticate_response_kind(data)
         elif ins == 0x82:
             ctx.summary = "host cryptogram and C-MAC prove the session keys"
             ctx.payload_kind = "opaque"
+        elif ins == 0x88:
+            ctx.summary = "SCP11b key agreement: the ephemeral public key of the OCE in, the card's and a receipt back"
+            ctx.header.append(_field("P1", f"{p1:02X}", _scp11_key_reference(p1, "Key Version Number"), spec="GPC Amd F v1.2 section 6.6.2"))
+            ctx.header.append(_field("P2", f"{p2:02X}", _scp11_key_reference(p2, "Key Identifier"), spec="GPC Amd F v1.2 section 6.6.2"))
+            ctx.payload_kind = "scp11_key_agreement"
+            ctx.response_kind = "scp11_internal_authenticate_response"
+        elif ins == 0x2A:
+            ctx.summary = "submit CERT.OCE.ECKA, or one certificate of the chain that ends with it, before an SCP11a or SCP11c session"
+            ctx.header.append(_field("P1", f"{p1:02X}", f"Key Version Number {p1 & 0x7F:02X} of PK.CA-KLOC.ECDSA; " + ("more command(s) follow for this certificate" if p1 & 0x80 else "last command of this certificate"), spec="GPC Amd F v1.2 Table 6-8"))
+            ctx.header.append(_field("P2", f"{p2:02X}", f"Key Identifier {p2 & 0x7F:02X} of PK.CA-KLOC.ECDSA; " + ("more certificate(s) follow" if p2 & 0x80 else "last certificate"), spec="GPC Amd F v1.2 Table 6-9"))
+            ctx.payload_kind = "scp11_certificate"
         elif ins == 0xD8:
             ctx.summary = "load or replace a key set"
             ctx.payload_kind = "gp_put_key"
@@ -633,6 +746,10 @@ def _uicc_header(ctx: CommandContext, ins: int, p1: int, p2: int, data: bytes) -
         ctx.header.append(_field("P1", f"{p1:02X}", f"record number {p1}" if p1 else "current record"))
     else:
         ctx.summary = name_summary(ins)
+        if ins == 0xAA:
+            ctx.payload_kind = "terminal_capability"
+        elif ins == 0x78:
+            ctx.response_kind = "suci"
     if ctx.payload_kind == "" and len(data) > 0:
         ctx.payload_kind = "tlv"
 
@@ -1030,9 +1147,28 @@ def decode_gp_get_data_response(tag_hex: str, data: bytes, registry: TagRegistry
         if len(nodes) == 1:
             nodes[0]["name"] = _gp_get_data_tag_name(nodes[0]["tag"])
             nodes[0]["spec"] = "GPC v2.3.1 section 11.3.2.1"
+            if nodes[0]["tag"] == "E0":
+                _name_key_information(nodes[0])
     else:
         nodes = [_node(tag_hex, _gp_get_data_tag_name(tag_hex), data)]
     return _payload("gp_get_data", f"GET DATA '{tag_hex}' response", "GPC v2.3.1 section 11.3.3", nodes=nodes)
+
+
+def _name_key_information(template: dict[str, Any]) -> None:
+    """Read each Key Information Data entry 'C0' of a Key Information Template in words."""
+    from . import payload_readings
+
+    for child in template.get("children") or []:
+        if child.get("tag") != "C0":
+            continue
+        try:
+            reading = payload_readings.key_information_text(bytes.fromhex(str(child.get("valueHex") or "")))
+        except ImportError:
+            reading = None
+        child["name"] = "Key Information Data"
+        child["spec"] = "GPC v2.4 section 11.3.3.1"
+        if reading:
+            child["decoded"] = reading
 
 
 def decode_scp_init_update_response(data: bytes) -> dict[str, Any]:
@@ -1439,9 +1575,118 @@ def _decode_comprehension_tlvs(data: bytes, *, command_type: int | None = None) 
             unit = {0x00: "minutes", 0x01: "seconds", 0x02: "tenths of seconds"}.get(value[0], "reserved unit")
             decoded = f"{value[1]} {unit}"
         node = _node(f"{tag:02X}", name, value, spec=spec, decoded=decoded)
+        if tag == 0x36 and value:
+            # Channel data of SEND DATA and RECEIVE DATA, read on its own; a trace follows it as a stream (_follow_channel_data).
+            from . import input_forms
+
+            carried = input_forms.channel_payload_nodes(value)
+            if carried:
+                node["children"] = carried
         node["comprehensionRequired"] = cr
         nodes.append(node)
     return nodes, complete
+
+
+def _decode_terminal_profile(data: bytes) -> dict[str, Any]:
+    """TERMINAL PROFILE: one row per byte naming the facilities it claims, findings as notes."""
+    from yggdrasim_common import terminal_profile
+
+    result = terminal_profile.decode(data)
+    claimed: dict[int, list[str]] = {}
+    for facility, value in result.values:
+        if value == 0:
+            continue
+        shown = facility.describe() if facility.width == 1 else f"{facility.describe()} = {value}"
+        claimed.setdefault(facility.byte, []).append(shown)
+    fields = [_field("Profile bytes", _hex(data), f"{len(data)} byte(s)")]
+    for byte in range(1, len(data) + 1):
+        if byte > terminal_profile.LAST_DEFINED_BYTE:
+            fields.append(_field(f"Bytes {byte}-{len(data)}", _hex(data[byte - 1 :]), "RFU"))
+            break
+        title = terminal_profile.BYTE_TITLES.get(byte, "")
+        label = f"Byte {byte}" + (f" ({title})" if title else "")
+        names = claimed.get(byte, [])
+        fields.append(_field(label, f"{data[byte - 1]:02X}", "; ".join(names) if names else "nothing claimed"))
+    payload = _payload(
+        "terminal_profile",
+        "TERMINAL PROFILE",
+        "TS 102 223 v18.3 section 5.2, TS 31.111 v19.4 section 5.2",
+        fields=fields,
+    )
+    notes = [
+        f"{finding.severity}: {finding.address + ' ' if finding.address else ''}{finding.text}"
+        for finding in result.findings
+    ]
+    if notes:
+        payload["notes"] = notes
+    return payload
+
+
+def _follow_channel_data(payload: dict[str, Any], state: TraceState, *, terminal_response: bool) -> dict[str, Any]:
+    """Read the channel data of a trace as one stream, so a record cut across data blocks is read once it is whole.
+
+    SEND DATA carries the card's octets in the proactive command (TS 102 223
+    v18.3 section 6.4.30); the terminal returns the network's in the TERMINAL
+    RESPONSE to RECEIVE DATA (section 6.4.29). Each channel is its own stream:
+    a proactive command names its channel in the destination device identity
+    (section 8.7, '21' to '27'), and the answer to RECEIVE DATA belongs to the
+    channel of the command before it. A channel starts afresh when OPEN
+    CHANNEL assigns its identifier (the Channel status of the TERMINAL
+    RESPONSE, section 8.56) and when CLOSE CHANNEL names it.
+    """
+    from yggdrasim_common.bip_stream_decode import BipChannelObserver
+    from yggdrasim_common.stk_tables import PROACTIVE_COMMANDS
+
+    def value_of(tag: str) -> bytes:
+        node = next((entry for entry in nodes if entry.get("tag") == tag and entry.get("valueHex")), None)
+        try:
+            return bytes.fromhex(str(node["valueHex"])) if node is not None else b""
+        except ValueError:
+            return b""
+
+    nodes = list(payload.get("nodes") or [])
+    if not terminal_response:
+        nodes = list(nodes[0].get("children") or []) if nodes else []
+    details = value_of("01")
+    command = PROACTIVE_COMMANDS.get(details[1], "") if len(details) == 3 else ""
+    identities = value_of("02")
+    addressed = identities[1] & 0x07 if len(identities) == 2 and 0x21 <= identities[1] <= 0x27 else 0
+    if command == "OPEN CHANNEL":
+        status = value_of("38")
+        if terminal_response and len(status) == 2 and status[0] & 0x07:
+            state.channel_observers.pop(status[0] & 0x07, None)
+        return payload
+    if command == "CLOSE CHANNEL":
+        if not terminal_response:
+            state.channel_observers.pop(addressed, None)
+        return payload
+    if command == "RECEIVE DATA" and not terminal_response:
+        state.receive_channel = addressed
+        return payload
+    if (command, terminal_response) not in (("SEND DATA", False), ("RECEIVE DATA", True)):
+        return payload
+    data_node = next((node for node in nodes if node.get("tag") == "36" and node.get("valueHex")), None)
+    if data_node is None:
+        return payload
+    from . import input_forms
+
+    channel = state.receive_channel if terminal_response else addressed
+    observer = state.channel_observers.setdefault(channel, BipChannelObserver())
+    direction = "network to card" if terminal_response else "card to network"
+    events = observer.observe(bytes.fromhex(str(data_node["valueHex"])), direction)
+    children = input_forms.channel_event_nodes(events)
+    waiting = observer.pending_bytes(direction) + observer.held_handshake_bytes(direction)
+    held = f"{waiting} byte(s) of a record or handshake message wait for the next data block"
+    if children:
+        if waiting:
+            children.append(_part_node("continues", b"", decoded=held))
+        data_node["children"] = children
+    else:
+        # Nothing completed in this block: the octets stay in view, with what they wait for.
+        data_node.pop("children", None)
+        if waiting:
+            data_node["decoded"] = held
+    return payload
 
 
 def decode_cat(data: bytes, *, expect: str) -> dict[str, Any]:
@@ -1453,7 +1698,7 @@ def decode_cat(data: bytes, *, expect: str) -> dict[str, Any]:
             payload["notes"] = ["The COMPREHENSION-TLV sequence does not cover the whole data field."]
         return payload
     if expect == "terminal_profile":
-        return _payload("terminal_profile", "TERMINAL PROFILE", "TS 102 223 v18.3 section 5.2", fields=[_field("Profile bytes", _hex(data), f"{len(data)} byte(s)")])
+        return _decode_terminal_profile(data)
     items = _iter_tlvs(data)
     if len(items) != 1 or not _tlvs_cover(data, items):
         nodes, complete = _decode_comprehension_tlvs(data)
@@ -1464,6 +1709,12 @@ def decode_cat(data: bytes, *, expect: str) -> dict[str, Any]:
     tag = outer.tag_bytes[0] if len(outer.tag_bytes) == 1 else -1
     name = _CAT_BER_TAGS.get(tag, "BER-TLV data object")
     nodes, complete = _decode_comprehension_tlvs(outer.value)
+    if tag == 0xD1:
+        # SMS-PP download: the TPDU comes from the network.
+        _attach_sms_tpdu(nodes, mobile_terminated=True)
+    elif tag == 0xD0 and any(child.get("tag") == "01" and str(child.get("valueHex", ""))[2:4] == "13" for child in nodes):
+        # SEND SHORT MESSAGE: the TPDU is the one the terminal submits.
+        _attach_sms_tpdu(nodes, mobile_terminated=False)
     root = _node(outer.tag_hex, name, outer.value, spec="TS 101 220 v19 table 7.17", children=nodes)
     title = name
     for child in nodes:
@@ -1474,6 +1725,20 @@ def decode_cat(data: bytes, *, expect: str) -> dict[str, Any]:
     if not complete:
         payload["notes"] = ["The COMPREHENSION-TLV sequence does not cover the whole BER-TLV value."]
     return payload
+
+
+def _attach_sms_tpdu(nodes: list[dict[str, Any]], *, mobile_terminated: bool) -> None:
+    """Read the SMS TPDU object among ``nodes`` field by field, with the secured packet it carries."""
+    from . import payload_readings
+
+    for node in nodes:
+        if node.get("tag") != "0B" or not node.get("valueHex"):
+            continue
+        children = payload_readings.sms_tpdu_nodes(bytes.fromhex(str(node["valueHex"])), mobile_terminated=mobile_terminated)
+        if children:
+            node["name"] = "SMS TPDU"
+            node["spec"] = "TS 23.040 v19 section 9.2.2"
+            node["children"] = children
 
 
 # ----------------------------------------------------------------------
@@ -1549,7 +1814,8 @@ def _es10_index() -> dict[str, dict[str, list[str]]]:
         bucket = "request" if type_name.endswith("Request") else "response"
         if type_name in ("EUICCInfo1", "EUICCInfo2", "BoundProfilePackage", "ProfileInstallationResultData", "NotificationMetadata", "HandleNotification", "HandleNotificationEsipa", "EimAcknowledgements", "SequenceNumber"):
             bucket = "response"
-        if type_name.endswith(("Request", "RequestEsipa")):
+        # ES9+, ES11 and ESipa requests carry an interface suffix (RequestEs9, RequestEsipa).
+        if re.search(r"Request(?:Es\w+)?$", type_name):
             bucket = "request"
         if type_name not in entry[bucket]:
             entry[bucket].append(type_name)
@@ -1647,20 +1913,450 @@ def es10_types_for(tag_hex: str) -> dict[str, list[str]]:
     return _ES10_TABLE.get(tag_hex.upper(), {"request": [], "response": [], "docs": []})
 
 
-def _schema_value_nodes(value: Any, name: str) -> dict[str, Any]:
-    """Turn an asn1tools value into display nodes: dicts nest, bytes show hex."""
+# ``type_name`` asn1tools gives a type written inline; any other value names
+# the type a member references (``IpaEuiccData``, ``ProfileState``).
+_ASN1_KEYWORDS = gsma_schema.ASN1_KEYWORDS
+
+# A tag list is the tags of another type's members, concatenated without
+# delimitation; (holding type, member) -> (type whose members it selects, clause).
+_TAG_LIST_TARGETS: dict[tuple[str, str], tuple[str, str]] = {
+    # The IPA and eUICC data items the eIM asks for, by their IpaEuiccData tag.
+    ("IpaEuiccDataRequest", "tagList"): ("IpaEuiccData", "SGP.32 v1.3 §2.11.1.2"),
+    # The data objects each ProfileInfo of the response carries.
+    ("ProfileInfoListRequest", "tagList"): ("ProfileInfo", "SGP.22 v3.1 §5.7.15"),
+    ("ListProfileInfo", "tagList"): ("ProfileInfo", "SGP.22 v3.1 §5.7.15"),
+    # The value is '5A', the EID.
+    ("GetEuiccDataRequest", "tagList"): ("GetEuiccDataResponse", "SGP.22 v3.1 §5.7.20"),
+}
+
+# A BIT STRING up to this many bits is shown bit by bit, a longer one as hex.
+_BITS_SHOWN = 32
+
+# Universal class numbers (X.680 (02/2021) §8.4, Table 1) an ANY value is read
+# as: the character string types, then BOOLEAN, INTEGER, NULL, OBJECT
+# IDENTIFIER, ENUMERATED, UTCTime and GeneralizedTime.
+_ANY_TEXT_TAGS = frozenset({12, 18, 19, 20, 21, 22, 25, 26, 27, 28, 30})
+_ANY_VALUE_TAGS = _ANY_TEXT_TAGS | {1, 2, 5, 6, 10, 23, 24}
+
+
+def _unwrap_type(type_obj: Any) -> Any:
+    """The asn1tools type under its ExplicitTag and Recursive wrappers."""
+    for _ in range(16):
+        if type(type_obj).__name__ not in ("ExplicitTag", "Recursive"):
+            break
+        inner = getattr(type_obj, "inner", None)
+        if inner is None:
+            break
+        type_obj = inner
+    return type_obj
+
+
+def _type_members(type_obj: Any) -> dict[str, Any]:
+    """Members of a SEQUENCE, SET or CHOICE type by name, extension additions included."""
+    shape = _unwrap_type(type_obj)
+    members: list[Any] = list(getattr(shape, "root_members", None) or getattr(shape, "members", None) or [])
+    for addition in getattr(shape, "additions", None) or []:
+        members.extend(addition if isinstance(addition, list) else [addition])
+    return {str(member.name): member for member in members if getattr(member, "name", "")}
+
+
+def _type_reference(type_obj: Any) -> tuple[str, str]:
+    """The type a member references and its module; ('', '') for an inline type."""
+    current = type_obj
+    for _ in range(16):
+        if current is None:
+            return "", ""
+        name = str(getattr(current, "type_name", "") or "")
+        if name and name not in _ASN1_KEYWORDS:
+            return name, str(getattr(current, "module_name", "") or "")
+        if type(current).__name__ not in ("ExplicitTag", "Recursive"):
+            return "", ""
+        current = getattr(current, "inner", None)
+    return "", ""
+
+
+def _type_label(type_obj: Any) -> str:
+    """The name of the type a member references; '' for an inline type."""
+    return _type_reference(type_obj)[0]
+
+
+def _member_definition(tree: dict[str, Any] | None, entry: Any, compiled: Any, module: str) -> tuple[dict[str, Any] | None, str]:
+    """The parse-tree entry describing a member: the type it references, or its own inline one.
+
+    Walking the parse tree beside the value finds an inline type wherever it
+    sits, also inside an anonymous SEQUENCE no type name reaches (SGP.32 v1.3
+    ProfileDownloadTriggerResult ... profileDownloadError.profileDownloadErrorReason).
+    """
+    if tree is None:
+        return None, module
+    reference, reference_module = _type_reference(compiled)
+    if reference:
+        return gsma_schema.resolve_definition(tree, {"type": reference}, reference_module or module)
+    return gsma_schema.resolve_definition(tree, entry, module) if isinstance(entry, dict) else (None, module)
+
+
+def _split_tag_list(value: bytes) -> tuple[list[bytes], bytes]:
+    """The BER tags of a tag list value, and a trailing tag that is cut short."""
+    tags: list[bytes] = []
+    offset = 0
+    while offset < len(value):
+        end = offset + 1
+        if value[offset] & 0x1F == 0x1F:
+            # X.690 §8.1.2.4: subsequent octets carry bit 8 until the last one.
+            while end < len(value) and value[end] & 0x80:
+                end += 1
+            if end >= len(value):
+                return tags, value[offset:]
+            end += 1
+        tags.append(value[offset:end])
+        offset = end
+    return tags, b""
+
+
+def _tag_list_entries(value: bytes, target: str, clause: str) -> tuple[list[dict[str, Any]], str] | None:
+    """Name each tag of a tag list after the ``target`` member it selects."""
+    tree = gsma_schema.type_tree(target)
+    if tree is None:
+        return None
+    names = {bytes(member.tag): name for name, member in _type_members(tree).items() if getattr(member, "tag", None)}
+    tags, tail = _split_tag_list(value)
+    entries = [{"name": _hex(tag), "kind": "tag", "value": names.get(tag, f"no {target} member")} for tag in tags]
+    if tail:
+        entries.append({"name": _hex(tail), "kind": "tag", "value": "tag cut short"})
+    summary = f"{len(tags)} {target} tag{'' if len(tags) == 1 else 's'}, {clause}"
+    return entries, summary
+
+
+_EUICC_RESPONSE_SPEC = "TCA eUICC Profile Package V3.4.1 section 8.11"
+
+
+def _euicc_response_nodes(data: bytes) -> tuple[list[dict[str, Any]], str, dict[str, Any]] | None:
+    """Display nodes, summary and result of an EUICCResponse octet string, or None when it is not one."""
+    from SCP11.shared.sima_response import decode_sima_response, describe_pe_status_text
+
+    semantic = decode_sima_response(data).get("semantic") or {}
+    statuses = semantic.get("pe_status")
+    if not isinstance(statuses, list) or len(statuses) == 0:
+        return None
+    entries: list[dict[str, Any]] = []
+    for index, entry in enumerate(statuses):
+        status = int(entry["status"])
+        fields: list[dict[str, Any]] = [{
+            "name": "status", "kind": "integer", "number": status,
+            "value": f"{status} ({entry['status_name']})", "decoded": entry["status_name"],
+        }]
+        for key, label in (("identification", "identification"),
+                           ("additional_information", "additional-information"), ("offset", "offset")):
+            if entry.get(key) is not None:
+                fields.append({"name": label, "kind": "integer", "value": int(entry[key])})
+        entries.append({"name": f"[{index}]", "kind": "sequence", "children": fields,
+                        "decoded": describe_pe_status_text(entry)})
+    nodes: list[dict[str, Any]] = [{"name": "peStatus", "kind": "list", "children": entries}]
+    if semantic.get("profile_installation_aborted"):
+        nodes.append({"name": "profileInstallationAborted", "kind": "null"})
+    if semantic.get("status_message"):
+        nodes.append({"name": "statusMessage", "kind": "string", "value": str(semantic["status_message"])})
+    summary = "all PEs ok" if semantic.get("ok") else str(semantic.get("failure_cause") or "failure")
+    result = {"ok": bool(semantic.get("ok")), "text": summary}
+    return [{"name": "EUICCResponse", "kind": "sequence", "children": nodes}], summary, result
+
+
+def _euicc_response_payload(data: bytes) -> dict[str, Any] | None:
+    """The payload of a bare EUICCResponse, the simaResponse octets on their own; None for anything else."""
+    from SCP11.shared.sima_response import is_euicc_response
+
+    if not is_euicc_response(data):
+        return None
+    reading = _euicc_response_nodes(data)
+    if reading is None:
+        return None
+    nodes, _summary, result = reading
+    tree = _generic_tree(data, _registry())
+    return _payload(
+        "es10", "EUICCResponse", _EUICC_RESPONSE_SPEC,
+        schema=nodes[0], schemaType="EUICCResponse", schemaSource=[_EUICC_RESPONSE_SPEC], result=result,
+        nodes=_tree_to_nodes(tree) if tree else [],
+        notes=["Read as an EUICCResponse by its structure; a bare SEQUENCE carries no tag that names its type."],
+    )
+
+
+def _installation_result(node: Any) -> dict[str, Any] | None:
+    """What the EUICCResponses under ``node`` report together: all ok, or each failure cause."""
+    found: list[dict[str, Any]] = []
+
+    def collect(entry: Any) -> None:
+        if isinstance(entry, list):
+            for item in entry:
+                collect(item)
+        elif isinstance(entry, dict):
+            if isinstance(entry.get("result"), dict):
+                found.append(entry["result"])
+            collect(entry.get("children"))
+
+    collect(node)
+    if not found:
+        return None
+    failed = [entry for entry in found if not entry.get("ok")]
+    if not failed:
+        return {"ok": True, "text": "all PEs ok" if len(found) == 1 else f"all PEs ok in {len(found)} results"}
+    text = "; ".join(str(entry.get("text") or "failure") for entry in failed)
+    if len(found) > 1:
+        text = f"{len(failed)} of {len(found)} results failed: {text}"
+    return {"ok": False, "text": text}
+
+
+def _located_installation_result(payload: dict[str, Any], data: bytes) -> None:
+    """Head ``payload`` with the outcome of an EUICCResponse found by its tags.
+
+    A ProfileInstallationResult the schema refuses, or one inside a wrapper the
+    schema has no type for, still carries the response at fixed tags (SGP.22
+    v3.1 section 2.5.6); the added rows say where it was found.
+    """
+    from SCP11.shared.sima_response import locate_sima_response
+
+    located = locate_sima_response(data)
+    if located is None or not located.get("sima_response"):
+        return
+    response = bytes(located["sima_response"])
+    reading = _euicc_response_nodes(response)
+    if reading is None:
+        return
+    payload["result"] = reading[2]
+    where = f"found by its tags in the {located.get('result') or 'result'} of a {located.get('source') or 'result'}"
+    fields = list(payload.get("fields") or [])
+    fields.append(_field("EUICCResponse", _hex(response), where, spec=_EUICC_RESPONSE_SPEC))
+    for key, type_name, label in (("bpp_command_id", "BppCommandId", "bppCommandId"), ("error_reason", "ErrorReason", "errorReason")):
+        if located.get(key) is not None:
+            number = int(located[key])
+            fields.append(_field(label, number, gsma_schema.named_values(type_name).get(number, "")))
+    payload["fields"] = fields
+
+
+def _euicc_info2_tag_reading(payload: dict[str, Any], data: bytes) -> None:
+    """Read an EUICCInfo2 the schema refuses member by member from its tags, with the SGP.32 check."""
+    from SCP03.logic.euicc_info2 import build_euicc_info2_detail_lines
+
+    try:
+        lines = build_euicc_info2_detail_lines(data)
+    except ValueError:
+        return
+    fields: list[dict[str, Any]] = []
+    path: list[str] = []
+    for indent, label, value in lines:
+        if indent == 0 and label == "SGP.32 Validation":
+            # The check follows as notes.
+            break
+        path = path[:indent] + [str(label)]
+        fields.append(_field(" / ".join(path), str(value)))
+    if not fields:
+        return
+    payload["title"] = "EUICCInfo2"
+    payload["fields"] = fields
+    payload["notes"] = list(payload.get("notes") or []) + _euicc_info2_check_notes(data)
+
+
+def _euicc_info2_check_notes(data: bytes) -> list[str]:
+    """The SGP.32 check of an EUICCInfo2 as notes; a consumer eUICC's answer has none."""
+    from SCP03.logic.euicc_info2 import build_euicc_info2_validation_lines
+
+    try:
+        lines = build_euicc_info2_validation_lines(data)
+    except ValueError as error:
+        # The check reads the TLVs strictly and refuses an encoding the schema decode took.
+        return [f"SGP.32 check not run: {error}"]
+    status = next((str(value) for indent, _label, value in lines if indent == 0), "")
+    details = [str(value) for indent, _label, value in lines if indent > 0]
+    if not status:
+        return []
+    return [f"SGP.32 check {status}: {detail}" for detail in details] or [f"SGP.32 check {status}"]
+
+
+def _any_value_reading(data: bytes) -> tuple[Any, bool] | None:
+    """An ANY carries one complete TLV; a primitive universal one is read by its tag.
+
+    Returns the value and whether it is character text, or None.
+    """
+    items = _iter_tlvs(data)
+    if len(items) != 1 or not _tlvs_cover(data, items) or items[0].constructed:
+        return None
+    first = items[0].tag_bytes[0]
+    number = first & 0x1F
+    if first & 0xC0 or number not in _ANY_VALUE_TAGS:
+        return None
+    value = _decode_universal_value(number, items[0].value, _registry())
     if isinstance(value, dict):
-        children = [_schema_value_nodes(item, str(key)) for key, item in value.items()]
+        return None
+    if number in _ANY_TEXT_TAGS and items[0].value and value == _hex(items[0].value):
+        # The decoder's fallback for undecodable text is the hex itself.
+        return None
+    return ("NULL" if value is None else value), number in _ANY_TEXT_TAGS
+
+
+def _bit_string_node(name: str, data: bytes, bit_count: int, names: dict[int, str]) -> dict[str, Any]:
+    """A BIT STRING with its set bits named; bit 0 is the first bit (X.680 §22.6)."""
+    count = max(0, min(bit_count, len(data) * 8))
+    bits = "".join("1" if data[index // 8] & (0x80 >> (index % 8)) else "0" for index in range(count))
+    node: dict[str, Any] = {"name": name, "kind": "bits", "valueHex": _hex(data), "bitLength": count, "bits": bits}
+    shown = f"'{bits}'B" if count <= _BITS_SHOWN else f"'{_hex(data)}'H ({count} bits)"
+    if names:
+        named = [names.get(index, f"bit {index}") for index, bit in enumerate(bits) if bit == "1"]
+        node["set"] = named
+        # Every bit the type names, and any set bit it does not, for the coverage view.
+        set_bits = {index for index, bit in enumerate(bits) if bit == "1"}
+        node["options"] = [
+            {"bit": number, "name": names.get(number, f"bit {number}"), "set": number in set_bits}
+            for number in sorted(set(names) | set_bits)
+        ]
+        shown += f" ({', '.join(named) if named else 'none set'})"
+    node["value"] = shown
+    return node
+
+
+def _extended_card_resources(data: bytes) -> str | None:
+    """ETSI TS 102 226 v19.0 §8.2.1.7.2 Extended Card resources: '81' installed
+    applications, '82' free non-volatile and '83' free volatile memory.
+
+    SGP.22 v3.1 §4.3 gives the memory in bytes, for Profile download and installation.
+    """
+    items = _iter_tlvs(data)
+    if not items or not _tlvs_cover(data, items):
+        return None
+    values = {item.tag_hex: int.from_bytes(item.value, "big") for item in items if item.value}
+    if not set(values) <= {"81", "82", "83"} or not values:
+        return None
+    parts = []
+    if "81" in values:
+        parts.append(f"{values['81']} installed application{'' if values['81'] == 1 else 's'}")
+    if "82" in values:
+        parts.append(f"{values['82']} B free non-volatile memory")
+    if "83" in values:
+        parts.append(f"{values['83']} B free volatile memory")
+    return ", ".join(parts)
+
+
+def _certificate_node(name: str, value: dict[str, Any], source: bytes) -> dict[str, Any] | None:
+    """An X.509 certificate as the rows of ``SCP11.shared.certificate_view``.
+
+    asn1tools hands over the decoded fields, not the bytes, so the certificate
+    is encoded again and used only when those bytes are the ones in the input:
+    after the first octet, which an implicit member tag ('A5', 'A6') replaces.
+    """
+    try:
+        der = gsma_schema.encode_type("Certificate", value)
+    except Exception:  # noqa: BLE001 - asn1tools encode errors are library-specific; the field tree stands
+        return None
+    if len(der) < 2 or der[1:] not in source:
+        return None
+    try:
+        from SCP11.shared.certificate_view import certificate_rows
+    except ImportError:
+        return None
+    rows = [
+        {"name": row.label, "kind": "value", "value": row.value, "tone": row.tone, "indent": row.indent}
+        for row in certificate_rows(der)
+    ]
+    return {"name": name, "kind": "certificate", "valueHex": _hex(der), "length": len(der), "children": rows}
+
+
+def _value_names(definition: dict[str, Any] | None, label: str, owner: str, name: str) -> dict[int, str]:
+    """Named bits or numbers from the parse-tree entry; by type and member name without one."""
+    if definition is not None:
+        return gsma_schema.definition_values(definition, label)
+    return gsma_schema.named_values(label, owner=owner, member=name)
+
+
+def _schema_value_nodes(
+    value: Any,
+    name: str,
+    type_obj: Any = None,
+    *,
+    type_label: str = "",
+    owner: str = "",
+    source: bytes = b"",
+    definition: dict[str, Any] | None = None,
+    tree: dict[str, Any] | None = None,
+    module: str = "",
+) -> dict[str, Any]:
+    """Turn an asn1tools value into display nodes: dicts nest, bytes show hex.
+
+    ``type_obj`` is the asn1tools type the value was decoded with, when known,
+    ``type_label`` the name of that type and ``owner`` the name of the type
+    whose member ``name`` is; they name the entries of a tag list. ``source``
+    is the decoded input, against which a certificate's bytes are checked.
+    ``definition`` is the value's entry in the parse ``tree`` (``module`` the
+    module it sits in), walked beside the value for the named bits and numbers.
+    """
+    label = type_label or _type_label(type_obj)
+    shape = _unwrap_type(type_obj) if type_obj is not None else None
+
+    def below(item: Any, child: str, compiled: Any, entry: Any) -> dict[str, Any]:
+        child_definition, child_module = _member_definition(tree, entry, compiled, module)
+        return _schema_value_nodes(
+            item, child, compiled, owner=label, source=source,
+            definition=child_definition, tree=tree, module=child_module,
+        )
+
+    if isinstance(value, dict):
+        if label == "Certificate" and source:
+            certificate = _certificate_node(name, value, source)
+            if certificate is not None:
+                return certificate
+        members = _type_members(shape) if shape is not None else {}
+        entries = gsma_schema.members_of(definition)
+        children = [below(item, str(key), members.get(str(key)), entries.get(str(key))) for key, item in value.items()]
         return {"name": name, "kind": "sequence", "children": children}
-    if isinstance(value, (list, tuple)) and not (len(value) == 2 and isinstance(value[0], str) and not isinstance(value[1], str) and isinstance(value, tuple)):
-        children = [_schema_value_nodes(item, f"{name}[{index}]") for index, item in enumerate(value)]
-        return {"name": name, "kind": "list", "children": children}
+    if isinstance(value, tuple) and len(value) == 2 and value[0] is None and value[1] is None:
+        # asn1tools reads an extensible CHOICE with an unknown tag this way.
+        return {"name": name, "kind": "value", "value": "unknown CHOICE alternative"}
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (bytes, bytearray)) and isinstance(value[1], int):
+        return _bit_string_node(name, bytes(value[0]), value[1], _value_names(definition, label, owner, name))
     if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], str):
-        inner = _schema_value_nodes(value[1], value[0])
+        member = _type_members(shape).get(value[0]) if shape is not None else None
+        inner = below(value[1], value[0], member, gsma_schema.members_of(definition).get(value[0]))
         return {"name": name, "kind": "choice", "choice": value[0], "children": [inner]}
+    if isinstance(value, (list, tuple)):
+        element = getattr(shape, "element_type", None)
+        element_entry = definition.get("element") if isinstance(definition, dict) else None
+        # An element is named by its index alone; the list above it carries the name.
+        children = [below(item, f"[{index}]", element, element_entry) for index, item in enumerate(value)]
+        return {"name": name, "kind": "list", "children": children}
     if isinstance(value, (bytes, bytearray)):
         data = bytes(value)
         node: dict[str, Any] = {"name": name, "kind": "octets", "valueHex": _hex(data), "length": len(data)}
+        target = _TAG_LIST_TARGETS.get((owner, name))
+        if target is not None:
+            listed = _tag_list_entries(data, *target)
+            if listed is not None:
+                node["children"], node["decoded"] = listed
+            return node
+        if type(shape).__name__ in ("Any", "AnyDefinedBy"):
+            # An ANY reads as nothing until its TLV is, e.g. a certificate's
+            # AttributeValue holding a PrintableString.
+            reading = _any_value_reading(data)
+            if reading is not None:
+                node["decoded"], node["decodedText"] = reading
+            return node
+        if label == "VersionType" and len(data) == 3:
+            # SGP.22 v3.1 §2.4a.1.0: major, minor and revision as binary bytes; '02 00 0C' is v2.0.12.
+            node["decoded"] = f"v{data[0]}.{data[1]}.{data[2]}"
+            return node
+        if owner == "DeviceInfo" and name in ("tac", "imei"):
+            # SGP.22 v3.1 §4.2: Telephony BCD (TS 29.002), the IMEI's last octet the
+            # check digit and an 'F' filler, in either nibble order (v2 swapped them).
+            node["decoded"] = _bcd_digits(data)
+            return node
+        if name == "extCardResource":
+            resources = _extended_card_resources(data)
+            if resources is not None:
+                node["decoded"] = resources
+            return node
+        if name in ("simaResponse", "ppiResponse"):
+            # SGP.22 v3.1 section 2.5.6: the EUICCResponse of the Profile
+            # Package Interpreter, read here so the failing PE shows by name.
+            reading = _euicc_response_nodes(data)
+            if reading is not None:
+                node["children"], node["decoded"], node["result"] = reading
+            return node
         lowered = name.lower()
         if lowered in ("iccid", "eid", "eidvalue") or lowered.endswith("iccid"):
             node["decoded"] = _bcd_digits(data) if "iccid" in lowered else _hex(data)
@@ -1674,12 +2370,33 @@ def _schema_value_nodes(value: Any, name: str) -> dict[str, Any]:
     if isinstance(value, bool):
         return {"name": name, "kind": "boolean", "value": value}
     if isinstance(value, int):
-        return {"name": name, "kind": "integer", "value": value}
+        names = _value_names(definition, label, owner, name) if type_obj is not None else {}
+        meaning = names.get(value)
+        node = {"name": name, "kind": "integer", "value": value}
+        if meaning is not None:
+            # A display node: "value" is what a reader sees, "number" the integer.
+            node.update(value=f"{value} ({meaning})", number=value, decoded=meaning)
+        if names:
+            node["options"] = [
+                {"number": number, "name": text, "active": number == value} for number, text in sorted(names.items())
+            ]
+        return node
     if isinstance(value, str):
         return {"name": name, "kind": "string", "value": value}
     if value is None:
         return {"name": name, "kind": "null"}
     return {"name": name, "kind": "value", "value": _json_safe(value)}
+
+
+def _schema_reading(type_name: str, data: bytes) -> tuple[Any, dict[str, Any]]:
+    """Decode ``data`` as ``type_name`` (every byte read) and build its display nodes."""
+    decoded = gsma_schema.decode_type_strict(type_name, data)
+    tree, definition, module = gsma_schema.parse_tree_for(type_name)
+    nodes = _schema_value_nodes(
+        decoded, type_name, gsma_schema.type_tree(type_name), type_label=type_name, source=data,
+        definition=definition, tree=tree, module=module,
+    )
+    return decoded, nodes
 
 
 def decode_es10(data: bytes, *, direction: str, registry: TagRegistry) -> dict[str, Any]:
@@ -1701,16 +2418,34 @@ def decode_es10(data: bytes, *, direction: str, registry: TagRegistry) -> dict[s
         if not gsma_schema.has_type(type_name):
             continue
         try:
-            decoded = gsma_schema.decode_type(type_name, data)
+            decoded, nodes = _schema_reading(type_name, data)
         except Exception as error:  # noqa: BLE001 - asn1tools decode errors are library-specific
             schema_error = f"{type_name}: {error}"
             continue
+        if isinstance(decoded, dict) and not decoded and len(root.value) > 0:
+            # A type with no member for what the object carries is not a reading of it: the
+            # memberless GetEuiccInfo2Request would stand in for an EUICCInfo2 the response type refused.
+            schema_error = schema_error or f"{type_name}: no member for the {len(root.value)} byte(s) the object carries"
+            continue
+        payload["title"] = type_name
         payload["schemaType"] = type_name
-        payload["schema"] = _schema_value_nodes(decoded, type_name)
+        payload["schema"] = nodes
         payload["schemaJson"] = _json_safe(decoded)
         break
     status = gsma_schema.rsp_specification_status()
-    payload["schemaSource"] = status.get("modules") or []
+    if "schemaType" in payload:
+        payload["schemaSource"] = gsma_schema.type_source(payload["schemaType"])
+        # SGP.22 v3.1 section 2.5.6: the outcome a ProfileInstallationResult
+        # holds in its EUICCResponse heads the reading, wherever the result sits.
+        result = _installation_result(payload["schema"])
+        if result is not None:
+            payload["result"] = result
+        if payload["schemaType"] == "EUICCInfo2":
+            notes = _euicc_info2_check_notes(data)
+            if notes:
+                payload["notes"] = notes
+    else:
+        payload["schemaSource"] = status.get("modules") or []
     if "schemaType" not in payload:
         notes = []
         if not status.get("available"):
@@ -1720,8 +2455,81 @@ def decode_es10(data: bytes, *, direction: str, registry: TagRegistry) -> dict[s
         elif type_names:
             notes.append("No compiled type for " + ", ".join(type_names) + ". Showing the generic BER tree.")
         payload["notes"] = notes
+        if root.tag_hex == "BF22":
+            _euicc_info2_tag_reading(payload, data)
+        _located_installation_result(payload, data)
     tree = _generic_tree(data, registry)
     payload["nodes"] = _tree_to_nodes(tree) if tree else []
+    return payload
+
+
+def _hinted_types(hint: str) -> list[str]:
+    """Compiled type names a JSON member name stands for, as given or with its first letter raised."""
+    text = re.sub(r"\[\d+\]$", "", str(hint or "").strip())
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9-]*", text) is None:
+        return []
+    names: list[str] = []
+    for candidate in (text, text[0].upper() + text[1:]):
+        if candidate not in names and gsma_schema.has_type(candidate):
+            names.append(candidate)
+    return names
+
+
+def _docs_for_type(type_name: str) -> str:
+    if _ES10_TABLE is None:
+        es10_types_for("")
+    for entry in (_ES10_TABLE or {}).values():
+        if type_name in entry.get("request", []) or type_name in entry.get("response", []):
+            return ", ".join(entry.get("docs") or [])
+    return ""
+
+
+def decode_rsp_object(data: bytes, *, type_hint: str = "") -> dict[str, Any] | None:
+    """Schema-decode one GSMA RSP data object; None when no compiled type reads it.
+
+    A ``type_hint`` that names a compiled type, as given or with its first
+    letter raised, is tried first: an ES9+ or ESipa JSON member name is the
+    name of its type that way (``smdpSigned2`` -> ``SmdpSigned2``). A single
+    BF-tagged object is then read as the response and the request types of its
+    tag. A type counts only when it reads every byte, so IpaEuiccDataRequest
+    and IpaEuiccDataResponse, both 'BF52', are told apart by their content.
+    The payload carries ``notation``, the reading as indented text.
+    """
+    if not data:
+        return None
+    data = bytes(data)
+    items = _iter_tlvs(data)
+    bf_object = len(items) == 1 and _tlvs_cover(data, items) and items[0].tag_hex.startswith("BF")
+    # Anything else keeps clear of the schema compile, which costs about a second.
+    if not bf_object and not str(type_hint or "").strip():
+        return None
+    if not gsma_schema.rsp_specification_status().get("available"):
+        return None
+    payload: dict[str, Any] | None = None
+    for type_name in _hinted_types(type_hint):
+        try:
+            decoded, nodes = _schema_reading(type_name, data)
+        except Exception:  # noqa: BLE001 - asn1tools decode errors are library-specific; the hint may simply be wrong
+            continue
+        payload = _payload(
+            "rsp",
+            type_name,
+            _docs_for_type(type_name),
+            schemaType=type_name,
+            schema=nodes,
+            schemaJson=_json_safe(decoded),
+            schemaSource=gsma_schema.type_source(type_name),
+        )
+        break
+    if payload is None and bf_object:
+        for direction in ("response", "request"):
+            candidate = decode_es10(data, direction=direction, registry=_registry())
+            if candidate.get("schemaType"):
+                payload = candidate
+                break
+    if payload is None:
+        return None
+    payload["notation"] = render_rsp_reading(payload)
     return payload
 
 
@@ -1827,9 +2635,21 @@ def _basic_sw_text(sw1: int, sw2: int) -> str:
 # Input parsing
 # ----------------------------------------------------------------------
 
+_FILE_MARKER = "@file"
 _HEX_RUN = re.compile(r"(?:0x)?[0-9A-Fa-f]{2}(?:[\s:,-]*(?:0x)?[0-9A-Fa-f]{2})*")
 _COMMAND_MARKERS = ("c-apdu", "capdu", "cmd", "command", "tx", ">>", "->", "→", ">", "c:")
 _RESPONSE_MARKERS = ("r-apdu", "rapdu", "rsp", "response", "rx", "<<", "<-", "←", "<", "r:")
+
+
+# One command per row with ``#`` comments is the script file the SCP03 shell's RUN and the SCP80
+# shell's ``script`` read; a bracketed label opens the raw exchange lines the SCP11 transport prints.
+_ROW_LABEL = re.compile(r"^\[.*\]\s*(?=[<>])")
+_ROW_ESCAPES = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+_ROW_SW = re.compile(r"(?i)\bsw\s*[=:]\s*([0-9A-F]{4})\b")
+_ROW_DATA_LABEL = re.compile(r"(?i)\bdata\s*[=:]")
+_ROW_DURATION = re.compile(r"(?i)\b\d+(?:\.\d+)?\s*ms\b")
+# TS 102 221 v18.4 section 10.1.0, Table 10.2 case 1: a command is at least CLA INS P1 P2.
+_COMMAND_HEADER_LENGTH = 4
 
 
 @dataclass
@@ -1838,6 +2658,12 @@ class RawExchange:
     response: bytes | None = None
     sw: bytes | None = None
     source: str = ""
+    # The input row the exchange starts on, counted from 1.
+    line: int = 0
+    # The file the terminal selected for this command without an APDU of its own
+    # (the <fileid> and <pathid> of AT+CRSM); empty when the trace shows the SELECT.
+    file_id: str = ""
+    file_path: str = ""
 
 
 def _strip_marker(text: str) -> tuple[str, str]:
@@ -1866,45 +2692,148 @@ def _split_line_segments(line: str) -> list[str]:
     return [segment for segment in re.split(r"\s[·|;]\s|\t", line) if segment.strip()]
 
 
-def parse_exchanges(text: str) -> list[RawExchange]:
-    """Split pasted text into command/response exchanges."""
+def _row_text(line: str) -> str:
+    """One input row without its ``#`` comment, the way the shells' script runners read a script file."""
+    return _ROW_ESCAPES.sub("", line.replace("\ufeff", "")).split("#", 1)[0].strip()
+
+
+def _is_known_command(data: bytes) -> bool:
+    """True for a well-formed command APDU whose instruction the decoder knows for its class."""
+    if len(data) < _COMMAND_HEADER_LENGTH or _looks_like_response(data):
+        return False
+    try:
+        body = _parse_apdu_body(data)
+    except DecodeError:
+        return False
+    return classify_command(data[0], data[1], data[2], data[3], body["data"]).domain != "unknown"
+
+
+def _miswritten_command(data: bytes) -> bool:
+    """True for a row that opens like a command the decoder knows and cannot be an answer.
+
+    An answer ends with its status word, and every first status byte starts
+    '6' or '9' (TS 102 221 v18.4 section 10.2.1; the procedure bytes '61' and
+    '6C' of section 7.3.1.1.5). A row that ends otherwise and carries a known
+    class and instruction is a command whose lengths do not add up.
+    """
+    if len(data) < _COMMAND_HEADER_LENGTH + 1 or (data[-2] >> 4) in (0x6, 0x9) and data[-2] != 0x60:
+        return False
+    items = _iter_tlvs(data)
+    if items and _tlvs_cover(data, items):
+        # A whole TLV sequence is an answer written without its status word.
+        return False
+    return classify_command(data[0], data[1], data[2], data[3], b"").domain != "unknown"
+
+
+def _unmarked_role(data: bytes, pending: RawExchange | None, hint: str) -> str:
+    """Whether a row without a marker is a command or an answer.
+
+    An explicit context is taken at face value: under ``apdu`` every row is a
+    command, under ``response`` every row an answer. Otherwise the first row
+    is a command unless it has the shape of an answer, and while a command
+    waits for its answer, only a row that is itself a command of a known
+    instruction starts the next one. That is what reads a script of one
+    command per row as that many commands; any other row is the answer,
+    except a miswritten command, which is shown as one with what is wrong.
+    """
+    if len(data) < _COMMAND_HEADER_LENGTH or hint == "response":
+        return "response"
+    if hint == "apdu":
+        return "command"
+    if pending is None:
+        return "response" if _looks_like_response(data) else "command"
+    return "command" if _is_known_command(data) or _miswritten_command(data) else "response"
+
+
+def parse_exchanges(text: str, hint: str = "auto", unread: list[int] | None = None) -> list[RawExchange]:
+    """Split pasted text into command/response exchanges, one row or one pair of rows each.
+
+    A marker (``>``, ``<``, ``C:``, ``R:`` and the like) says what a row is;
+    ``_unmarked_role`` decides for a row without one. ``#`` starts a comment.
+    The number of every row that held no hex is added to ``unread``.
+    """
     exchanges: list[RawExchange] = []
     pending: RawExchange | None = None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+    marked_file: tuple[str, str] = ("", "")
+    for number, raw_line in enumerate(text.splitlines(), 1):
+        line = _row_text(raw_line)
+        if not line:
             continue
+        if line.startswith(_FILE_MARKER + " "):
+            # Written by the AT rewrite before a restricted-access command.
+            parts = line.split()
+            if len(parts) >= 2 and re.fullmatch(r"[0-9A-Fa-f]{4}", parts[1]):
+                marked_file = (parts[1].upper(), parts[2].upper() if len(parts) > 2 and _hex_bytes(parts[2]) else "")
+            continue
+        read = False
+        # The exchange a response segment of this row has just closed: a status word written after it joins it.
+        answered: RawExchange | None = None
         for segment in _split_line_segments(line):
-            kind, body = _strip_marker(segment)
-            sw_match = re.search(r"(?i)\bsw\s*[=:]\s*([0-9A-F]{4})\b", body)
-            if sw_match and not kind:
-                if pending is None:
-                    pending = RawExchange(source=line)
-                pending.sw = bytes.fromhex(sw_match.group(1))
-                exchanges.append(pending)
+            marker, body = _strip_marker(_ROW_LABEL.sub("", segment.strip()))
+            sw_match = _ROW_SW.search(body)
+            body = _ROW_DATA_LABEL.sub("", _ROW_DURATION.sub("", _ROW_SW.sub("", body))).strip()
+            data = _hex_bytes(body) if body else None
+            role = marker
+            if data is not None and not marker:
+                role = _unmarked_role(data, pending, hint)
+            if sw_match is not None and role != "command":
+                # A status word written out closes the exchange, with the data beside it when there is any.
+                target = answered if answered is not None and data is None else pending
+                if target is None:
+                    target = RawExchange(source=line, line=number)
+                target.sw = bytes.fromhex(sw_match.group(1))
+                if data:
+                    target.response = data
+                if target is not answered:
+                    exchanges.append(target)
                 pending = None
+                answered = None
+                read = True
                 continue
-            body = re.sub(r"(?i)\bsw\s*[=:]\s*[0-9A-F]{4}\b", "", body).strip()
-            body = re.sub(r"(?i)\b\d+(?:\.\d+)?\s*ms\b", "", body).strip()
-            data = _hex_bytes(body)
             if data is None:
                 continue
-            if kind == "command" or (kind == "" and pending is None and not _looks_like_response(data)):
+            read = True
+            if role == "command":
                 if pending is not None:
                     exchanges.append(pending)
-                pending = RawExchange(command=data, source=line)
+                pending = RawExchange(command=data, source=line, line=number, file_id=marked_file[0], file_path=marked_file[1])
+                marked_file = ("", "")
+                if sw_match is not None:
+                    # "<command> sw=9000" on one row: the command with its status word.
+                    pending.sw = bytes.fromhex(sw_match.group(1))
+                    exchanges.append(pending)
+                    pending = None
                 continue
             if pending is None:
-                pending = RawExchange(source=line)
-            if len(data) == 2 and pending.response is None and kind != "response":
+                pending = RawExchange(source=line, line=number)
+            if len(data) == 2 and pending.response is None and marker != "response":
                 pending.sw = data
             else:
                 pending.response = data
+                answered = pending
             exchanges.append(pending)
             pending = None
+        if not read and unread is not None:
+            unread.append(number)
     if pending is not None:
         exchanges.append(pending)
     return exchanges
+
+
+def _unread_rows_note(unread: list[int]) -> str:
+    """Which rows held no hex, by number; a row is never quoted, since a script row can carry a credential."""
+    spans: list[str] = []
+    start = previous = unread[0]
+    for number in unread[1:] + [0]:
+        if number == previous + 1:
+            previous = number
+            continue
+        spans.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = number
+    shown = spans[:12]
+    more = f" and {len(spans) - len(shown)} more" if len(spans) > len(shown) else ""
+    rows = "row" if len(unread) == 1 else "rows"
+    return f"{len(unread)} {rows} held no hex and {'was' if len(unread) == 1 else 'were'} left unread: {rows} {', '.join(shown)}{more}."
 
 
 def _looks_like_response(data: bytes) -> bool:
@@ -1942,6 +2871,8 @@ def _split_response(data: bytes) -> tuple[bytes, bytes | None]:
 class TraceState:
     selected_fid: str = ""
     selected_adf: str = ""
+    # Where the selection came from, when not from a SELECT in the trace.
+    selection_origin: str = ""
     selected_aid: bytes = b""
     pending_command: dict[str, Any] | None = None
     pending_context: CommandContext | None = None
@@ -1949,6 +2880,10 @@ class TraceState:
     es10_blocks: bytes = b""
     es10_context: CommandContext | None = None
     last_get_status_p1: int | None = None
+    # The BIP channel data of the trace, one stream per channel identifier (a BipChannelObserver each).
+    channel_observers: dict[int, Any] = field(default_factory=dict)
+    # The channel of the RECEIVE DATA command whose TERMINAL RESPONSE is still to come.
+    receive_channel: int = 0
 
 
 _REGISTRY: TagRegistry | None = None
@@ -1961,12 +2896,46 @@ def _registry() -> TagRegistry:
     return _REGISTRY
 
 
+def _secure_messaging(cla: int) -> bool:
+    """True when the class byte indicates secure messaging (TS 102 221 v18.4 tables 10.4 and 10.4b)."""
+    return bool(cla & 0x20) if cla & 0x40 else bool(cla & 0x0C)
+
+
+def _protected_command_data(apdu: dict[str, Any], data: bytes, registry: TagRegistry) -> dict[str, Any] | None:
+    """An ES10 data field under a secure channel; None when the field reads as it stands.
+
+    GPC Amd D v1.1.2 section 6.2.4 appends a C-MAC of 8 bytes to the data
+    field, and section 6.2.6 may encrypt what is before it. A field that is
+    one TLV without its last 8 bytes is read as that TLV; anything else is
+    shown as the protected block it is, not as an ES10 object.
+    """
+    if not _secure_messaging(int(apdu["cla"], 16)):
+        return None
+    whole = _iter_tlvs(data)
+    if len(whole) == 1 and _tlvs_cover(data, whole):
+        return None
+    body, mac = data[:-8], data[-8:]
+    items = _iter_tlvs(body) if len(data) > 8 else []
+    if len(items) == 1 and _tlvs_cover(body, items):
+        payload = decode_es10(body, direction="request", registry=registry)
+        payload["notes"] = list(payload.get("notes") or []) + [f"The last 8 bytes are the C-MAC of the secure channel, not checked here: {_hex(mac)}."]
+        return payload
+    return _payload(
+        "protected", "Protected command data", "GPC Amd D v1.1.2 section 6.2.4",
+        fields=[_field("Data field", _hex(data), f"{len(data)} byte(s)")],
+        notes=["The class byte indicates secure messaging: the data field ends with a C-MAC and may be encrypted, so it is not read as an ES10 object."],
+    )
+
+
 def _decode_command_payload(ctx: CommandContext, apdu: dict[str, Any], data: bytes, state: TraceState) -> dict[str, Any] | None:
     kind = ctx.payload_kind
     registry = _registry()
     if not data:
         return None
     if kind == "es10_request":
+        protected = _protected_command_data(apdu, data, registry)
+        if protected is not None:
+            return protected
         p1 = int(apdu["p1"], 16)
         if not p1 & 0x80:
             state.es10_blocks += data
@@ -2001,7 +2970,31 @@ def _decode_command_payload(ctx: CommandContext, apdu: dict[str, Any], data: byt
     if kind == "scp_host_challenge":
         return _payload("scp_host_challenge", "Host challenge", "GPC Amd D v1.1.2 section 7.1.1.5", fields=[_field("Host challenge", _hex(data), f"{len(data)} byte(s), 8 expected")])
     if kind == "gp_put_key":
-        return _payload("gp_put_key", "PUT KEY data field", "GPC v2.3.1 tables 11-68 / 11-69", fields=[_field("Key version number", f"{data[0]:02X}"), _field("Key data", _hex(data[1:]), "key components are encrypted; not decoded")])
+        from . import payload_readings
+
+        try:
+            fields = payload_readings.put_key_fields(data)
+        except (ValueError, ImportError) as error:
+            fields = [_field("Key Version Number", f"{data[0]:02X}"), _field("Key data", _hex(data[1:]), f"not read as a key data field: {error}")]
+        return _payload("gp_put_key", "PUT KEY data field", "GPC v2.4 section 11.8.2.3", fields=fields)
+    if kind in ("scp11_key_agreement", "scp11_certificate"):
+        from . import payload_readings
+
+        if kind == "scp11_key_agreement":
+            title, spec, scp11 = "Data for key establishment", "GPC Amd F v1.2 Table 6-17", payload_readings.scp11_key_agreement_nodes(data)
+        else:
+            title, spec, scp11 = "Certificate(s)", "GPC Amd F v1.2 Table 6-12", payload_readings.scp11_certificate_nodes(data)
+        if scp11 is not None:
+            return _payload(kind, title, spec, nodes=scp11)
+        return _payload(kind, title, spec, fields=[_field("Data field", _hex(data), f"{len(data)} byte(s); not whole TLVs, as in one block of a chained command or under secure messaging")])
+    if kind == "terminal_capability":
+        from . import payload_readings
+
+        capability = payload_readings.terminal_capability_nodes(data)
+        if capability is not None:
+            return _payload("terminal_capability", "TERMINAL CAPABILITY", "TS 102 221 v18.4 section 11.1.19.2", nodes=capability)
+        tree = _generic_tree(data, registry)
+        return _payload("tlv", "Command data (BER-TLV)", "ITU-T X.690", nodes=_tree_to_nodes(tree) if tree else [_node("", "command data", data)])
     if kind == "gp_load":
         tree = _generic_tree(data, registry)
         return _payload("gp_load", "LOAD data block", "GPC v2.3.1 section 11.6", nodes=_tree_to_nodes(tree) if tree else [_node("", "load file data block", data)])
@@ -2014,7 +3007,7 @@ def _decode_command_payload(ctx: CommandContext, apdu: dict[str, Any], data: byt
             return _payload("select", "SELECT by path", "TS 102 221 v18.4 table 11.1", fields=[_field("Path", path)])
         return _payload("select", "SELECT by file identifier", "TS 102 221 v18.4 table 11.1", fields=[_field("File identifier", _hex(data))])
     if kind == "cat_terminal_response":
-        return decode_cat(data, expect="cat_terminal_response")
+        return _follow_channel_data(decode_cat(data, expect="cat_terminal_response"), state, terminal_response=True)
     if kind == "cat_envelope":
         return decode_cat(data, expect="cat_envelope")
     if kind == "terminal_profile":
@@ -2044,7 +3037,8 @@ def _decode_file_content(data: bytes, state: TraceState, apdu: dict[str, Any]) -
         decoded = content_decoder.decode_obj(fid, _hex(data), context_path=context_path)
     except Exception:  # noqa: BLE001 - the decoder set is optional
         decoded = None
-    fields = [_field("File", fid + (f" under {state.selected_adf}" if state.selected_adf else ""), "from the last SELECT in the trace")]
+    origin = state.selection_origin or "the last SELECT in the trace"
+    fields = [_field("File", fid + (f" under {state.selected_adf}" if state.selected_adf else ""), f"from {origin}")]
     if isinstance(decoded, dict):
         for key, value in decoded.items():
             fields.append(_field(str(key), value if isinstance(value, (int, float, bool)) else str(value)))
@@ -2072,12 +3066,33 @@ def _decode_response_payload(ctx: CommandContext | None, command: dict[str, Any]
     if kind == "scp_init_update_response":
         return decode_scp_init_update_response(data)
     if kind == "cat_proactive" or (not ctx and data[0] == 0xD0):
-        return decode_cat(data, expect="cat_proactive")
+        return _follow_channel_data(decode_cat(data, expect="cat_proactive"), state, terminal_response=False)
     if kind == "cat_envelope_response":
+        from . import payload_readings
+
+        report = payload_readings.report_user_data_nodes(data)
+        if report is not None:
+            # TS 31.115 v19 section 4.4: the response packet rides in the user data of the SMS-DELIVER-REPORT.
+            return _payload("cat", "ENVELOPE response: secured response packet", "TS 31.115 v19 section 4.4", nodes=report)
         tree = _generic_tree(data, registry)
         return _payload("cat", "ENVELOPE response data", "TS 102 223 v18.3 section 7", nodes=_tree_to_nodes(tree) if tree else [_node("", "response data", data)])
     if kind == "auth_response":
         return decode_auth_response(int(command["ins"], 16), int(command["p2"], 16), data) if command else None
+    if kind.startswith("scp11") and kind.endswith("_authenticate_response"):
+        from . import payload_readings
+
+        table, card_key = payload_readings.SCP11_RESPONSES[kind]
+        scp11 = payload_readings.scp11_key_agreement_nodes(data, card_key=card_key)
+        if scp11 is not None:
+            return _payload(kind, "Key establishment response", f"GPC Amd F v1.2 {table}", nodes=scp11)
+    if kind == "suci":
+        from . import payload_readings
+
+        fields = payload_readings.suci_fields(data)
+        if fields is not None:
+            return _payload("suci", "SUCI", "TS 31.102 v19.5 section 7.5.2.1", fields=fields)
+        tree = _generic_tree(data, registry)
+        return _payload("tlv", "Response data (BER-TLV)", "ITU-T X.690", nodes=_tree_to_nodes(tree) if tree else [_node("", "response data", data)])
     if kind in ("file_content", "file_record"):
         return _decode_file_content(data, state, command or {})
     if kind == "channel_number" and len(data) == 1:
@@ -2093,6 +3108,7 @@ def _decode_response_payload(ctx: CommandContext | None, command: dict[str, Any]
 def _update_selection_state(ctx: CommandContext, apdu: dict[str, Any], data: bytes, state: TraceState) -> None:
     if ctx.name != "SELECT FILE":
         return
+    state.selection_origin = ""
     p1 = int(apdu["p1"], 16)
     if p1 == 0x04 and data:
         state.selected_aid = data
@@ -2118,6 +3134,12 @@ def decode_exchange(raw: RawExchange, state: TraceState, index: int) -> dict[str
     ctx: CommandContext | None = None
     command: dict[str, Any] | None = None
     data_field = b""
+    if raw.file_id:
+        # TS 27.007 V19.6 section 8.18 NOTE 1: the MT selects the file itself before the command.
+        state.selected_fid = raw.file_id
+        state.selected_adf = "/".join(raw.file_path[i:i + 4] for i in range(0, len(raw.file_path), 4))
+        state.selection_origin = "the file identifier of the AT command"
+        result["selectedFile"] = raw.file_id + (f" under {raw.file_path}" if raw.file_path else "")
     if raw.command is not None:
         try:
             body = _parse_apdu_body(raw.command)
@@ -2153,6 +3175,11 @@ def decode_exchange(raw: RawExchange, state: TraceState, index: int) -> dict[str
                 ctx.response_kind = state.pending_context.response_kind
                 command["continues"] = state.pending_context.name
             else:
+                # GET RESPONSE comes immediately after the command it completes (TS 102 221 v18.4 section 12.1.1.1),
+                # so any other command ends the chain; without this an unanswered row would leave it open.
+                state.pending_context = None
+                state.pending_command = None
+                state.chained_data = b""
                 if ctx.name == "GET STATUS":
                     state.last_get_status_p1 = p1
                 payload = _decode_command_payload(ctx, command, data_field, state)
@@ -2211,7 +3238,7 @@ def decode_exchange(raw: RawExchange, state: TraceState, index: int) -> dict[str
 # Entry point
 # ----------------------------------------------------------------------
 
-_HINTS = ("auto", "apdu", "response", "tlv", "es10", "gp", "uicc", "cat", "sw")
+_HINTS = ("auto", "apdu", "response", "tlv", "es10", "gp", "uicc", "cat", "sw", "ef")
 
 
 def _standalone_payload(data: bytes, hint: str) -> dict[str, Any]:
@@ -2238,10 +3265,15 @@ def _standalone_payload(data: bytes, hint: str) -> dict[str, Any]:
     domain = "tlv"
     payload: dict[str, Any] | None = None
     first = body[0] if body else -1
-    if hint == "es10" or (hint in ("auto", "response") and first == 0xBF):
+    if first == 0x30 and hint in ("auto", "response", "es10"):
+        # The simaResponse octets pasted on their own; the raw BER-TLV context keeps the plain tree.
+        payload = _euicc_response_payload(body)
+    if payload is not None:
+        domain = "es10"
+    elif hint == "es10" or (hint in ("auto", "response") and first == 0xBF):
         domain = "es10"
         payload = decode_es10(body, direction="response", registry=registry)
-        if payload.get("schemaType") is None and payload.get("typeCandidates"):
+        if payload.get("schemaType") is None and payload.get("typeCandidates") and "result" not in payload:
             alternative = decode_es10(body, direction="request", registry=registry)
             if alternative.get("schemaType"):
                 payload = alternative
@@ -2259,6 +3291,9 @@ def _standalone_payload(data: bytes, hint: str) -> dict[str, Any]:
         if tree is None:
             raise DecodeError("input is neither an APDU, a response with status word, nor a BER-TLV object")
         payload = _payload("tlv", "BER-TLV object", "ITU-T X.690", nodes=_tree_to_nodes(tree))
+        if hint != "tlv":
+            # A ProfileInstallationResult inside a wrapper the schema has no type for.
+            _located_installation_result(payload, body)
     result: dict[str, Any] = {
         "inputKind": "response" if sw is not None else "tlv",
         "context": {"domain": domain, "label": _DOMAIN_LABELS.get(domain, domain), "spec": payload.get("spec", ""), "summary": payload.get("title", "")},
@@ -2269,22 +3304,134 @@ def _standalone_payload(data: bytes, hint: str) -> dict[str, Any]:
     return result
 
 
-def decode_context_text(text: str, *, hint: str = "auto") -> dict[str, Any]:
-    """Decode pasted hex, one APDU or a whole exchange trace with context."""
+def decode_context_text(text: str, *, hint: str = "auto", max_exchanges: int | None = None) -> dict[str, Any]:
+    """Decode pasted hex, one APDU, a script of commands or a whole exchange trace with context.
+
+    Hex is the form the decoder reads first. ``input_forms`` adds the others:
+    AT command lines that carry APDUs, and for a paste the hex path refuses
+    PEM, a JSON body, base64, an identifier in digits and an ATR. A reading
+    that names no domain may be replaced there by a certificate or an ATR.
+    ``max_exchanges`` bounds the answer for a caller that shows it whole.
+    """
+    from . import input_forms
+
     hint = (hint or "auto").strip().lower()
     if hint not in _HINTS:
         hint = "auto"
-    normalized = str(text or "").strip()
+    normalized = str(text or "").replace("\ufeff", "").strip()
     if not normalized:
         raise DecodeError("input is empty")
-    exchanges = parse_exchanges(normalized)
-    lines = [line for line in normalized.splitlines() if line.strip() and not line.strip().startswith("#")]
-    single_hex = len(lines) == 1 and _hex_bytes(_strip_marker(lines[0])[1]) is not None and _strip_marker(lines[0])[0] == ""
-    result: dict[str, Any] = {
-        "format": "context",
-        "hint": hint,
-        "schema": gsma_schema.rsp_specification_status(),
+    base: dict[str, Any] = {"format": "context", "hint": hint, "schema": gsma_schema.rsp_specification_status()}
+
+    def finish(reading: dict[str, Any]) -> dict[str, Any]:
+        result = dict(base)
+        result.update(reading)
+        result["notation"] = render_context_notation(result)
+        return result
+
+    if hint == "ef":
+        return finish(_file_content_reading(normalized))
+    if hint == "auto":
+        code = input_forms.pcsc_reading(normalized)
+        if code is not None:
+            return finish(code)
+    rewritten = input_forms.rewrite_at_lines(normalized)
+    notes: list[str] = []
+    if rewritten is not None:
+        normalized, notes = rewritten
+    try:
+        result = _decode_hex_text(normalized, hint, base, number_rows=rewritten is None, max_exchanges=max_exchanges)
+    except DecodeError:
+        other = input_forms.read_refused(normalized, hint)
+        if other is None:
+            raise
+        return finish(other)
+    if hint == "auto":
+        refined = _refine_plain_reading(result)
+        if refined is not None:
+            return finish(refined)
+    if notes:
+        context = dict(result.get("context") or {})
+        context["notes"] = list(context.get("notes") or []) + notes
+        result["context"] = context
+        result["notation"] = render_context_notation(result)
+    return result
+
+
+def _refine_plain_reading(result: dict[str, Any]) -> dict[str, Any] | None:
+    """A certificate, a profile package, an ATR or TLS records in place of a reading that names no domain; None to keep it."""
+    from . import input_forms
+
+    payload = result.get("payload")
+    if isinstance(payload, dict) and payload.get("title") == "BER-TLV object" and "result" not in payload and not result.get("sw"):
+        data = bytes.fromhex(str(result.get("inputHex") or ""))
+        refined = input_forms.certificate_reading(data) or input_forms.profile_package_reading(data)
+        if refined is not None:
+            refined["inputHex"] = _hex(data)
+            refined["byteCount"] = len(data)
+        return refined
+    exchanges = result.get("exchanges")
+    if isinstance(exchanges, list) and len(exchanges) == 1 and (exchanges[0].get("context") or {}).get("domain") == "unknown":
+        exchange = exchanges[0]
+        command = exchange.get("command") or {}
+        if exchange.get("response") or not command.get("hex"):
+            return None
+        data = bytes.fromhex(str(command["hex"]))
+        refined = input_forms.atr_reading(data) or input_forms.tls_reading(data)
+        if refined is not None:
+            refined["inputHex"] = _hex(data)
+            refined["byteCount"] = len(data)
+        return refined
+    return None
+
+
+def _file_content_reading(text: str) -> dict[str, Any]:
+    """The "ef" context: the first line names the file (a file identifier, with its path before it), the rest is its content."""
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+    if len(lines) < 2:
+        raise DecodeError("the EF content context takes the file on the first line (6F07, or ADF_USIM/6F07) and the content in hex below it")
+    parts = [part for part in lines[0].replace("\\", "/").split("/") if part.strip()]
+    fid = parts[-1].strip().upper() if parts else ""
+    if re.fullmatch(r"[0-9A-F]{4}", fid) is None:
+        raise DecodeError("the first line is not a file identifier: four hex digits, with the path before it (ADF_USIM/6F07)")
+    data = _hex_bytes(" ".join(lines[1:]))
+    if not data:
+        raise DecodeError("no hex bytes found under the file line")
+    state = TraceState(selected_fid=fid, selected_adf="/".join(part.strip().upper() for part in parts[:-1]), selection_origin="the first line of the input")
+    payload = _decode_file_content(data, state, {})
+    return {
+        "inputKind": "file",
+        "context": {"domain": "uicc", "label": _DOMAIN_LABELS["uicc"], "spec": payload.get("spec", ""), "summary": payload.get("title", "")},
+        "payload": payload,
+        "inputHex": _hex(data),
+        "byteCount": len(data),
     }
+
+
+def _decode_hex_text(
+    normalized: str,
+    hint: str,
+    base: dict[str, Any],
+    *,
+    number_rows: bool = True,
+    max_exchanges: int | None = None,
+) -> dict[str, Any]:
+    """The hex path: one hex string, an APDU, a script of commands or a trace of exchanges.
+
+    ``number_rows`` is off when the rows are not the ones the operator wrote
+    (AT lines rewritten into exchanges): a row number would point nowhere.
+    ``max_exchanges`` decodes the first that many and says how many the input
+    holds: an answer grows by a few thousand characters per exchange, and a
+    megabyte of short rows is some ninety thousand of them.
+    """
+    unread: list[int] = []
+    exchanges = parse_exchanges(normalized, hint, unread)
+    held = len(exchanges)
+    if max_exchanges is not None and held > max_exchanges:
+        exchanges = exchanges[:max_exchanges]
+    lines = [row for row in (_row_text(line) for line in normalized.splitlines()) if row]
+    single_hex = len(lines) == 1 and _hex_bytes(_strip_marker(lines[0])[1]) is not None and _strip_marker(lines[0])[0] == ""
+    result: dict[str, Any] = dict(base)
     if single_hex and hint not in ("apdu",):
         data = _hex_bytes(lines[0]) or b""
         treat_as_apdu = hint == "auto" and len(data) >= 4 and not _looks_like_response(data)
@@ -2299,16 +3446,33 @@ def decode_context_text(text: str, *, hint: str = "auto") -> dict[str, Any]:
         raise DecodeError("no hex bytes found in the input")
     state = TraceState()
     decoded = [decode_exchange(raw, state, index + 1) for index, raw in enumerate(exchanges)]
+    if number_rows and len(lines) > 1:
+        # Where each exchange starts in the input: with comments and unread rows the two counts part.
+        for item, raw in zip(decoded, exchanges):
+            if raw.line:
+                item["row"] = raw.line
     domains = sorted({item.get("context", {}).get("domain", "unknown") for item in decoded})
+    # A script has no answers: it is counted as commands.
+    counted = "exchanges" if any("response" in item for item in decoded) else "commands"
     result.update(
         {
             "inputKind": "trace" if len(decoded) > 1 else "apdu",
             "exchanges": decoded,
             "exchangeCount": len(decoded),
             "domains": domains,
-            "context": decoded[0].get("context", {}) if len(decoded) == 1 else {"domain": "trace", "label": f"{len(decoded)} exchanges", "summary": ", ".join(_DOMAIN_LABELS.get(domain, domain) for domain in domains)},
+            "context": decoded[0].get("context", {}) if len(decoded) == 1 else {"domain": "trace", "label": f"{len(decoded)} {counted}", "summary": ", ".join(_DOMAIN_LABELS.get(domain, domain) for domain in domains)},
         }
     )
+    # Notes about the input as a whole, apart from the notes of any one exchange.
+    input_notes: list[str] = []
+    if held > len(decoded):
+        result["inputExchanges"] = held
+        result["context"]["label"] = f"{len(decoded)} of {held} {counted}"
+        input_notes.append(f"The input holds {held} {counted}; the first {len(decoded)} are decoded here. Send the rest in parts.")
+    if unread and number_rows:
+        input_notes.append(_unread_rows_note(unread))
+    if input_notes:
+        result["inputNotes"] = input_notes
     result["notation"] = render_context_notation(result)
     return result
 
@@ -2318,93 +3482,343 @@ def decode_context_text(text: str, *, hint: str = "auto") -> dict[str, Any]:
 # ----------------------------------------------------------------------
 
 
-def _render_nodes(nodes: list[dict[str, Any]], indent: int, lines: list[str]) -> None:
+def _names_aid(value_hex: str, decoded: Any) -> bool:
+    try:
+        value = bytes.fromhex(value_hex)
+    except ValueError:
+        return False
+    return len(value) > 0 and aid_name(value) == decoded
+
+
+# Painter: (role, text) -> text. The notation a payload stores is drawn with
+# plain_painter, so the JSON, the GUI and the MCP answers never carry escape
+# codes; a terminal gets terminal_painter, which colours the same roles.
+Painter = Callable[[str, str], str]
+
+# Reading roles -> (colour role of yggdrasim_common.cli_theme, style).
+_ROLE_STYLES: dict[str, tuple[str, str]] = {
+    "title": ("HEADER", "BOLD"),
+    "spec": ("TEXT_DIM", ""),
+    "field": ("BLUE", ""),
+    "choice": ("PURPLE", ""),
+    "index": ("TEXT_DIM", ""),
+    "punct": ("TEXT_DIM", ""),
+    "string": ("GREEN", ""),
+    "number": ("ORANGE", ""),
+    "reading": ("YELLOW", ""),
+    "inactive": ("TEXT_DIM", "DIM"),
+    "tag": ("TEXT_DIM", ""),
+    "note": ("YELLOW", ""),
+    "ok": ("GREEN", ""),
+    "warn": ("YELLOW", ""),
+    "fail": ("RED", ""),
+}
+
+# Sibling values line up in one column; a longer name than this keeps its own.
+_ALIGN_LIMIT = 28
+
+
+def plain_painter(role: str, text: str) -> str:
+    """No escape codes, whatever the role."""
+    return text
+
+
+def terminal_painter() -> Painter:
+    """Colours of the active CLI theme (``YGGDRASIM_CLI_THEME``); the mono theme paints nothing."""
+    from yggdrasim_common.cli_theme import role_ansi, style_code
+
+    reset = style_code("RESET")
+    prefixes: dict[str, str] = {}
+
+    def paint(role: str, text: str) -> str:
+        if not text:
+            return text
+        prefix = prefixes.get(role)
+        if prefix is None:
+            colour, style = _ROLE_STYLES.get(role, ("", ""))
+            prefix = (role_ansi(colour) if colour else "") + (style_code(style) if style else "")
+            prefixes[role] = prefix
+        return f"{prefix}{text}{reset}" if prefix else text
+
+    return paint
+
+
+def _render_nodes(nodes: list[dict[str, Any]], indent: int, lines: list[str], paint: Painter = plain_painter) -> None:
     prefix = " " * indent
     for node in nodes:
-        label = f"{prefix}{node.get('tag', '')} {node.get('name', '')}".rstrip()
+        tag = str(node.get("tag", ""))
+        name = str(node.get("name", ""))
+        label = prefix + " ".join(part for part in (paint("tag", tag), paint("field", name)) if part)
         decoded = node.get("decoded")
+        value_hex = str(node.get("valueHex") or "")
         if decoded is not None and not isinstance(decoded, (dict, list)):
-            label += f" = {decoded}"
+            if _names_aid(value_hex, decoded):
+                # A named AID keeps its value, which a command needs, in the
+                # form the plain decoder gives a decoded string.
+                label += f" = '{value_hex}'H " + paint("reading", f"({decoded})")
+            else:
+                label += " = " + paint("reading", str(decoded))
         elif not node.get("children"):
             label += f" = '{node.get('valueHex', '')}'H"
         lines.append(label)
         if node.get("children"):
-            _render_nodes(node["children"], indent + 2, lines)
+            _render_nodes(node["children"], indent + 2, lines, paint)
 
 
-def _render_schema(node: dict[str, Any], indent: int, lines: list[str]) -> None:
-    prefix = " " * indent
+def _ascii_text(value_hex: str) -> str | None:
+    try:
+        return bytes.fromhex(value_hex).decode("ascii")
+    except ValueError:
+        return None
+
+
+def _schema_leaf_text(node: dict[str, Any], paint: Painter = plain_painter) -> str:
+    """The value of a schema leaf as ASN.1 value notation, its reading in parentheses."""
     kind = node.get("kind")
-    if kind in ("sequence", "list", "choice"):
-        head = f"{prefix}{node.get('name')}"
-        if kind == "choice":
-            head += f" (choice {node.get('choice')})"
-        lines.append(head)
-        for child in node.get("children", []):
-            _render_schema(child, indent + 2, lines)
-        return
-    value = node.get("decoded", node.get("value", node.get("valueHex")))
-    lines.append(f"{prefix}{node.get('name')} = {value}")
+    if kind == "octets":
+        value_hex = str(node.get("valueHex") or "")
+        text = f"'{value_hex}'H"
+        decoded = node.get("decoded")
+        if decoded is None or decoded == value_hex:
+            return text
+        if node.get("decodedText") or decoded == _ascii_text(value_hex):
+            return f"{text} " + paint("punct", "(") + paint("string", json.dumps(decoded)) + paint("punct", ")")
+        return f"{text} " + paint("reading", f"({decoded})")
+    if kind == "bits":
+        shown = f"'{node.get('bits', '')}'B" if int(node.get("bitLength") or 0) <= _BITS_SHOWN else f"'{node.get('valueHex', '')}'H ({node.get('bitLength')} bits)"
+        options = node.get("options") or []
+        if options:
+            taken = sum(1 for option in options if option.get("set"))
+            return f"{shown} " + paint("reading", f"({taken} of {len(options)} set)")
+        return shown
+    if kind == "integer":
+        if "number" in node:
+            return paint("number", str(node["number"])) + " " + paint("reading", f"({node.get('decoded')})")
+        return paint("number", str(node.get("value", "")))
+    if kind == "boolean":
+        return paint("number", "TRUE" if node.get("value") else "FALSE")
+    if kind == "null":
+        return paint("number", "NULL")
+    if kind == "string":
+        return paint("string", json.dumps(node.get("value")))
+    return str(node.get("value", ""))
 
 
-def _render_payload(payload: dict[str, Any], indent: int, lines: list[str]) -> None:
+def _label_text(chain: list[tuple[str, str]], paint: Painter) -> tuple[str, int]:
+    """A node's label (a member and the CHOICE alternatives under it), painted, and its width."""
+    plain = ": ".join(text for _, text in chain)
+    painted = paint("punct", ": ").join(paint(role, text) for role, text in chain)
+    return painted, len(plain)
+
+
+def _name_role(name: str) -> str:
+    return "index" if name.startswith("[") else "field"
+
+
+def _render_certificate(rows: list[dict[str, Any]], indent: int, lines: list[str], paint: Painter) -> None:
+    """``label : value`` rows in one column, as format_certificate_rows lays them out."""
     prefix = " " * indent
-    title = payload.get("title", "")
-    spec = payload.get("spec", "")
-    lines.append(f"{prefix}{title}" + (f"  [{spec}]" if spec else ""))
+    labelled = [len("  " * int(row.get("indent") or 0) + str(row.get("name") or "")) for row in rows if row.get("value")]
+    width = min(max([12, *labelled]), 28)
+    for row in rows:
+        label = "  " * int(row.get("indent") or 0) + str(row.get("name") or "")
+        value = str(row.get("value") or "")
+        if not value:
+            lines.append(prefix + paint("field", label))
+            continue
+        tone = str(row.get("tone") or "")
+        painted = paint(tone, value) if tone else value
+        if not row.get("name"):
+            lines.append(f"{prefix}{' ' * width}  {painted}")
+        else:
+            lines.append(f"{prefix}{paint('field', label.ljust(width))}{paint('punct', ':')} {painted}")
+
+
+def _leaf_label_width(node: dict[str, Any]) -> int | None:
+    """Width of the label a node prints before ' = ', or None for a heading line."""
+    names = [str(node.get("name", ""))]
+    while node.get("kind") == "choice" and node.get("children"):
+        names.append(str(node.get("choice")))
+        node = node["children"][0]
+    kind = node.get("kind")
+    if kind == "certificate" or (kind in ("sequence", "list") and node.get("children")):
+        return None
+    return len(": ".join(names))
+
+
+def _render_children(children: list[dict[str, Any]], indent: int, lines: list[str], paint: Painter) -> None:
+    """Sibling nodes, their values in one column."""
+    widths = [width for width in map(_leaf_label_width, children) if width is not None and width <= _ALIGN_LIMIT]
+    column = max(widths, default=0)
+    for child in children:
+        _render_schema(child, indent, lines, paint=paint, column=column)
+
+
+def _render_options(node: dict[str, Any], indent: int, lines: list[str], paint: Painter) -> None:
+    """Every value the type names, the ones taken marked: [x] a set bit, (*) the number."""
+    bits = node.get("kind") == "bits"
+    key, flag = ("bit", "set") if bits else ("number", "active")
+    options = node.get("options") or []
+    width = max(len(str(option.get(key))) for option in options)
+    for option in options:
+        taken = bool(option.get(flag))
+        mark = ("[x]" if taken else "[ ]") if bits else ("(*)" if taken else "( )")
+        text = f"{mark} {str(option.get(key)).rjust(width)}  {option.get('name')}"
+        lines.append(" " * indent + paint("reading" if taken else "inactive", text))
+
+
+def _render_schema(
+    node: dict[str, Any],
+    indent: int,
+    lines: list[str],
+    chain: list[tuple[str, str]] | None = None,
+    paint: Painter = plain_painter,
+    column: int = 0,
+) -> None:
+    """One schema node as indented lines; a CHOICE prints as ``member: alternative``.
+
+    ``column`` is the label width the siblings share, so their ' = ' line up.
+    """
+    prefix = " " * indent
+    name = str(node.get("name", ""))
+    chain = list(chain or [(_name_role(name), name)])
+    kind = node.get("kind")
+    children = node.get("children") or []
+    if kind == "choice":
+        chain.append(("choice", str(node.get("choice"))))
+        if children:
+            _render_schema(children[0], indent, lines, chain, paint, column)
+        else:
+            lines.append(prefix + _label_text(chain, paint)[0])
+        return
+    label, label_width = _label_text(chain, paint)
+    pad = " " * max(0, column - label_width)
+    if kind in ("sequence", "list"):
+        if not children:
+            lines.append(f"{prefix}{label}{pad} {paint('punct', '= {}')}")
+            return
+        lines.append(prefix + label)
+        _render_children(children, indent + 2, lines, paint)
+        return
+    if kind == "certificate":
+        lines.append(prefix + label + " " + paint("reading", "(X.509 certificate)"))
+        _render_certificate(children, indent + 2, lines, paint)
+        return
+    lines.append(f"{prefix}{label}{pad} {paint('punct', '=')} {_schema_leaf_text(node, paint)}")
+    if node.get("options"):
+        _render_options(node, indent + max(column, label_width) + 3, lines, paint)
+    # The entries of a tag list, one tag per line.
+    width = max((len(str(child.get("name", ""))) for child in children), default=0)
+    for child in children:
+        entry = str(child.get("value", ""))
+        role = "note" if entry.startswith(("no ", "tag cut short")) else "field"
+        lines.append(f"{prefix}  {paint('tag', str(child.get('name', '')).ljust(width))}  {paint(role, entry)}")
+
+
+def _render_schema_body(root: dict[str, Any], indent: int, lines: list[str], paint: Painter = plain_painter) -> None:
+    """The members of the decoded type under its title line, which already names the type."""
+    kind = root.get("kind")
+    children = root.get("children") or []
+    if kind == "sequence":
+        if not children:
+            lines.append(" " * indent + paint("note", "(no members present)"))
+        _render_children(children, indent, lines, paint)
+        return
+    if kind == "choice" and children:
+        _render_schema(children[0], indent, lines, paint=paint)
+        return
+    _render_schema(root, indent, lines, paint=paint)
+
+
+def _render_payload(payload: dict[str, Any], indent: int, lines: list[str], paint: Painter = plain_painter) -> None:
+    prefix = " " * indent
+    title = str(payload.get("title", ""))
+    spec = str(payload.get("spec", ""))
+    lines.append(prefix + paint("title", title) + (f"  {paint('spec', f'[{spec}]')}" if spec else ""))
+    result = payload.get("result")
+    if isinstance(result, dict):
+        outcome = "ok" if result.get("ok") else "failed"
+        lines.append(f"{prefix}  {paint('field', 'result')}: {outcome}  " + paint("reading", f"-- {result.get('text', '')}"))
     for field_entry in payload.get("fields", []) or []:
-        text = f"{prefix}  {field_entry.get('label')}: {field_entry.get('value')}"
+        text = f"{prefix}  {paint('field', str(field_entry.get('label')))}: {field_entry.get('value')}"
         if field_entry.get("meaning"):
-            text += f"  -- {field_entry['meaning']}"
+            text += "  " + paint("reading", f"-- {field_entry['meaning']}")
         lines.append(text)
     if payload.get("schema"):
-        lines.append(f"{prefix}  schema {payload.get('schemaType')}:")
-        _render_schema(payload["schema"], indent + 4, lines)
+        _render_schema_body(payload["schema"], indent + 2, lines, paint)
     elif payload.get("nodes"):
-        _render_nodes(payload["nodes"], indent + 2, lines)
+        _render_nodes(payload["nodes"], indent + 2, lines, paint)
     for note in payload.get("notes", []) or []:
-        lines.append(f"{prefix}  note: {note}")
+        lines.append(f"{prefix}  " + paint("note", f"note: {note}"))
 
 
-def render_context_notation(result: dict[str, Any]) -> str:
+def render_rsp_reading(payload: dict[str, Any], paint: Painter = plain_painter) -> str:
+    """The text of a ``decode_rsp_object`` payload, painted for a terminal or plain."""
+    lines: list[str] = []
+    _render_payload(payload, 0, lines, paint)
+    return "\n".join(lines)
+
+
+_GENERIC_LINE = re.compile(r"^(\s*)([A-Za-z][\w-]*)( \[[0-9A-F]+\])?(.*)$")
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def paint_generic_notation(text: str, paint: Painter) -> str:
+    """Colour the generic BER notation of ``main.render_asn1_notation``: names, tags and text."""
+    painted = []
+    for line in text.splitlines():
+        match = _GENERIC_LINE.match(line)
+        if match is None:
+            painted.append(_QUOTED.sub(lambda found: paint("string", found.group(0)), line))
+            continue
+        indent, name, tag, rest = match.groups()
+        rest = _QUOTED.sub(lambda found: paint("string", found.group(0)), rest)
+        painted.append(indent + paint("field", name) + (paint("tag", tag) if tag else "") + rest)
+    return "\n".join(painted)
+
+
+def render_context_notation(result: dict[str, Any], paint: Painter = plain_painter) -> str:
     lines: list[str] = []
     if result.get("inputKind") == "sw":
         sw = result.get("sw", {})
-        lines.append(f"SW {sw.get('sw')}: {sw.get('meaning')}")
+        lines.append(f"{paint('field', 'SW')} {paint('number', str(sw.get('sw')))}: {sw.get('meaning')}")
         return "\n".join(lines)
     if "exchanges" not in result:
         context = result.get("context", {})
-        lines.append(f"{context.get('label', '')}: {context.get('summary', '')}".strip(": "))
+        lines.append(paint("spec", f"{context.get('label', '')}: {context.get('summary', '')}".strip(": ")))
         if result.get("payload"):
-            _render_payload(result["payload"], 2, lines)
+            _render_payload(result["payload"], 2, lines, paint)
         if result.get("sw"):
-            lines.append(f"  SW {result['sw'].get('sw')}: {result['sw'].get('meaning')}")
+            lines.append(f"  {paint('field', 'SW')} {paint('number', str(result['sw'].get('sw')))}: {result['sw'].get('meaning')}")
         return "\n".join(lines)
     for exchange in result.get("exchanges", []):
         context = exchange.get("context", {})
         command = exchange.get("command") or {}
-        head = f"#{exchange.get('index')} {command.get('name', '')}".rstrip()
+        head = paint("title", f"#{exchange.get('index')} {command.get('name', '')}".rstrip())
         if command.get("cla"):
-            head += f" [{command['cla']} {command['ins']} {command['p1']} {command['p2']}]"
+            head += " " + paint("tag", f"[{command['cla']} {command['ins']} {command['p1']} {command['p2']}]")
         if context.get("summary"):
-            head += f" -- {context['summary']}"
+            head += " " + paint("reading", f"-- {context['summary']}")
         lines.append(head)
         if context.get("label"):
-            lines.append(f"  context: {context['label']}" + (f" ({context.get('spec')})" if context.get("spec") else ""))
+            lines.append("  " + paint("spec", f"context: {context['label']}" + (f" ({context.get('spec')})" if context.get("spec") else "")))
         for entry in command.get("header", []):
             if entry.get("meaning"):
-                lines.append(f"  {entry['label']} {entry['value']}: {entry['meaning']}")
+                lines.append(f"  {paint('field', str(entry['label']))} {entry['value']}: {entry['meaning']}")
         if command.get("payload"):
-            _render_payload(command["payload"], 2, lines)
+            _render_payload(command["payload"], 2, lines, paint)
         response = exchange.get("response") or {}
         if response:
             sw = response.get("sw") or {}
             if sw:
-                lines.append(f"  SW {sw.get('sw')}: {sw.get('meaning')}" + (f" -> {sw['followUp']}" if sw.get("followUp") else ""))
+                follow = f" -> {sw['followUp']}" if sw.get("followUp") else ""
+                lines.append(f"  {paint('field', 'SW')} {paint('number', str(sw.get('sw')))}: {sw.get('meaning')}{follow}")
             if response.get("chained"):
-                lines.append(f"  response continues in GET RESPONSE ({response.get('partialBytes', 0)} byte(s) held)")
+                lines.append("  " + paint("note", f"response continues in GET RESPONSE ({response.get('partialBytes', 0)} byte(s) held)"))
             if response.get("payload"):
-                _render_payload(response["payload"], 2, lines)
+                _render_payload(response["payload"], 2, lines, paint)
+    for note in result.get("inputNotes") or []:
+        lines.append(paint("note", f"note: {note}"))
     return "\n".join(lines)
 
 

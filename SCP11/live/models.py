@@ -81,6 +81,9 @@ class InitiateAuthenticationResponse:
     server_signature1: str
     server_certificate: str
     euicc_ci_pkid_to_be_used: str
+    # SGP.32 v1.3 InitiateAuthenticationOkEsipa: the eIM names the Matching ID
+    # when it keeps the Activation Code (indirect download, eimDownloadDataHandling).
+    matching_id: Optional[str] = None
 
 
 @dataclass
@@ -97,6 +100,13 @@ class AuthenticateClientResponse:
     smdp_signature2: str
     smdp_certificate: str
     profile_metadata: Optional[str] = None
+    # ES11 (SM-DS) answers eventEntries, EVENT_RECORD {eventId, rspServerAddress}, instead of the SM-DP+
+    # members (SGP.22 v3.1 5.8.2, p.373)
+    event_entries: Optional[List[Dict[str, Any]]] = None
+    # authenticateClientOkDSEsipa (SGP.32 v1.3 6.3.2.2, p.181): the eIM ran the Event Retrieval and keeps
+    # the Event Records; the ProfileDownloadTriggerRequest 'BF54' that may come with it, base64
+    event_retrieval_by_eim: bool = False
+    profile_download_trigger: Optional[str] = None
 
 
 @dataclass

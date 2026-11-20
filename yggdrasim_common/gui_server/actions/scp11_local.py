@@ -13,7 +13,7 @@ is rebuilt per call.
 
 Read-only surface:
 
-* ``scp11_local.get_eid``              -- 5A tag via ISD-R SELECT + ECASD.
+* ``scp11_local.get_eid``              -- ES10 GetEID on the ISD-R, the ECASD read as fallback.
 * ``scp11_local.list_profiles``        -- ProfilesInfo (BF2D) decoded.
 * ``scp11_local.get_euicc_info2``      -- EUICCInfo2 (BF22) detail lines.
 * ``scp11_local.get_configured_data``  -- EuiccConfiguredData (BF3C)
@@ -41,7 +41,6 @@ GUI layer.
 from __future__ import annotations
 
 import contextlib
-import io
 import json
 import logging
 import os
@@ -51,6 +50,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from ..live_trace import configure_channel_trace, live_trace_sink
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -88,12 +88,13 @@ def _resolve_reader_index(reader_name: str) -> int:
     ``REMOTE_READER_INDEX``; ``_build_session`` then opens the relay channel
     for that name instead of a PC/SC one.
     """
+    from yggdrasim_common.card_backend import is_simulated_reader_name
     from yggdrasim_common.remote_readers import REMOTE_READER_INDEX, is_remote_reader
 
     cleaned = str(reader_name or "").strip()
     if is_remote_reader(cleaned):
         return REMOTE_READER_INDEX
-    if len(cleaned) == 0:
+    if len(cleaned) == 0 or is_simulated_reader_name(cleaned):
         return 0
     try:
         from smartcard.System import readers as list_pcsc_readers
@@ -125,6 +126,8 @@ def _build_session(reader_index: int, reader_name: str = "") -> tuple[Any, Any]:
     else:
         channel = PcscApduChannel(reader_index=int(reader_index), quiet_apdu_logging=True)
     session = LocalIsdrSession(cfg=cfg, apdu_channel=channel)
+    # After the session: its constructor switches raw logging off.
+    configure_channel_trace(channel)
     return session, channel
 
 
@@ -184,7 +187,7 @@ def _dispatch_get_eid(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     eid_text = ""
     note_parts: list[str] = []
     try:
@@ -209,7 +212,7 @@ def _dispatch_get_eid(
         "ok": ok,
         "raw_hex": raw_hex,
         "note": "; ".join(note_parts) if note_parts else (
-            "EID decoded via ISD-R SELECT + ECASD GET DATA 5A."
+            "EID read with ES10 GetEID on the ISD-R (GET DATA 5A on the ECASD for a card without it)."
             if ok
             else "No EID returned; verify the card is seated and ISD-R is addressable."
         ),
@@ -225,7 +228,7 @@ def _dispatch_list_profiles(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     rows: list[dict[str, Any]] = []
     note_parts: list[str] = []
     raw_hex = ""
@@ -271,7 +274,7 @@ def _dispatch_get_euicc_info2(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     raw_hex = ""
     lines: list[dict[str, str]] = []
     note_parts: list[str] = []
@@ -335,7 +338,7 @@ def _dispatch_get_configured_data(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     raw_hex = ""
     decoded: dict[str, Any] = {}
     note_parts: list[str] = []
@@ -386,7 +389,7 @@ def _dispatch_list_notifications(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     raw_hex = ""
     note_parts: list[str] = []
     try:
@@ -424,7 +427,7 @@ def _dispatch_list_certs_inventory(
         cfg=LocalAccessConfig(READER_INDEX=reader_index),
         apdu_channel=None,
     )
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     report: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -573,7 +576,7 @@ def _dispatch_discover(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     snapshot: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -624,8 +627,9 @@ GET_EID_SPEC = ActionSpec(
     subsystem="SCP11 Local",
     title="Get EID (ISD-R)",
     description=(
-        "Open a PC/SC channel, run the local ISD-R select + ECASD GET "
-        "DATA 5A path, and close the channel. Pure read; no SCP11 handshake."
+        "Open a PC/SC channel, select the ISD-R, read the EID with ES10 "
+        "GetEID (GET DATA 5A on the ECASD for a card without it), and close "
+        "the channel. Pure read; no SCP11 handshake."
     ),
     inputs=(_reader_input_field(),),
     output_kind="json",
@@ -639,7 +643,7 @@ GET_EID_SPEC = ActionSpec(
 LIST_PROFILES_SPEC = ActionSpec(
     id="scp11_local.list_profiles",
     subsystem="SCP11 Local",
-    title="List profiles (ES10b local)",
+    title="List profiles (ES10c local)",
     description=(
         "Fetch ProfilesInfo (BF2D00) through the local ISD-R and decode "
         "each E3 entry (ICCID, AID, state, class, nickname, service "
@@ -834,7 +838,7 @@ def _run_profile_state_mutation(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -923,7 +927,7 @@ def _dispatch_store_metadata(
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -959,7 +963,7 @@ def _dispatch_update_metadata(
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -999,7 +1003,7 @@ def _dispatch_store_metadata_custom(
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -1045,7 +1049,7 @@ def _dispatch_status(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     state_snapshot: dict[str, Any] = {}
     try:
@@ -1094,7 +1098,7 @@ def _dispatch_load_profile(
     if len(path_s) == 0:
         raise ValueError("profile_path is required for the one-shot load cycle.")
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -1159,7 +1163,7 @@ def _dispatch_store_metadata_custom_all(
     reader_index = _resolve_reader_index(reader_name)
     path_s = str(metadata_path or "").strip()
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     results: list[tuple[str, bytes]] = []
     note_parts: list[str] = []
     try:
@@ -1196,7 +1200,7 @@ def _dispatch_explain_last(
     reader_name = str(reader or "")
     reader_index = _resolve_reader_index(reader_name)
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     lines: list[dict[str, str]] = []
     try:
@@ -1247,7 +1251,7 @@ def _dispatch_export_keybag(
     path_s = str(output_path or "").strip()
     label_s = str(label or "").strip()
     session, channel = _build_session(reader_index, reader_name)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     keybag_path = ""
     try:
@@ -1365,7 +1369,7 @@ def _dispatch_metadata_lint(
     if len(path_s) == 0:
         raise ValueError("metadata_path is required.")
     session, channel = _build_session(0)
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     report: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -1416,7 +1420,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
     dispatcher=_dispatch_enable_profile,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "profile", "enable"),
+    tags=("destructive", "scp11", "local", "profile", "enable"),
 )
 
 
@@ -1439,7 +1443,7 @@ DISABLE_PROFILE_SPEC = ActionSpec(
     dispatcher=_dispatch_disable_profile,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "profile", "disable"),
+    tags=("destructive", "scp11", "local", "profile", "disable"),
 )
 
 
@@ -1500,7 +1504,7 @@ STORE_METADATA_SPEC = ActionSpec(
     dispatcher=_dispatch_store_metadata,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "metadata", "store"),
+    tags=("destructive", "scp11", "local", "metadata", "store"),
 )
 
 
@@ -1527,7 +1531,7 @@ UPDATE_METADATA_SPEC = ActionSpec(
     dispatcher=_dispatch_update_metadata,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "metadata", "update"),
+    tags=("destructive", "scp11", "local", "metadata", "update"),
 )
 
 
@@ -1561,7 +1565,7 @@ STORE_METADATA_CUSTOM_SPEC = ActionSpec(
     dispatcher=_dispatch_store_metadata_custom,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "metadata", "custom"),
+    tags=("destructive", "scp11", "local", "metadata", "custom"),
 )
 
 
@@ -1641,7 +1645,7 @@ STORE_METADATA_CUSTOM_ALL_SPEC = ActionSpec(
     dispatcher=_dispatch_store_metadata_custom_all,
     requires_card=True,
     streams=False,
-    tags=("scp11", "local", "metadata", "custom-all"),
+    tags=("destructive", "scp11", "local", "metadata", "custom-all"),
 )
 
 EXPLAIN_LAST_SPEC = ActionSpec(

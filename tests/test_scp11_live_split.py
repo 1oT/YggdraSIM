@@ -2082,9 +2082,10 @@ class LiveSplitTests(unittest.TestCase):
         orchestrator.state.bpp_bytes = bpp_bytes
         orchestrator.state.prepare_download_response_b64 = base64.b64encode(prepare_download_response).decode("utf-8")
 
-        install_complete = orchestrator._phase_install_package()
+        # The capture channel answers every block without data, so no PIR arrives.
+        with self.assertRaisesRegex(RuntimeError, "without a ProfileInstallationResult"):
+            orchestrator._phase_install_package()
 
-        self.assertTrue(install_complete)
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
         # BF23 (segment 1) fits in one block with the 0xFF chunk ceiling.
         self.assertEqual(load_calls[1][0], "DOWNLOAD: LoadBoundProfilePackage [2/7] [Block 0]")
@@ -2219,7 +2220,9 @@ class LiveSplitTests(unittest.TestCase):
         orchestrator.state.bpp_bytes = bpp_bytes
         orchestrator.state.prepare_download_response_b64 = base64.b64encode(prepare_download_response).decode("utf-8")
 
-        orchestrator._phase_install_package()
+        # The capture channel answers every block without data, so no PIR arrives.
+        with self.assertRaisesRegex(RuntimeError, "without a ProfileInstallationResult"):
+            orchestrator._phase_install_package()
 
         load_calls = [call for call in apdu_channel.send_calls if call[0].startswith("DOWNLOAD: LoadBoundProfilePackage")]
         self.assertTrue(all(call[1][0] == 0x81 for call in load_calls))
@@ -2265,7 +2268,26 @@ class LiveSplitTests(unittest.TestCase):
         )
         orchestrator.state.bpp_bytes = b"\x01\x02\x03"
         orchestrator._segment_bound_profile_package = lambda _: [b"\xAA", b"\xBB", b"\xCC"]
-        orchestrator._send_personalization_store_data = lambda *_a, **_kw: b""
+        # SGP.22 v3.1 §2.5.6: the last segment is answered with a successful PIR.
+        success_pir = wrap_tlv(
+            "BF37",
+            wrap_tlv(
+                "BF27",
+                wrap_tlv("80", b"\x10" * 16)
+                + wrap_tlv(
+                    "A2",
+                    wrap_tlv(
+                        "A0",
+                        wrap_tlv("4F", bytes.fromhex("A0000005591010FFFFFFFF8900001100"))
+                        + wrap_tlv("04", bytes.fromhex("3007A0053003800100")),
+                    ),
+                ),
+            )
+            + wrap_tlv("5F37", b"\x22" * 64),
+        )
+        orchestrator._send_personalization_store_data = (
+            lambda segment, *_a, **_kw: success_pir if segment == b"\xCC" else b""
+        )
         orchestrator._sync_pending_notifications = lambda *_a, **_kw: None
         orchestrator._inspect_install_bootstrap = lambda _segments: None
 
@@ -2379,8 +2401,9 @@ class LiveSplitTests(unittest.TestCase):
         self.assertTrue(any("STATUS CH0" in name for name in kinds))
         self.assertTrue(any(name.endswith("[CH1]") for name in kinds))
         self.assertTrue(any("CLOSE LOGICAL CHANNEL 1" in name for name in kinds))
-        # TS 102 223 §5.4 scopes TERMINAL PROFILE to the start of a card
-        # session; this rung runs on one that is still alive.
+        # TS 102 223 v18.3 §5.1 sends the profile download (TERMINAL PROFILE)
+        # in the UICC initialization procedure; this rung runs on a card
+        # session that is still alive.
         self.assertEqual([name for name in kinds if "TERMINAL PROFILE" in name], [])
 
     def test_recovery_channel_rung_keeps_the_cached_logical_channel(self):

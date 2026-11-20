@@ -13,15 +13,16 @@ Round-12 closes the following:
 * 3GPP TS 31.103 §4.2.2 / §4.2.4 / §4.2.5 ISIM EFs ``EF.IMPI``,
   ``EF.IMPU``, ``EF.DOMAIN`` and ``EF.AD`` are seeded under ADF.ISIM
   with their TLV encodings.
-* ETSI TS 102 223 §7.4 call-lifecycle event downloads:
+* ETSI TS 102 223 v18.3 §7.5.1-§7.5.3 call event downloads:
   ``MT Call`` (0x00), ``Call Connected`` (0x01),
   ``Call Disconnected`` (0x02). Each latches its transaction id
   and toggles ``call_active`` consistently with the CC layer of a
   paired terminal.
-* §7.4.4 ``User Activity`` (0x04) bumps a monotonic counter.
-* 3GPP TS 31.111 §7.5.4 ``Access Technology Change`` (0x0D) caches
-  the new RAT and counts transitions.
-* ETSI TS 102 223 §7.4.14 ``Display Parameters Change`` (0x0E)
+* ETSI TS 102 223 v18.3 §7.5.5 ``User activity`` event (0x04) bumps
+  a monotonic counter.
+* ETSI TS 102 223 v18.3 §7.5.12 ``Access Technology Change`` (0x0B)
+  caches the new RAT and counts transitions.
+* ETSI TS 102 223 v18.3 §7.5.13 ``Display parameters changed`` (0x0C)
   caches the new display blob and counts changes.
 """
 
@@ -262,7 +263,7 @@ class IsimFilesystemTests(_EngineHarness):
 
 
 class CallLifecycleEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.0 / §7.4.1 / §7.4.2 call events."""
+    """ETSI TS 102 223 v18.3 §7.5.1 / §7.5.2 / §7.5.3 MT call and call connected / disconnected."""
 
     def test_mt_call_event_records_transaction_and_address(self) -> None:
         envelope = _event_payload(

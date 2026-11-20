@@ -24,9 +24,10 @@ This module is the relay implementation used by both ``SCP11.live`` and the
 import base64
 import binascii
 import copy
+import os
 import re
 import time
-from typing import Any, Optional, Sequence, Union
+from typing import Any, NamedTuple, Optional, Sequence, Union
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -35,6 +36,7 @@ from SCP03.logic.sgp32_decode import decode_eim_acknowledgements
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entries as decode_eim_configuration_entries_shared
 from SCP03.logic.sgp32_decode import decode_eim_configuration_entry as decode_eim_configuration_entry_shared
 from SCP11.shared.ber_tlv import decode_object_identifier, read_ber_tlv
+from SCP11.shared.get_eid import GET_EID_REQUEST, eid_value
 from SCP11.shared.gsma_error_codes import (
     SGP22_BPP_COMMAND_ID,
     SGP22_PROFILE_INSTALLATION_RESULT_REASON,
@@ -77,6 +79,7 @@ try:
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
         TYPE_PROFILE_STATE_MANAGEMENT,
         package_changes_eim_configuration,
+        package_changes_enabled_profile,
         parse_eim_package,
     )
     from .models import (
@@ -119,6 +122,7 @@ except ImportError:
         TYPE_PROFILE_DOWNLOAD_TRIGGER,
         TYPE_PROFILE_STATE_MANAGEMENT,
         package_changes_eim_configuration,
+        package_changes_enabled_profile,
         parse_eim_package,
     )
     from models import (
@@ -161,6 +165,38 @@ def _print_trace_note(text: str, *, heading: bool = False) -> None:
 
 class EimEntryRemovedError(RuntimeError):
     """The eIM an eIM sweep selected is no longer in the card's eIM configuration (BF55)."""
+
+
+# SGP.32 v1.3 IpaCapabilities ipaFeatures bits.
+IPA_FEATURE_DIRECT = 0
+IPA_FEATURE_INDIRECT = 1
+IPA_FEATURE_EIM_DOWNLOAD_DATA_HANDLING = 2
+INDIRECT_DOWNLOAD_ENV = "YGGDRASIM_IPA_INDIRECT_DOWNLOAD"
+
+
+def _indirect_download_preferred() -> bool:
+    """YGGDRASIM_IPA_INDIRECT_DOWNLOAD: run an Activation Code or contactSmds trigger through the eIM too."""
+    return os.environ.get(INDIRECT_DOWNLOAD_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+class EventRetrievalAnswer(NamedTuple):
+    """How an RSP session ended when the server it authenticated was an SM-DS.
+
+    Over ES11 the SM-DS answers AuthenticateClient with the Event Records
+    (SGP.22 v3.1 §3.6.2 step 8), each an EventID and the address of the RSP
+    Server it is to be taken to. Over ESipa the eIM keeps the records and
+    answers the SM-DS transactionId, with a ProfileDownloadTriggerRequest when
+    it wants a download started (SGP.32 v1.3 §3.9.2.2 step 14).
+    """
+
+    events: tuple[tuple[str, str], ...] = ()
+    by_eim: bool = False
+    trigger: bytes = b""
+
+
+# A ProfileDownloadTriggerRequest that rides in the eIM's Event Retrieval answer is followed; one that
+# arrives the same way inside that download is not, so an eIM cannot keep the IPA in a chain of them.
+MAX_EVENT_RETRIEVAL_TRIGGER_DEPTH = 1
 
 
 class SGP22Orchestrator:
@@ -216,9 +252,41 @@ class SGP22Orchestrator:
         # queue or saw it empty", ``False`` means "sync failed before
         # reaching the queue (notifications must NOT be deleted)".
         self._last_notification_sync_succeeded: Optional[bool] = None
+        # Set while a command was asked to leave pending Notifications on
+        # the eUICC (EIM-LISTEN notifications=keep): the sync then reads
+        # and forwards nothing.
+        self._notification_sync_held = False
+        # EIM-LISTEN state: an HTTPS listener is up (declared as
+        # ipaInjectHttps while it is), the last injected package marked a
+        # Profile for a state change, the last one failed in the card work.
+        self._inject_https_listening = False
+        self._injected_profile_state_change = False
+        self._injected_session_suspect = False
+        # Set by the AuthenticateClient step when the RSP Server turned out to be
+        # an SM-DS; the flow that sees it stops before PrepareDownload. Reset at
+        # the start of every flow.
+        self._event_retrieval: Optional[EventRetrievalAnswer] = None
+        # True while a profile download trigger runs the flow: an SM-DS answer is
+        # then an outcome for the trigger handler to act on. Otherwise the flow
+        # raises on it, since its caller asked for a download.
+        self._event_retrieval_expected = False
+        # How many ProfileDownloadTriggerRequests taken from an Event Retrieval
+        # answer are being run right now (MAX_EVENT_RETRIEVAL_TRIGGER_DEPTH).
+        self._event_retrieval_trigger_depth = 0
+        # Why the eIM Package being relayed owes the eIM no eIM Package Result;
+        # read and cleared by the poll round.
+        self._no_eim_package_result_owed = ""
 
     def run_flow(self, matching_id: str = "", smdp_address: Optional[str] = None) -> None:
-        """Execute the full SGP.22 ES2+/ES9+/ES8+ profile download flow for one EID target."""
+        """Execute the full SGP.22 ES2+/ES9+/ES8+ profile download flow for one EID target.
+
+        When the server answers AuthenticateClient as an SM-DS, the flow ends
+        there: an Event Retrieval (SGP.22 v3.1 §3.6.2) has no PrepareDownload.
+        For a profile download trigger that is an outcome, left in
+        ``_event_retrieval`` (``_run_flow_for_trigger``). Any other caller asked
+        for a download and gets a RuntimeError that names the Event Records.
+        """
+        self._event_retrieval = None
         effective_smdp_address = smdp_address
         if effective_smdp_address is None:
             effective_smdp_address = self.cfg.RSP_SERVER_URL
@@ -249,9 +317,19 @@ class SGP22Orchestrator:
                     smdp_address=effective_smdp_address,
                 )
                 bar.advance("authenticate server")
-                self._phase_authenticate_server(auth_seed, matching_id=matching_id)
+                self._phase_authenticate_server(auth_seed, matching_id=str(auth_seed.get("matching_id") or matching_id))
                 bar.advance("prepare download")
                 self._phase_prepare_download(smdp_address=effective_smdp_address)
+                answered = getattr(self, "_event_retrieval", None)
+                if answered is not None:
+                    if getattr(self, "_event_retrieval_expected", False) is not True:
+                        # Whoever called asked for a download, as every caller but a
+                        # trigger handler does: no Profile came of it, and saying so
+                        # is this flow's failure, as it was before the answer was read.
+                        self._event_retrieval = None
+                        raise RuntimeError(self._unexpected_event_retrieval_text(effective_smdp_address, answered))
+                    print("\n[*] Sequence completed: the RSP Server answered as an SM-DS, no profile download on this session.")
+                    return
                 bar.advance("bound profile package")
                 bpp_ready = self._phase_get_bound_profile_package(smdp_address=effective_smdp_address)
                 try:
@@ -474,6 +552,146 @@ class SGP22Orchestrator:
         finally:
             self._close_es10b_logical_channel("EIM")
 
+    def run_eim_listen(
+        self,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        max_calls: Optional[int] = None,
+        idle_seconds: Optional[float] = None,
+        stop: Any = None,
+        keep_notifications: bool = False,
+        tls_context: Any = None,
+    ) -> int:
+        """Take injected eIM Packages until stopped; returns the number of calls answered.
+
+        The eIM calls ESipa.TransferEimPackage on this IPA (SGP.32 v1.3
+        section 3.1.1.2). Section 5.14.4 says what the IPA does per eIM
+        Package; ``SCP11.live.transfer_provider`` carries that rule and the
+        limits of this version. The listener is up only while this runs.
+
+        After each package this IPA delivers the pending Notifications to
+        their SM-DP+ itself (section 3.3.1 step 17). With *keep_notifications*
+        it reads and delivers none: they stay on the eUICC.
+
+        With *tls_context* the listener serves HTTPS, on any *host*, and the
+        IpaCapabilities declare ipaInjectHttps while it is up (section 4.1).
+        """
+        from SCP11.live.transfer_provider import TransferListener, answer_transfer
+
+        debug_print("--- IOT / SGP.32 eIM PACKAGE INJECTION - LISTENING ---")
+        listener = None
+        self._notification_sync_held = bool(keep_notifications)
+        self._inject_https_listening = tls_context is not None
+        self._injected_profile_state_change = False
+        self._injected_session_suspect = False
+        try:
+            self._phase_connect()
+            eid = self._read_card_eid()
+            if len(eid) != 32:
+                raise RuntimeError("the eUICC gave no EID, and an injected eIM Package is answered for one")
+            self._injected_eim_package_count = 0
+
+            def answer(request: bytes) -> bytes:
+                return answer_transfer(
+                    request,
+                    eid=eid,
+                    run_package=self._run_injected_eim_package,
+                    remove_acknowledged=self._remove_notification_from_list,
+                    log=print,
+                )
+
+            listener = TransferListener(answer, host=host, port=port, log=print, tls_context=tls_context,
+                                        settle=self._settle_injected_eim_package)
+            print(f"[*] eIM package injection: listening on {listener.url} for EID {eid}.")
+            if listener.host in ("0.0.0.0", "::"):
+                print(f"[*] On the eIM: the address of this host, port {listener.port}, "
+                      f"{'HTTPS' if listener.secure else 'HTTP'}.")
+            else:
+                print(f"[*] On the Local eIM: INJECT {eid} target={listener.url}")
+            if listener.secure:
+                print("[*] HTTPS: a call is taken only from a client certificate that verifies against client-ca; "
+                      "IpaCapabilities declare ipaInjectHttps while this runs.")
+            if self._notification_sync_held:
+                print("[*] Pending Notifications are left on the eUICC (notifications=keep).")
+            try:
+                calls = listener.serve(max_calls=max_calls, idle_seconds=idle_seconds, stop=stop)
+            except KeyboardInterrupt:
+                calls = listener.calls
+                print("")
+            print(f"[*] eIM package injection: stopped after {calls} call(s).")
+            return calls
+        finally:
+            self._notification_sync_held = False
+            self._inject_https_listening = False
+            self._injected_profile_state_change = False
+            self._injected_session_suspect = False
+            if listener is not None:
+                listener.close()
+            self._close_es10b_logical_channel("EIM")
+
+    def _run_injected_eim_package(self, package_bytes: bytes) -> bytes:
+        """Run one injected eIM Package on the card; returns what an EimPackageResult carries for it."""
+        self._injected_eim_package_count = int(getattr(self, "_injected_eim_package_count", 0) or 0) + 1
+        self._injected_profile_state_change = package_changes_enabled_profile(package_bytes)
+        try:
+            card_response = self._relay_eim_package_to_card(
+                package_bytes,
+                poll_round=0,
+                package_index=self._injected_eim_package_count,
+                source="injected by the eIM",
+            )
+        except Exception:
+            self._injected_profile_state_change = False
+            self._injected_session_suspect = True
+            raise
+        if len(card_response) == 0:
+            self._injected_profile_state_change = False
+            self._injected_session_suspect = True
+            raise RuntimeError("the card returned no eIM Package Result")
+        # ProvideEimPackageResult 'BF50' without an eidValue holds the EimPackageResult
+        # alone (SGP.32 v1.3 section 6.3.2.7): the same check of the card's answer as on
+        # the route where this IPA polls, and the alternative the answer carries.
+        provide_result = self._build_provide_eim_package_result_tlv(card_response, package_bytes=package_bytes)
+        _tag, eim_package_result, _raw, _next = self._read_tlv(provide_result, 0)
+        return eim_package_result
+
+    def _settle_injected_eim_package(self) -> None:
+        """Between two calls: give the card the reset the last injected package is waiting for.
+
+        The eUICC completes a PSMO enable or disable "upon reception of the
+        Terminal Response or after the RESET" (SGP.32 v1.3 section 3.3.1 step
+        8b). This IPA sends no TERMINAL PROFILE, so no REFRESH reaches it, and
+        a listener that stays up would leave the Profile marked until it ends.
+        The reset is given here, after the result went back to the eIM, and
+        the Notification the state change creates is then delivered like any
+        other. A package the card work failed on gets a new card session too.
+        """
+        changed = self._injected_profile_state_change
+        suspect = self._injected_session_suspect
+        self._injected_profile_state_change = False
+        self._injected_session_suspect = False
+        if not changed and not suspect:
+            return
+        reason = "the Profile state change" if changed else "the failed package"
+        reset = getattr(self.apdu_channel, "reset", None)
+        if callable(reset) is False:
+            print(f"[*] eIM package injection: this card channel has no reset; after {reason} the card session goes on.")
+            return
+        try:
+            reset()
+            self._phase_connect_complete = False
+            self._es10b_logical_channel = 0
+            self._phase_connect()
+        except Exception as error:
+            # The next package finds out; a session that did not come back is tried again after it.
+            self._injected_session_suspect = True
+            print(f"[!] eIM package injection: no new card session after {reason}: {error}")
+            return
+        print(f"[*] eIM package injection: card reset after {reason}; new card session.")
+        if changed:
+            self._sync_pending_notifications()
+
     def _resolve_eim_poll_drain_round_limit(self, entry_count: int) -> int:
         default_limit = max(1, int(entry_count) + 1)
         configured_limit = int(
@@ -559,6 +777,8 @@ class SGP22Orchestrator:
         print(f"[*] eIM poll {attempt_label} -> {', '.join(suffix_parts)}")
 
     def _run_single_eim_poll_round(self, request: EimPollRequest) -> dict[str, Any]:
+        # An indirect download triggered in this round goes to the same eIM.
+        self._active_eim_poll_request = request
         poll_round = 1
         pending_response = None
         relayed_package_count = 0
@@ -647,6 +867,17 @@ class SGP22Orchestrator:
                     self._current_eim_poll_request = previous_eim_poll_request
                 relayed_package_count += 1
                 if len(card_response) == 0:
+                    not_owed = str(getattr(self, "_no_eim_package_result_owed", "") or "")
+                    self._no_eim_package_result_owed = ""
+                    if len(not_owed) > 0:
+                        # SGP.32 v1.3 §3.9.2.2 ends with the eIM's AuthenticateClient
+                        # answer (step 14): the IPA asks for the next package (§3.1.1.1).
+                        print(
+                            f"[*] No eIM Package Result for package {package_index} in poll round {poll_round}: "
+                            f"{not_owed}."
+                        )
+                        continue_after_acknowledgement = True
+                        continue
                     raise RuntimeError("eIM package exchange requires a card package result, but the last relay response was empty.")
                 provide_result = self._build_provide_eim_package_result_tlv(
                     card_response,
@@ -895,7 +1126,7 @@ class SGP22Orchestrator:
     ) -> bytes:
         # STK-mode last-resort path: cold-reset the transport, replay
         # the TS 102 221 §11.1.19 TERMINAL CAPABILITY and
-        # TS 102 223 §5.4 TERMINAL PROFILE handshake on the basic
+        # TS 102 223 v18.3 §5.1 TERMINAL PROFILE handshake on the basic
         # channel, drain any pending proactive commands queued by the
         # newly-active profile's STK applets (TS 102 223 §6), then
         # dispatch the StoreData with CLA=0x80.
@@ -923,7 +1154,7 @@ class SGP22Orchestrator:
         )
         self._select_isd_r(f"{log_name} [STK MODE SELECT ISD-R]")
         # TERMINAL PROFILE belongs to the start of a card session
-        # (TS 102 223 §5.4). It is sent here only when the reset above
+        # (TS 102 223 v18.3 §5.1). It is sent here only when the reset above
         # actually began one: on a session that is still alive it would
         # restart the toolkit negotiation the STK bring-up already
         # completed. It is the toolchain's one profile, which claims
@@ -1028,7 +1259,7 @@ class SGP22Orchestrator:
     ) -> bytes:
         # Fresh MANAGE CHANNEL OPEN + SELECT ISD-R on the new channel,
         # then STATUS / TERMINAL PROFILE so eUICC stacks that gate
-        # ES10b on the proactive-UICC handshake (TS 102 223 §5.4) drop
+        # ES10b on the proactive-UICC handshake (TS 102 223 v18.3 §5.1) drop
         # their 6985 ``conditions of use not satisfied'' guard. Without
         # the TERMINAL PROFILE step some commercial eUICC OSes reject
         # BF28 on a freshly-opened channel even after a clean
@@ -1084,7 +1315,7 @@ class SGP22Orchestrator:
         #
         # TERMINAL PROFILE is deliberately NOT replayed here. This rung
         # runs on a card session that is still alive and answering, and
-        # TS 102 223 §5.4 scopes TERMINAL PROFILE to the start of a card
+        # TS 102 223 v18.3 §5.1 scopes TERMINAL PROFILE to the start of a card
         # session: re-sending one mid-session re-declares the terminal's
         # capabilities, and the minimal body this ladder used to send is
         # narrower than the profile the STK bring-up negotiates, so a
@@ -1795,6 +2026,57 @@ class SGP22Orchestrator:
         return self._send_es10b_store_data(payload, log_name)
 
     def _read_card_eid(self, reselect_isdr: bool = True) -> str:
+        """Return the card's EID, "" when it gave none; a failure is printed, never raised.
+
+        Once the connect phase has run, the ISD-R is selected behind the IPAd
+        declaration and ES10 GetEID is asked there (SGP.22 v3.1 §5.7.20,
+        SGP.32 v1.3 §5.9.19), once and with no recovery cascade of its own:
+        a refusal starts no reset. GET DATA '5A' on the ECASD, the retrieval of
+        SGP.02 v4.2 §2.2.2 that a later eUICC need not answer (a live one
+        answered '6D 00'), follows only after a card answer. Without the
+        connect phase the read is the ECASD one alone: this method declares
+        nothing and selects no ISD-R by itself, so a card session that has
+        to stay without the IPAd declaration is not changed by it.
+        """
+        eid = ""
+        isdr_error: Optional[Exception] = None
+        if getattr(self, "_phase_connect_complete", False):
+            try:
+                eid = self._read_eid_from_isdr()
+            except Exception as error:
+                if isinstance(error, ValueError) is False and self._is_card_status_word_rejection(error) is False:
+                    print(f"[*] EIM metadata: failed to read EID ({error}).")
+                    return ""
+                isdr_error = error
+        if len(eid) == 0:
+            try:
+                eid = self._read_eid_from_ecasd(reselect_isdr)
+            except Exception as error:
+                if isdr_error is None:
+                    print(f"[*] EIM metadata: failed to read EID ({error}).")
+                else:
+                    print(
+                        "[*] EIM metadata: failed to read EID (ES10 GetEID on the ISD-R: "
+                        f"{isdr_error}; GET DATA '5A' on the ECASD: {error})."
+                    )
+                return ""
+        if len(eid) == 0:
+            if isdr_error is not None:
+                print(
+                    "[*] EIM metadata: failed to read EID (ES10 GetEID on the ISD-R: "
+                    f"{isdr_error}; GET DATA '5A' on the ECASD gave none)."
+                )
+            return ""
+        from SCP11.eim_local.engine.detected import register_detected_eid
+
+        register_detected_eid(eid, "the eSIM Management console")
+        return eid
+
+    def _read_eid_from_isdr(self) -> str:
+        response = self._send_es10b_store_data(GET_EID_REQUEST, "EIM: GetEID")
+        return self._decode_bcd_digits(eid_value(response))
+
+    def _read_eid_from_ecasd(self, reselect_isdr: bool) -> str:
         active_channel = int(self._es10b_logical_channel or 0)
         if active_channel > 0:
             cla_select = active_channel & 0x03
@@ -1808,21 +2090,8 @@ class SGP22Orchestrator:
             self.apdu_channel.send(select_apdu, "EIM: SELECT ECASD")
             response = self.apdu_channel.send(
                 bytes([cla_cmd, 0xCA, 0x00, 0x5A, 0x00]),
-                "EIM: GetEID",
+                "EIM: GetEID (ECASD)",
             )
-            if len(response) == 0:
-                return ""
-            try:
-                tag_bytes, value, _, _ = self._read_tlv(response, 0)
-            except ValueError:
-                value = response
-            else:
-                if tag_bytes != b"\x5A":
-                    return ""
-            return self._decode_bcd_digits(value)
-        except Exception as error:
-            print(f"[*] EIM metadata: failed to read EID ({error}).")
-            return ""
         finally:
             if reselect_isdr:
                 try:
@@ -1832,6 +2101,16 @@ class SGP22Orchestrator:
                         self._select_isd_r("EIM: RESELECT ISD-R")
                 except Exception:
                     pass
+        if len(response) == 0:
+            return ""
+        try:
+            tag_bytes, value, _, _ = self._read_tlv(response, 0)
+        except ValueError:
+            value = response
+        else:
+            if tag_bytes != b"\x5A":
+                return ""
+        return self._decode_bcd_digits(value)
 
     def _decode_eim_configuration_entries(self, response: bytes) -> list:
         entries = []
@@ -2410,15 +2689,35 @@ class SGP22Orchestrator:
         ).strip()
         if len(provider_override) > 0:
             return provider_override.rstrip("/")
+        try:
+            from SCP11.live.es9_client import local_eim_service_route
+        except ImportError:
+            local = ""
+        else:
+            local = local_eim_service_route(smdp_address)
+        if len(local) > 0:
+            print(f"[*] RSP Server {smdp_address}: answered by the running Local eIM service at {local}.")
+            return local
         return self._as_https_smdp(smdp_address)
 
-    def _relay_eim_package_to_card(self, package_bytes: bytes, poll_round: int, package_index: int) -> bytes:
+    def _relay_eim_package_to_card(
+        self,
+        package_bytes: bytes,
+        poll_round: int,
+        package_index: int,
+        source: str = "",
+    ) -> bytes:
+        """Run one eIM Package on the card; *source* names where it came from when no poll fetched it."""
+        self._no_eim_package_result_owed = ""
         log_name = f"EIM: RelayPackage [poll={poll_round} package={package_index}]"
         attempt_context = getattr(self, "_current_eim_poll_attempt_context", None)
         attempt_label = ""
         if isinstance(attempt_context, dict):
             attempt_label = str(attempt_context.get("label", "") or "").strip()
-        if len(attempt_label) > 0:
+        if len(source) > 0:
+            log_name = f"EIM: InjectedPackage [package={package_index}]"
+            source_text = source
+        elif len(attempt_label) > 0:
             source_text = f"from eIM poll {attempt_label} poll_round={poll_round}"
         else:
             source_text = f"from poll round {poll_round}"
@@ -2628,19 +2927,27 @@ class SGP22Orchestrator:
         """Act on a ProfileDownloadTriggerRequest (SGP.32 v1.3 section 2.11.1.3).
 
         activationCode and contactDefaultSmdp start the SGP.22 download against
-        the named or the eUICC's default SM-DP+. A trigger the IPA cannot use
-        is answered with invalidPackageFormat (section 3.2.3.1 steps 3 and 4):
-        an Activation Code that is not SGP.22 section 4.1, contactDefaultSmdp
-        with no default SM-DP+ address, or no profileDownloadData, which
-        section 2.11.1.3 reserves for an IPA declaring eimDownloadDataHandling
-        (this IPA runs no indirect download). contactSmds, which this IPA does
-        not run, gets a ProfileDownloadTriggerResult error.
+        the named or the eUICC's default SM-DP+, directly, or through the eIM
+        when YGGDRASIM_IPA_INDIRECT_DOWNLOAD asks for it (an IPA supporting both
+        may choose, section 2.11.1.3). A trigger without profileDownloadData runs
+        the indirect download (section 3.2.3.2), which section 2.11.1.3 allows
+        for an IPA declaring eimDownloadDataHandling. A trigger the IPA cannot
+        use is answered with invalidPackageFormat (section 3.2.3.1 steps 3 and
+        4): an Activation Code that is not SGP.22 section 4.1, contactDefaultSmdp
+        with no default SM-DP+ address, contactSmds with no SM-DS address in
+        the trigger or on the eUICC, or no profileDownloadData from an IPA that
+        does not declare eimDownloadDataHandling. contactSmds starts an Event
+        Retrieval (section 3.9.2) and the downloads its Event Records lead to.
         """
         choice = str(getattr(parsed, "download_data_choice", "") or "")
         if choice == DOWNLOAD_DATA_ACTIVATION_CODE:
             if parsed.smdp_address is None or parsed.matching_id is None:
                 return self._reject_malformed_profile_download_trigger(
                     parsed, "activation code is not a valid SGP.22 section 4.1 code"
+                )
+            if _indirect_download_preferred() and self._ipa_declares_feature(IPA_FEATURE_INDIRECT):
+                return self._run_indirect_profile_download(
+                    parsed, smdp_address=parsed.smdp_address, matching_id=parsed.matching_id
                 )
             print(
                 f"[*] Profile download trigger: smdp={parsed.smdp_address} "
@@ -2659,10 +2966,9 @@ class SGP22Orchestrator:
             )
             return self._run_triggered_profile_download(parsed, default_smdp, "")
         if choice == DOWNLOAD_DATA_CONTACT_SMDS:
-            target = parsed.smds_address or "the eUICC's root SM-DS"
-            return self._refuse_profile_download_trigger(
-                parsed, f"contactSmds ({target}) is not supported by this IPA"
-            )
+            return self._run_event_retrieval_trigger(parsed)
+        if self._ipa_declares_feature(IPA_FEATURE_EIM_DOWNLOAD_DATA_HANDLING):
+            return self._run_indirect_profile_download(parsed)
         return self._reject_malformed_profile_download_trigger(
             parsed, "trigger carries no profileDownloadData and this IPA does not declare eimDownloadDataHandling"
         )
@@ -2693,6 +2999,19 @@ class SGP22Orchestrator:
 
     def _read_default_smdp_address(self) -> str:
         """Return defaultDpAddress from ES10a.GetEuiccConfiguredData (BF3C, tag 80)."""
+        return self._read_configured_address(b"\x80")
+
+    def _read_root_smds_address(self) -> str:
+        """Return rootDsAddress from ES10a.GetEuiccConfiguredData (BF3C, tag 81).
+
+        SGP.22 v3.1 §5.7.3: a zero-length rootDsAddress means no Root SM-DS is
+        configured. additionalRootDsAddresses, the further ones a version 3
+        eUICC may list, are not read: a contactSmds trigger without an address
+        goes to the first Root SM-DS.
+        """
+        return self._read_configured_address(b"\x81")
+
+    def _read_configured_address(self, tag: bytes) -> str:
         configured_data = self._cached_or_retrieve_eim_metadata(
             "euicc_configured_data",
             bytes.fromhex("BF3C00"),
@@ -2710,22 +3029,232 @@ class SGP22Orchestrator:
                 tag_bytes, field_value, _, offset = self._read_tlv(root_value, offset)
             except Exception:
                 return ""
-            if tag_bytes == b"\x80":
+            if tag_bytes == tag:
                 return field_value.decode("utf-8", errors="replace").strip()
         return ""
 
-    def _run_triggered_profile_download(self, parsed: Any, smdp_address: str, matching_id: str) -> bytes:
+    def _point_profile_provider_at(self, rsp_server_address: str) -> None:
         if self.profile_provider is not None and hasattr(self.profile_provider, "set_base_url"):
-            base_url = self._profile_download_provider_base_url(smdp_address)
+            base_url = self._profile_download_provider_base_url(rsp_server_address)
             if len(base_url) > 0:
                 self.profile_provider.set_base_url(base_url)
+
+    def _run_triggered_profile_download(self, parsed: Any, smdp_address: str, matching_id: str) -> bytes:
+        self._point_profile_provider_at(smdp_address)
         # A ProfileInstallationResult left by an earlier download in this
         # session is not this trigger's result.
         self.state.load_bpp_response = b""
+        answer = None
         try:
-            self.run_flow(matching_id=matching_id, smdp_address=smdp_address)
+            answer = self._run_flow_for_trigger(matching_id, smdp_address)
         except Exception as error:
             print(f"[*] eIM-triggered profile download failed: {error}")
+        if answer is not None:
+            print(f"[!] {smdp_address} answered as an SM-DS where the trigger named an SM-DP+; nothing was downloaded.")
+        return self._profile_download_trigger_result(parsed)
+
+    def _run_flow_for_trigger(self, matching_id: str, smdp_address: str) -> Optional[EventRetrievalAnswer]:
+        """run_flow for a profile download trigger, where an SM-DS answer is an outcome and no failure.
+
+        Returns what the SM-DS answered, or None when the flow ran as a
+        download. Exceptions of the flow pass through. Any other caller of
+        run_flow asked for a download: there the same answer raises.
+        """
+        self._event_retrieval = None
+        expected = getattr(self, "_event_retrieval_expected", False)
+        self._event_retrieval_expected = True
+        try:
+            self.run_flow(matching_id=matching_id, smdp_address=smdp_address)
+        finally:
+            self._event_retrieval_expected = expected
+        answer = self._event_retrieval
+        self._event_retrieval = None
+        return answer
+
+    def _run_event_retrieval_trigger(self, parsed: Any) -> bytes:
+        """contactSmds (SGP.32 v1.3 §2.11.1.3): an Event Retrieval at the SM-DS, then what its records ask for.
+
+        The SM-DS is the one the trigger names, else the eUICC's Root SM-DS.
+        With neither, data the IPA needs is missing: the procedure stops
+        (§3.9.2.2 step 2) and the eIM is told invalidPackageFormat, as for
+        contactDefaultSmdp without a default SM-DP+ (§3.2.3.1 step 3). The
+        retrieval runs over ES11 with this IPA in the LPA's role (§3.9.2.1), or
+        through the eIM (§3.9.2.2) when YGGDRASIM_IPA_INDIRECT_DOWNLOAD asks.
+        """
+        address = str(getattr(parsed, "smds_address", "") or "").strip()
+        named_by = "named by the eIM"
+        if len(address) == 0:
+            address = self._read_root_smds_address()
+            named_by = "the eUICC's Root SM-DS"
+        if len(address) == 0:
+            return self._reject_malformed_profile_download_trigger(
+                parsed, "contactSmds requested but neither the trigger nor the eUICC names an SM-DS address"
+            )
+        if _indirect_download_preferred() and self._ipa_declares_feature(IPA_FEATURE_INDIRECT):
+            return self._run_indirect_profile_download(parsed, smdp_address=address, event_retrieval=True)
+        print(f"[*] Profile download trigger: contactSmds -> {address} ({named_by}); running the Event Retrieval.")
+        return self._run_direct_event_retrieval(parsed, address)
+
+    def _run_direct_event_retrieval(self, parsed: Any, smds_address: str) -> bytes:
+        """Event Retrieval by the IPA (SGP.32 v1.3 §3.9.2.1), the LPA's part of SGP.22 v3.1 §3.6.2.
+
+        The Common Mutual Authentication runs against the SM-DS without a
+        Matching ID (step 1, case a) and AuthenticateClient answers the Event
+        Records (step 8). They are taken in the order received, one download
+        each at the record's RSP Server with its EventID as Matching ID (step
+        10), until one installs no Profile. ProfileDownloadTriggerResult has
+        room for one result (SGP.32 v1.3 §2.11.2.3): it reports the last
+        download tried, and profileDownloadError when the SM-DS could not be
+        asked or held no Event Record. Not followed: a record that leads to
+        another SM-DS (a cascaded Event, case b) and signed Event Records.
+        """
+        self._point_profile_provider_at(smds_address)
+        self.state.load_bpp_response = b""
+        try:
+            answer = self._run_flow_for_trigger("", smds_address)
+        except Exception as error:
+            # Reported like a failed triggered download: the poll goes on and the eIM is told.
+            print(f"[*] Event Retrieval at {smds_address} failed: {error}")
+            return self._profile_download_trigger_result(parsed)
+        if answer is None:
+            print(f"[!] {smds_address} did not answer as an SM-DS: no Event Records came back.")
+            return self._profile_download_trigger_result(parsed)
+        events = answer.events
+        if len(events) == 0:
+            print(f"[*] Event Retrieval at {smds_address}: no Event Record for this eUICC.")
+            return self._profile_download_trigger_result(parsed)
+        print(f"[+] Event Retrieval at {smds_address}: {len(events)} Event Record(s).")
+        for index, (event_id, rsp_server_address) in enumerate(events, start=1):
+            print(
+                f"[*] Event Record {index} of {len(events)}: EventID {event_id!r} at {rsp_server_address}; "
+                "running SGP.22 profile download."
+            )
+            if self._run_event_record_download(event_id, rsp_server_address) is False:
+                if index < len(events):
+                    print(f"[!] {len(events) - index} Event Record(s) left untried after that.")
+                break
+        return self._profile_download_trigger_result(parsed)
+
+    def _run_event_record_download(self, event_id: str, rsp_server_address: str) -> bool:
+        """The download one Event Record asks for; True when it installed a Profile."""
+        self._point_profile_provider_at(rsp_server_address)
+        self.state.load_bpp_response = b""
+        try:
+            answer = self._run_flow_for_trigger(event_id, rsp_server_address)
+        except Exception as error:
+            print(f"[*] Download for EventID {event_id!r} at {rsp_server_address} failed: {error}")
+            return False
+        if answer is not None:
+            print(
+                f"[!] {rsp_server_address} answered EventID {event_id!r} as an SM-DS: a cascaded Event Record, "
+                "which this IPA does not follow."
+            )
+            return False
+        result = bytes(getattr(self.state, "load_bpp_response", b"") or b"")
+        if self._is_terminal_profile_installation_result(result) is False:
+            return False
+        return self._is_failed_profile_installation_result(result) is False
+
+    def _run_indirect_profile_download(
+        self,
+        parsed: Any,
+        smdp_address: str = "",
+        matching_id: str = "",
+        *,
+        event_retrieval: bool = False,
+    ) -> bytes:
+        """The download of SGP.32 v1.3 §3.2.3.2: same eUICC steps, the SM-DP+ reached through the eIM.
+
+        The eIM of the poll round that delivered the trigger relays every step;
+        with no Activation Code here it supplies the SM-DP+ and the Matching ID.
+        The same first steps are an Event Retrieval by the eIM (§3.9.2.2) when
+        the address is an SM-DS (*event_retrieval*), or when the eIM, holding
+        the download data of an empty trigger, takes them to one: its
+        AuthenticateClient answer then ends the session.
+        """
+        from SCP11.live.indirect_download import EsipaProfileProvider
+
+        request = getattr(self, "_active_eim_poll_request", None)
+        eim_fqdn = str(getattr(request, "eim_fqdn", "") or "").strip()
+        client = self.profile_provider
+        if client is None or not hasattr(client, "post_esipa") or not eim_fqdn:
+            return self._refuse_profile_download_trigger(
+                parsed, "no eIM connection to relay the indirect profile download through"
+            )
+        provider = EsipaProfileProvider(
+            client,
+            eim_fqdn=eim_fqdn,
+            pinned_tls_public_key_data=bytes(getattr(request, "trusted_tls_public_key_data", b"") or b""),
+            eim_transaction_id=bytes(getattr(parsed, "eim_transaction_id", b"") or b""),
+        )
+        target = smdp_address or "the SM-DP+ the eIM names"
+        if event_retrieval:
+            print(f"[*] Profile download trigger: contactSmds -> {target}; Event Retrieval through eIM {eim_fqdn}.")
+        else:
+            print(f"[*] Profile download trigger: indirect download through eIM {eim_fqdn} to {target}.")
+        self.state.load_bpp_response = b""
+        self.profile_provider = provider
+        self._indirect_download_active = True
+        answer = None
+        try:
+            answer = self._run_flow_for_trigger(matching_id, smdp_address)
+        except Exception as error:
+            what = "Event Retrieval through the eIM" if event_retrieval else "indirect profile download"
+            print(f"[*] eIM-triggered {what} failed: {error}")
+        finally:
+            self.profile_provider = client
+            self._indirect_download_active = False
+        if answer is not None:
+            return self._after_event_retrieval_by_eim(answer)
+        return self._profile_download_trigger_result(parsed)
+
+    def _after_event_retrieval_by_eim(self, answer: EventRetrievalAnswer) -> bytes:
+        """What follows the eIM's Event Retrieval answer (SGP.32 v1.3 §3.9.2.2 step 14).
+
+        The eIM keeps the Event Records; this IPA got the SM-DS transactionId
+        and, when the eIM wants a download started, a
+        ProfileDownloadTriggerRequest. That trigger is run like one from an eIM
+        Package, and its result goes to the eIM under its own eimTransactionId.
+        For the package that asked for the retrieval no eIM Package Result is
+        owed: ProfileDownloadTriggerResult reports a direct download
+        (§2.11.2.3), the eIM ran this retrieval itself, and nothing was
+        downloaded or failed on its account.
+        """
+        trigger = bytes(answer.trigger or b"")
+        if len(trigger) == 0:
+            print("[+] Event Retrieval by the eIM completed; its answer carries no profile download trigger.")
+            return self._no_eim_package_result("the eIM ran the Event Retrieval and holds its outcome")
+        if int(getattr(self, "_event_retrieval_trigger_depth", 0) or 0) >= MAX_EVENT_RETRIEVAL_TRIGGER_DEPTH:
+            print(
+                "[!] Event Retrieval by the eIM completed inside a download an Event Retrieval started; "
+                "the profile download trigger in its answer is not run."
+            )
+            return self._no_eim_package_result("a second Event Retrieval in a row is not followed")
+        try:
+            nested = parse_eim_package(trigger)
+        except Exception as error:
+            print(f"[!] Event Retrieval by the eIM completed; the trigger in its answer does not parse ({error}).")
+            return self._no_eim_package_result("the trigger in the eIM's Event Retrieval answer does not parse")
+        if nested.package_type != TYPE_PROFILE_DOWNLOAD_TRIGGER:
+            print(
+                "[!] Event Retrieval by the eIM completed; its answer carries "
+                f"{nested.package_type}, not a profile download trigger."
+            )
+            return self._no_eim_package_result("the eIM's Event Retrieval answer carries no profile download trigger")
+        print("[+] Event Retrieval by the eIM completed; running the profile download trigger in its answer.")
+        self._event_retrieval_trigger_depth = int(getattr(self, "_event_retrieval_trigger_depth", 0) or 0) + 1
+        try:
+            return self._handle_profile_download_trigger(nested)
+        finally:
+            self._event_retrieval_trigger_depth -= 1
+
+    def _no_eim_package_result(self, reason: str) -> bytes:
+        """Mark the eIM Package being relayed as one that owes the eIM no result; the poll round reads it."""
+        self._no_eim_package_result_owed = str(reason or "no result is owed")
+        self.state.eim_package_response = b""
+        return b""
+
+    def _profile_download_trigger_result(self, parsed: Any) -> bytes:
         last_response = getattr(self.state, "load_bpp_response", b"") or b""
         if len(last_response) == 0:
             # SGP.32 v1.3 §2.11.2.3: without a ProfileInstallationResult the
@@ -2969,34 +3498,48 @@ class SGP22Orchestrator:
         capabilities = dict(getattr(self.cfg, "CAPABILITIES", {}) or {})
         if len(tac) == 0:
             return b""
-
-        capability_fields = [
-            "gsmSupportedRelease",
-            "utranSupportedRelease",
-            "cdma2000onexSupportedRelease",
-            "cdma2000hrpdSupportedRelease",
-            "cdma2000ehrpdSupportedRelease",
-            "eutranEpcSupportedRelease",
-            "contactlessSupportedRelease",
-            "rspCrlSupportedVersion",
-        ]
-        capability_value = b""
-        for field_name in capability_fields:
-            field_bytes = bytes(capabilities.get(field_name, b"") or b"")
-            if len(field_bytes) == 0:
-                continue
-            capability_value += self._wrap_tlv(b"\x04", field_bytes)
-
-        device_info_value = self._wrap_tlv(b"\x04", tac)
-        device_info_value += self._wrap_tlv(b"\x30", capability_value)
-        return self._wrap_tlv(b"\xA9", device_info_value)
+        imei = bytes(getattr(self.cfg, "IMEI", b"") or b"")
+        device_info = PayloadBuilder.encode_device_info(
+            {"tac": tac, "deviceCapabilities": capabilities, **({"imei": imei} if imei else {})}
+        )
+        if len(device_info) == 0:
+            debug_print("[*] IPA eUICC data: deviceInfo left out, pySim's SGP.22 v3.1 module is unavailable.")
+            return b""
+        # IpaEuiccData deviceInfo [9] (SGP.32 v1.3 ASN.1 module): IMPLICIT on the SEQUENCE, so 'A9'
+        # takes the place of DeviceInfo's '30' around the same members.
+        _tag, value, _end, _next = self._read_tlv(device_info, 0)
+        return self._wrap_tlv(b"\xA9", value)
 
     def _default_ipa_capabilities_value(self) -> bytes:
-        # We return euiccInfo1/2 and certificate material in ESIPA data responses,
-        # so advertise minimizeEsipaBytes support per SGP.32.
-        ipa_features = self._encode_named_bit_string([0, 1, 5])
-        ipa_supported_protocols = self._encode_named_bit_string([0])
+        # Direct and indirect downloads both run, and an empty trigger is taken:
+        # the eIM keeps the download data (SGP.32 v1.3 §4.1, §2.11.1.3). With
+        # minimizeEsipaBytes the eIM leaves transactionId out and truncates the
+        # CI Public Key Identifier (§5.14.1); the ESipa provider reads the one
+        # from serverSigned1 and expands the other. This IPA sends the full
+        # forms, which §5.14.2 allows (re-encoding them is a SHOULD).
+        ipa_features = self._encode_named_bit_string(
+            [IPA_FEATURE_DIRECT, IPA_FEATURE_INDIRECT, IPA_FEATURE_EIM_DOWNLOAD_DATA_HANDLING, 5]
+        )
+        # ipaRetrieveHttps (0) always; ipaInjectHttps (2) while EIM-LISTEN serves HTTPS (§4.1).
+        protocols = [0, 2] if self._inject_https_listening else [0]
+        ipa_supported_protocols = self._encode_named_bit_string(protocols)
         return self._wrap_tlv(b"\x80", ipa_features) + self._wrap_tlv(b"\x81", ipa_supported_protocols)
+
+    def _ipa_declares_feature(self, bit: int) -> bool:
+        """Whether this IPA's IpaCapabilities ipaFeatures (tag '80' in 'A8') has *bit* set."""
+        try:
+            _tag, value, _end, _next = self._read_tlv(self._build_ipa_capabilities_item(), 0)
+            offset = 0
+            while offset < len(value):
+                tag, field, _raw_end, offset = self._read_tlv(value, offset)
+                if tag != b"\x80" or len(field) < 1:
+                    continue
+                bits = field[1:]
+                index = bit // 8
+                return index < len(bits) and bool(bits[index] & (0x80 >> (bit % 8)))
+        except Exception:
+            return False
+        return False
 
     def _extract_first_eim_entry_bytes(self, response: bytes) -> bytes:
         try:
@@ -3182,7 +3725,9 @@ class SGP22Orchestrator:
             euicc_info1,
             smdp_address=smdp_address,
         )
-        auth_seed["matching_id"] = matching_id
+        # An eIM that keeps the Activation Code names the Matching ID itself
+        # (SGP.32 v1.3 §3.2.3.2 step 11).
+        auth_seed["matching_id"] = matching_id or str(auth_seed.get("provider_matching_id", "") or "")
         return auth_seed
 
     def _phase_smdp_card_challenge(self) -> None:
@@ -3254,6 +3799,7 @@ class SGP22Orchestrator:
             "server_signature1": server_signature1,
             "server_certificate": server_certificate_bytes,
             "root_ci_id": ci_pk_id,
+            "provider_matching_id": str(getattr(response, "matching_id", None) or ""),
         }
 
     def _build_local_auth_seed(self, smdp_address: str) -> dict:
@@ -3524,6 +4070,10 @@ class SGP22Orchestrator:
     def _phase_prepare_download(self, smdp_address: str) -> None:
         print("\n[*] Phase: Prepare Download")
         remote_payload = self._get_prepare_download_payload_from_provider(smdp_address=smdp_address)
+        if getattr(self, "_event_retrieval", None) is not None:
+            # The server was an SM-DS: there is nothing to prepare, and local
+            # signing must not stand in for a download nobody offered.
+            return
         if remote_payload is None:
             if self._local_fallback_enabled() is False:
                 raise RuntimeError("Provider authenticateClient did not return usable payload and local fallback is disabled.")
@@ -3573,6 +4123,11 @@ class SGP22Orchestrator:
             if self._local_fallback_enabled() is False:
                 raise RuntimeError(f"Provider authenticateClient failed: {error}")
             print(f"[*] Provider authenticateClient failed ({error}), fallback to local signing.")
+            return None
+
+        event_retrieval = self._event_retrieval_answer(authenticate_response)
+        if event_retrieval is not None:
+            self._event_retrieval = event_retrieval
             return None
 
         smdp_signed2_raw = self._decode_string_payload(authenticate_response.smdp_signed2)
@@ -3629,6 +4184,56 @@ class SGP22Orchestrator:
                 "fallback to local signing."
             )
             return None
+
+    @staticmethod
+    def _unexpected_event_retrieval_text(address: Any, answer: EventRetrievalAnswer) -> str:
+        """Why a flow that was to download a Profile stops: its RSP Server is an SM-DS."""
+        where = str(address or "the RSP Server").strip() or "the RSP Server"
+        if answer.by_eim:
+            return (f"the eIM answered for {where} as for an SM-DS (an Event Retrieval, SGP.32 v1.3 §3.9.2.2); "
+                    "no Profile was downloaded")
+        if len(answer.events) == 0:
+            return f"{where} answered as an SM-DS with no Event Record for this eUICC; no Profile was downloaded"
+        records = ", ".join(f"EventID {event_id!r} at {server}" for event_id, server in answer.events[:8])
+        if len(answer.events) > 8:
+            records += f" and {len(answer.events) - 8} more"
+        return (f"{where} answered as an SM-DS with {len(answer.events)} Event Record(s) ({records}); "
+                "no Profile was downloaded")
+
+    @staticmethod
+    def _event_retrieval_answer(authenticate_response: Any) -> Optional[EventRetrievalAnswer]:
+        """What AuthenticateClient answered when the server was an SM-DS, else None.
+
+        ES11.AuthenticateClient answers eventEntries where ES9+ answers
+        smdpSigned2 (SGP.22 v3.1 §5.8.2); over ESipa the eIM answers
+        authenticateClientOkDSEsipa (SGP.32 v1.3 §6.3.2.2). An answer that
+        carries smdpSigned2 is a download's whatever else it holds. An Event
+        Record without an EventID or an RSP Server address is left out.
+        """
+        if getattr(authenticate_response, "event_retrieval_by_eim", False) is True:
+            trigger = b""
+            text = getattr(authenticate_response, "profile_download_trigger", None)
+            if isinstance(text, str) and len(text.strip()) > 0:
+                try:
+                    trigger = base64.b64decode(text.strip(), validate=True)
+                except (ValueError, binascii.Error):
+                    trigger = b""
+            return EventRetrievalAnswer(by_eim=True, trigger=trigger)
+        entries = getattr(authenticate_response, "event_entries", None)
+        if isinstance(entries, list) is False:
+            return None
+        signed2 = getattr(authenticate_response, "smdp_signed2", "")
+        if isinstance(signed2, str) and len(signed2.strip()) > 0:
+            return None
+        events = []
+        for entry in entries:
+            if isinstance(entry, dict) is False:
+                continue
+            event_id = str(entry.get("eventId") or "").strip()
+            address = str(entry.get("rspServerAddress") or "").strip()
+            if len(event_id) > 0 and len(address) > 0:
+                events.append((event_id, address))
+        return EventRetrievalAnswer(events=tuple(events))
 
     @staticmethod
     def _provider_certificate_payload_supported(certificate_bytes: bytes) -> bool:
@@ -3767,12 +4372,20 @@ class SGP22Orchestrator:
                 )
                 break
 
-        self.state.load_bpp_response = last_response
         self._progress_advance(progress_bar, "sync notifications")
         if len(last_response) == 0:
-            print("[+] LoadBoundProfilePackage completed with empty response data.")
+            # SGP.22 v3.1 §2.5.6 (p.51): the PIR follows the last BPP TLV, and the eUICC keeps
+            # it until the LPA deletes it, so an empty answer is looked up on the card before
+            # the install counts as failed.
+            print(
+                "[*] LoadBoundProfilePackage ended with empty response data; "
+                "looking for this session's ProfileInstallationResult among the pending notifications."
+            )
+            last_response = self._recover_profile_installation_result()
+        self.state.load_bpp_response = last_response
+        if len(last_response) == 0:
             self._sync_pending_notifications()
-            return True
+            raise RuntimeError("LoadBoundProfilePackage ended without a ProfileInstallationResult.")
 
         print(f"[+] LoadBoundProfilePackage Response: {last_response.hex()[:60]}...")
         self._handle_profile_load_result(last_response)
@@ -3925,6 +4538,11 @@ class SGP22Orchestrator:
         # profile_provider does not inherit the previous command's
         # outcome.
         self._last_notification_sync_succeeded = None
+        if self._notification_sync_held:
+            # Nothing was read, so nothing counts as delivered: the outcome
+            # stays None and no caller may clear the list on the strength of it.
+            print("[*] Notification sync: left out (notifications=keep); pending Notifications stay on the eUICC.")
+            return
         if self.profile_provider is None:
             return
         forward_failures = 0
@@ -4531,6 +5149,33 @@ class SGP22Orchestrator:
                 return f"card failed {command_name} with {reason_name}({result_detail})"
             return f"card failed {command_name} with errorReason {result_detail}"
         return f"card failed {command_name}"
+
+    def _recover_profile_installation_result(self) -> bytes:
+        """This RSP Session's PIR from the eUICC's pending notifications, or b"".
+
+        SGP.22 v3.1 §2.5.6 (p.51): the eUICC keeps each Profile Installation Result until the
+        LPA deletes it, and the LPA MAY retrieve it at any time. The one whose transactionId is
+        this session's is the result of the BPP just loaded.
+        """
+        transaction_id = bytes(getattr(self.state, "transaction_id", b"") or b"")
+        if len(transaction_id) == 0:
+            return b""
+        try:
+            response = self._list_pending_notifications_with_context_recovery()
+        except Exception as error:
+            print(f"[*] Notification list unavailable ({error}); no ProfileInstallationResult recovered.")
+            return b""
+        for entry in self._extract_notification_metadata_entries(response):
+            seq_number = entry.get("seqNumber")
+            if isinstance(seq_number, int) is False:
+                continue
+            raw_pending_notification = self._retrieve_pending_notification(seq_number)
+            details = self._decode_profile_installation_result(raw_pending_notification)
+            if details.get("transactionId") == transaction_id:
+                print(f"[*] Recovered this session's ProfileInstallationResult from notification seq={seq_number}.")
+                return raw_pending_notification
+        print("[*] No pending notification holds this session's ProfileInstallationResult.")
+        return b""
 
     def _is_terminal_profile_installation_result(self, raw_response: bytes) -> bool:
         details = self._decode_profile_installation_result(raw_response)
@@ -5425,17 +6070,19 @@ class SGP22Orchestrator:
         cla = self._current_es10b_store_data_cla()
         chunks = split_tlv_aware_chunks(payload, chunk_size)
 
-        print_store_data_chunk_plan(
-            log_name,
-            payload,
-            cla=cla,
-            ins=0xE2,
-            final_p1=0x91,
-            p2_start=0,
-            chunk_size=chunk_size,
-            p2_wrap=True,
-            chunks=chunks,
-        )
+        milestones_only = getattr(self.apdu_channel, "narrates_milestones_only", None)
+        if (callable(milestones_only) and milestones_only() is True) is False:
+            print_store_data_chunk_plan(
+                log_name,
+                payload,
+                cla=cla,
+                ins=0xE2,
+                final_p1=0x91,
+                p2_start=0,
+                chunk_size=chunk_size,
+                p2_wrap=True,
+                chunks=chunks,
+            )
         print(f"\n--- Transmitting {log_name} ({total} bytes) ---")
         for chunk_index, chunk in enumerate(chunks, start=1):
             is_last_chunk = chunk_index == len(chunks)
@@ -5561,6 +6208,10 @@ class SGP22Orchestrator:
         return True
 
     def _local_fallback_enabled(self) -> bool:
+        # A failed relay step of an indirect download is the eIM's answer, not
+        # a reason to fake the SM-DP+ locally.
+        if getattr(self, "_indirect_download_active", False):
+            return False
         if self.cfg.BACKEND_MODE == BACKEND_MODE_LOCAL_SGP26:
             return True
         return bool(getattr(self.cfg, "REMOTE_DP_ALLOW_LOCAL_FALLBACK", False))

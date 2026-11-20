@@ -53,9 +53,13 @@ class GuidesRouteCatalog(unittest.TestCase):
     def test_catalog_includes_core_guides(self) -> None:
         ids = {row[0] for row in self.module._CATALOG}
         for required in (
+            "user-manual",
+            "user-manual-gui",
+            "user-manual-cli",
             "guides-index",
             "architecture",
             "capabilities",
+            "runbook",
             "cli-and-piping",
             "profile-lifecycle",
             "hil-bridge",

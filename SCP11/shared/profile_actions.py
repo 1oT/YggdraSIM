@@ -20,8 +20,9 @@ ISD-R commands. Output goes through the adapter's ``info`` / ``warn`` /
 ``error`` callbacks so each shell controls its own colour scheme.
 
 Authoritative reference: SGP.22 §5.7.16 (EnableProfile rules), §5.7.17
-(DisableProfile), §5.7.18 (DeleteProfile); SGP.32 §3.2.6 lifecycle
-constraints; ETSI TS 102 226 §5 for the ISD-R underpinnings.
+(DisableProfile), §5.7.18 (DeleteProfile); SGP.32 v1.3 §3.4 Profile State
+Management lifecycle constraints; ETSI TS 102 226 §5 for the ISD-R
+underpinnings.
 """
 
 from __future__ import annotations

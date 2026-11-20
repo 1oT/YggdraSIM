@@ -34,6 +34,23 @@
   font-weight: 600;
 }
 
+/* A whole panel that takes a dropped file (Local SM-DP+: drop a profile
+   package to load it). The hint line names what a drop does. */
+.cc-path-drop-target.cc-panel-drop-hover {
+  box-shadow: 0 0 0 2px var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.cc-local-smdp-drop-hint {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.cc-panel-drop-hover .cc-local-smdp-drop-hint {
+  color: var(--accent);
+}
+
 .cc-path-input.cc-path-drop-hover {
   background: var(--accent-soft);
   border-color: var(--accent);

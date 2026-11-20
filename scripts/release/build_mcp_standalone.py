@@ -62,6 +62,9 @@ VENDORED = {
     # (``from .remote_readers import``) and the server reads for a remote
     # binding. Standard library only.
     "yggdrasim_common/remote_readers.py": "_vendor/remote_readers.py",
+    # The lock the card tools take so a terminal console, the GUI and the HIL bridge
+    # on the same reader are not reset under. Standard library only.
+    "yggdrasim_common/reader_locks.py": "_vendor/reader_locks.py",
 }
 DATA_FILES = {"SCP03/seeds/aid.txt": "data/aid.txt"}
 
@@ -87,6 +90,10 @@ SERVER_REWRITES = (
     (
         "    from yggdrasim_common import card_backend\n",
         f"    from {PACKAGE}._vendor import card_backend\n",
+    ),
+    (
+        "    from yggdrasim_common import reader_locks\n",
+        f"    from {PACKAGE}._vendor import reader_locks\n",
     ),
     (
         "            from yggdrasim_common.remote_lab.security import read_token_file",

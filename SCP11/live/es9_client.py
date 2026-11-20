@@ -88,6 +88,22 @@ except ImportError:
         verify_certificate_against_ca_bundle = None
 
 
+
+def local_eim_service_route(name: str) -> str:
+    """URL of the running Local eIM service when *name* is its eIM FQDN or SM-DP+ address, else ''.
+
+    The service (``SCP11.eim_local.engine.server``) records its loopback URL
+    and the names it answers for; any other name resolves as before.
+    """
+    try:
+        from SCP11.eim_local.engine.server import local_route
+    except ImportError:
+        return ""
+    try:
+        return local_route(name)
+    except (OSError, ValueError):
+        return ""
+
 class _ManagedHttpResponse:
     def __init__(self, connection, response):
         self._connection = connection
@@ -160,6 +176,9 @@ class Es9LikeClient:
         self._eim_http_protocol = eim_http_protocol.strip()
         self._eim_rest_create_path = eim_rest_create_path.strip()
         self._eim_rest_lookup_path_template = eim_rest_lookup_path_template.strip()
+        # HTTP status of the last JSON answer read: a caller that has to tell the 204 of a
+        # Notification function (SGP.22 v3.1 §6.3) from another answer below 400 reads it.
+        self.last_http_status: int | None = None
 
     def get_base_url(self) -> str:
         return self._base_url
@@ -273,6 +292,7 @@ class Es9LikeClient:
             smdp_signed2=self._string_field(response, "smdpSigned2"),
             smdp_signature2=self._string_field(response, "smdpSignature2"),
             smdp_certificate=self._string_field(response, "smdpCertificate"),
+            event_entries=response["eventEntries"] if isinstance(response.get("eventEntries"), list) else None,
         )
 
     def get_bound_profile_package(
@@ -321,6 +341,15 @@ class Es9LikeClient:
         lowered = candidate.lower()
         if lowered.startswith("http://") or lowered.startswith("https://"):
             return candidate.rstrip("/")
+        # The SM-DP+ of a running Local eIM service answers on its loopback URL,
+        # the way the download itself reached it.
+        local = local_eim_service_route(candidate.rstrip("/"))
+        if local:
+            return local
+        # notificationAddress is an FQDN (SGP.22 v3.1 §5.7.9 NotificationMetadata, p.331), so
+        # it names no port: the SM-DP+ this client is configured for keeps the configured URL.
+        if lowered.rstrip("/") == (urlparse(self._base_url).hostname or ""):
+            return self._base_url
         return f"https://{candidate.rstrip('/')}"
 
     def get_eim_package(self, request_obj: EimPollRequest) -> EimPollResponse:
@@ -624,12 +653,61 @@ class Es9LikeClient:
             with response_handle as resp:
                 return self._read_http_response_bytes(resp, endpoint, label="eIM")
 
+    def post_esipa(self, eim_fqdn: str, body: bytes, pinned_tls_public_key_data: bytes = b"") -> bytes:
+        """POST one ESipa ASN.1 request to the eIM and return its raw answer (empty for HTTP 204).
+
+        The indirect profile download (SGP.32 v1.3 §3.2.3.2) sends BF39 / BF3B /
+        BF3A / BF41 this way: their answers are not GetEimPackage responses, so
+        they bypass the parser of ``_post_eim_binary``.
+        """
+        base_url = self._resolve_eim_base_url(eim_fqdn)
+        return self._post_eim_binary_raw(base_url, bytes(body), bytes(pinned_tls_public_key_data or b""))
+
     def _post_eim_binary(
         self,
         base_url: str,
         body: bytes,
         pinned_tls_public_key_data: bytes,
     ) -> dict:
+        raw = self._post_eim_binary_raw(base_url, body, pinned_tls_public_key_data)
+        endpoint = base_url.rstrip("/") + self._normalized_eim_http_path()
+        if len(raw) == 0:
+            return {}
+        is_json = raw.lstrip().startswith(b"{")
+        debug_print(f"[*] eIM response: len={len(raw)} format={'JSON' if is_json else 'binary'} "
+              f"first={raw[:min(64, len(raw))].hex().upper()}")
+        if is_json:
+            decoded = json.loads(raw.decode("utf-8"))
+            pkg_key = "euiccPackageList" if "euiccPackageList" in decoded else "packages" if "packages" in decoded else None
+            pkg_count = len(decoded.get(pkg_key or "", [])) if pkg_key else 0
+            debug_print(f"[*] eIM JSON keys={list(decoded.keys())} package_key={pkg_key} package_count={pkg_count}")
+            if pkg_count == 0:
+                self._dump_eim_response_for_debug(raw)
+        else:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                debug_print(f"[*] eIM parsed as JSON (fallback) keys={list(decoded.keys())}")
+            except (ValueError, UnicodeDecodeError):
+                decoded = self._parse_eim_binary_response(raw)
+                pkg_count = len(decoded.get("euiccPackageList", []))
+                rc = decoded.get("eimResultCode")
+                rc_str = ""
+                if rc is not None:
+                    rc_name = self._eim_package_error_name(rc)
+                    rc_str = f" eimPackageError={rc_name}"
+                debug_print(f"[*] eIM binary parsed: packages={pkg_count} "
+                      f"pollingComplete={decoded.get('pollingComplete')}{rc_str}")
+                if pkg_count == 0:
+                    self._dump_eim_response_for_debug(raw)
+        self._raise_for_execution_status(decoded, endpoint)
+        return decoded
+
+    def _post_eim_binary_raw(
+        self,
+        base_url: str,
+        body: bytes,
+        pinned_tls_public_key_data: bytes,
+    ) -> bytes:
         path = self._normalized_eim_http_path()
         endpoint = base_url.rstrip("/") + path
         body_hex = body.hex().upper()
@@ -705,36 +783,7 @@ class Es9LikeClient:
                     "for this runtime; using configured HTTPS trust path."
                 )
             raw = self._post_eim_binary_over_trust_path(request, endpoint)
-        if len(raw) == 0:
-            return {}
-        is_json = raw.lstrip().startswith(b"{")
-        debug_print(f"[*] eIM response: len={len(raw)} format={'JSON' if is_json else 'binary'} "
-              f"first={raw[:min(64, len(raw))].hex().upper()}")
-        if is_json:
-            decoded = json.loads(raw.decode("utf-8"))
-            pkg_key = "euiccPackageList" if "euiccPackageList" in decoded else "packages" if "packages" in decoded else None
-            pkg_count = len(decoded.get(pkg_key or "", [])) if pkg_key else 0
-            debug_print(f"[*] eIM JSON keys={list(decoded.keys())} package_key={pkg_key} package_count={pkg_count}")
-            if pkg_count == 0:
-                self._dump_eim_response_for_debug(raw)
-        else:
-            try:
-                decoded = json.loads(raw.decode("utf-8"))
-                debug_print(f"[*] eIM parsed as JSON (fallback) keys={list(decoded.keys())}")
-            except (ValueError, UnicodeDecodeError):
-                decoded = self._parse_eim_binary_response(raw)
-                pkg_count = len(decoded.get("euiccPackageList", []))
-                rc = decoded.get("eimResultCode")
-                rc_str = ""
-                if rc is not None:
-                    rc_name = self._eim_package_error_name(rc)
-                    rc_str = f" eimPackageError={rc_name}"
-                debug_print(f"[*] eIM binary parsed: packages={pkg_count} "
-                      f"pollingComplete={decoded.get('pollingComplete')}{rc_str}")
-                if pkg_count == 0:
-                    self._dump_eim_response_for_debug(raw)
-        self._raise_for_execution_status(decoded, endpoint)
-        return decoded
+        return raw
 
     def _dump_eim_response_for_debug(self, raw: bytes) -> None:
         try:
@@ -1050,12 +1099,58 @@ class Es9LikeClient:
             label="HTTP",
         )
         with response_handle as response:
+            status = getattr(response, "status", None)
+            self.last_http_status = int(status) if isinstance(status, int) else None
             raw = self._read_http_response_bytes(
                 response,
                 endpoint,
                 label="HTTP",
             )
         return raw.decode("utf-8")
+
+    def post_es9_asn1(self, body: bytes, protocol_header: str = "") -> bytes:
+        """POST one ES9+ request in the ASN.1 binding to this SM-DP+ and return its answer as sent.
+
+        SGP.22 v3.1 §6.6: a RemoteProfileProvisioningRequest 'A2' to
+        /gsma/rsp2/asn1; an empty answer is HandleNotification's 204. The
+        trust path is the one the JSON calls take, its CA bundle retry
+        included; ``last_http_status`` keeps the status.
+        """
+        endpoint = self._base_url.rstrip("/") + "/gsma/rsp2/asn1"
+        headers = {
+            "Content-Type": "application/x-gsma-rsp-asn1",
+            "Accept": "application/x-gsma-rsp-asn1",
+            "User-Agent": ES9_USER_AGENT,
+        }
+        if len(protocol_header.strip()) > 0:
+            headers["X-Admin-Protocol"] = protocol_header.strip()
+        request = urllib.request.Request(endpoint, data=bytes(body), method="POST", headers=headers)
+        ssl_context = None
+        if endpoint.lower().startswith("https://"):
+            ssl_context = self._build_ssl_context_for_endpoint(endpoint, log_label="ES9+")
+        try:
+            return self._open_asn1_request(request, ssl_context)
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            resolved_bundle = self._resolve_dynamic_ca_bundle_for_endpoint(
+                endpoint,
+                trust_hint_ci_pkid="",
+                initial_error=error,
+            )
+            if len(resolved_bundle) == 0:
+                raise IOError(f"ES9+ request failed for {endpoint}: {error}") from error
+            retry_context = self._create_default_context_with_bundle(resolved_bundle)
+            try:
+                return self._open_asn1_request(request, retry_context)
+            except (OSError, http.client.HTTPException, ValueError) as retry_error:
+                raise IOError(f"ES9+ request failed for {endpoint}: {retry_error}") from retry_error
+
+    def _open_asn1_request(self, request: urllib.request.Request, ssl_context: ssl.SSLContext | None) -> bytes:
+        endpoint = request.full_url
+        response_handle = self._open_http_response(request, ssl_context, endpoint, label="ES9+")
+        with response_handle as response:
+            status = getattr(response, "status", None)
+            self.last_http_status = int(status) if isinstance(status, int) else None
+            return self._read_http_response_bytes(response, endpoint, label="ES9+")
 
     def _open_http_response(
         self,
@@ -1441,6 +1536,10 @@ class Es9LikeClient:
         configured = self._eim_base_url.strip()
         if len(configured) > 0:
             return self._normalize_poll_base_url(configured)
+        local = local_eim_service_route(eim_fqdn)
+        if len(local) > 0:
+            debug_print(f"[*] eIM {eim_fqdn}: answered by the running Local eIM service at {local}.")
+            return local
         return self._normalize_poll_base_url(eim_fqdn)
 
     def _normalized_eim_http_path(self) -> str:

@@ -1416,7 +1416,7 @@ class _Registry:
     def scp11_eim(cls) -> set:
         return cls._dicts_named(
             "SCP11/eim_local/main.py", {"self._commands", "self._command_aliases"}
-        )
+        ) | cls._dicts_named("SCP11/eim_local/engine_shell.py", {"DOCS"})
 
     @classmethod
     def scp11_relay(cls) -> set:
@@ -1993,6 +1993,19 @@ def test_spec_lookup_reports_a_clause_the_document_lacks(server, spec_library) -
     assert missing == {"error": "Clause 99.9 not found in ts_102221v18.4.", "document": "ts_102221v18.4"}
 
 
+def test_spec_lookup_reads_a_title_that_opens_with_digits(server, tmp_path, monkeypatch) -> None:
+    # TS 24.501 v19.7 §9.11.3.4 is "5GS mobile identity". A top-level value row
+    # of a coding table and a hex dump under a dotted number are not headings.
+    heading = {"clause": "9.11.3.4", "title": "5GS mobile identity"}
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-901.md", f"{heading['clause']}         {heading['title']}")
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-950.md", "1     5GS encryption algorithm 5G-EA1 supported")
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-951.md", "3.1     8A 01 05 //life cycle")
+    monkeypatch.setattr(server, "SPEC_LIBRARY_ROOT", tmp_path)
+    assert json.loads(server.spec_section_lookup("TS 24.501", heading["clause"]))["title"] == heading["title"]
+    assert "error" in json.loads(server.spec_section_lookup("TS 24.501", "1"))
+    assert "error" in json.loads(server.spec_section_lookup("TS 24.501", "3.1"))
+
+
 def test_spec_lookup_outline_skips_front_matter_and_contents(server, spec_library) -> None:
     outline = json.loads(server.spec_section_lookup("TS 102 221"))["outline"]
     assert [entry["clause"] for entry in outline] == ["1"]
@@ -2032,3 +2045,119 @@ def test_eid_range_is_32_digits(server) -> None:
     assert json.loads(server.validate_identifier("eid", sgp26_test_eid))["valid"] is True
     assert json.loads(server.validate_identifier("eid", sgp26_test_eid[:-1]))["valid"] is False
     assert "error" in json.loads(server.validate_identifier("imei", "0" * 15))
+
+
+class _FakeLocalReader:
+    """A local PC/SC reader whose connection reports what another process sees mid-APDU."""
+
+    def __init__(self, name: str, on_transmit=None) -> None:
+        self.name = name
+        self.on_transmit = on_transmit
+        self.connections: list[object] = []
+
+    def __str__(self) -> str:
+        return self.name
+
+    def createConnection(self):  # noqa: N802 -- pyscard API name
+        reader = self
+
+        class _Connection:
+            def connect(self, mode=None) -> None:
+                del mode
+
+            def transmit(self, apdu):
+                if reader.on_transmit is not None:
+                    reader.on_transmit()
+                return [0x6F, 0x00], 0x90, 0x00
+
+            def disconnect(self) -> None:
+                pass
+
+            def getATR(self):  # noqa: N802 -- pyscard API name
+                return [0x3B, 0x9F]
+
+        connection = _Connection()
+        self.connections.append(connection)
+        return connection
+
+
+@pytest.fixture()
+def local_reader_lock(server, monkeypatch, tmp_path):
+    """One local reader, the card gate open, and reader locks in a scratch directory."""
+    from tests.reader_lock_support import READER
+    from yggdrasim_common import card_backend, reader_locks
+
+    lock_dir = tmp_path / "reader-locks"
+    monkeypatch.setattr(reader_locks, "_DIRECTORY", lock_dir)
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    reader = _FakeLocalReader(READER)
+    monkeypatch.setattr(server, "_load_pcsc", lambda: ((lambda: [reader]), 1, None))
+    opened: list[dict] = []
+
+    def fake_create(**kwargs):
+        opened.append(dict(kwargs))
+        return reader.createConnection()
+
+    monkeypatch.setattr(card_backend, "create_card_connection", fake_create)
+    monkeypatch.setattr(card_backend, "is_simulated_card_backend", lambda: False)
+    return lock_dir, reader, opened
+
+
+def test_card_session_open_holds_a_local_reader_until_closed(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, _reader, _opened = local_reader_lock
+    payload = json.loads(_call(server.card_session_open()))
+    session_id = payload["session_id"]
+    assert probe(lock_dir)["holder"].startswith(f"MCP card session {session_id} (pid ")
+    _call(server.card_session_close(session_id))
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_card_session_open_is_refused_a_reader_another_process_keeps(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import CONSOLE_HOLDER, OtherProcess
+
+    lock_dir, _reader, opened = local_reader_lock
+    other = OtherProcess(lock_dir, long_running=True)
+    try:
+        payload = json.loads(_call(server.card_session_open()))
+        assert payload["error"].startswith(f"reader busy: {CONSOLE_HOLDER} (pid {other.pid}) has held ")
+        assert opened == []
+        assert server._CARD_SESSIONS == {}
+    finally:
+        other.close()
+
+
+def test_an_idle_card_session_gives_its_reader_back(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, _reader, _opened = local_reader_lock
+    session_id = json.loads(_call(server.card_session_open()))["session_id"]
+    server._CARD_SESSIONS[session_id]["touched"] = float("-inf")
+    assert server._expire_idle_sessions() == [session_id]
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_pcsc_transmit_holds_the_reader_for_its_one_apdu(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, reader, _opened = local_reader_lock
+    seen: list[dict] = []
+    reader.on_transmit = lambda: seen.append(probe(lock_dir))
+    payload = json.loads(_call(server.pcsc_transmit("00A4040000")))
+    assert payload["SW1"] == "0x90"
+    assert seen[0]["holder"].startswith("MCP pcsc_transmit (pid ")
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_pcsc_transmit_is_refused_a_reader_another_process_keeps(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import CONSOLE_HOLDER, OtherProcess
+
+    lock_dir, reader, _opened = local_reader_lock
+    other = OtherProcess(lock_dir, long_running=True)
+    try:
+        payload = json.loads(_call(server.pcsc_transmit("00A4040000")))
+        assert payload["error"].startswith(f"reader busy: {CONSOLE_HOLDER} (pid {other.pid}) has held ")
+        assert reader.connections == []
+    finally:
+        other.close()

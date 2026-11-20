@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import unittest
 
+from pySim.ts_102_221 import EF_ARR
+
 from SIMCARD.etsi_fs import (
     CONTAINER_ARR_RECORD_INDEX,
     DEFAULT_ARR_RECORD,
@@ -138,6 +140,31 @@ class DefaultArrRecordTests(unittest.TestCase):
 
     def test_the_single_record_alias_stays_record_one(self) -> None:
         self.assertEqual(DEFAULT_ARR_RECORD, DEFAULT_ARR_RECORDS[0])
+
+    def test_every_crt_carries_the_usage_qualifier(self) -> None:
+        # TS 102 221 v18.4 §9.5.1: the CRT holds a usage qualifier DO ('95') and a
+        # key reference DO ('83'); Table 9.3 codes the qualifier as '08'.
+        for index, record in enumerate(DEFAULT_ARR_RECORDS, start=1):
+            scope = ARR_SCOPE_DF if index == CONTAINER_ARR_RECORD_INDEX else ARR_SCOPE_EF
+            decoded = _decode_ef_arr(record.hex().upper(), scope=scope)
+            assert isinstance(decoded, dict)
+            for rule in decoded["rules"]:
+                if rule["condition"] in ("Always", "Never"):
+                    continue
+                with self.subTest(record=f"0x{index:02X}", condition=rule["condition"]):
+                    self.assertEqual([item["tag"] for item in rule["items"]], ["83", "95"])
+                    self.assertEqual(rule["usageQualifier"], "0x08")
+
+    def test_pysim_decodes_every_record(self) -> None:
+        # pySim refuses a CRT without the usage qualifier, so it checks the
+        # coding independently of this repository's decoder.
+        for index, record in enumerate(DEFAULT_ARR_RECORDS, start=1):
+            with self.subTest(record=f"0x{index:02X}"):
+                EF_ARR().decode_record_hex(record.hex())
+
+    def test_pysim_reads_the_admin_record_as_adm1(self) -> None:
+        decoded = EF_ARR().decode_record_hex(DEFAULT_ARR_RECORDS[0x0A - 1].hex())
+        self.assertEqual(decoded[1][1], {"control_reference_template": "ADM1"})
 
 
 if __name__ == "__main__":

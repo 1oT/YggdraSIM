@@ -134,6 +134,13 @@ def hil_bridge_reset() -> int:
     return _invoke("Tools.HilBridge.device_reset", "run_standalone")
 
 
+def hil_bridge_modem_diag() -> int:
+    guard_code = _guard_hil_bridge()
+    if guard_code != 0:
+        return guard_code
+    return _invoke("Tools.HilBridge.modem_diag", "entry")
+
+
 def card_bridge() -> int:
     """Reader-side APDU bridge CLI entry.
 

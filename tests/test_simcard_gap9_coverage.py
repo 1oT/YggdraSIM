@@ -5,8 +5,8 @@
 
 Round-9 closes the following:
 
-* ETSI TS 102 221 §11.1.14 RETRIEVE DATA (`INS 0xCB`) and
-  §11.1.15 SET DATA (`INS 0xDB`) with a card-side data-object
+* ETSI TS 102 221 v18.4 §11.3.1 RETRIEVE DATA (`INS 0xCB`) and
+  §11.3.2 SET DATA (`INS 0xDB`) with a card-side data-object
   registry seeded with Card Capabilities (tag 0x0066), Application
   Identifier (0x004F), Card Service Data (0x0043) and Extended
   Card Resources (0xFF21).
@@ -15,11 +15,11 @@ Round-9 closes the following:
   TS 31.102 v19.5 §7.1.1.4 / §7.1.1.5 / §7.1.2.3 / §7.1.2.4,
   TS 31.103 v19 §7.1.1.2 / §7.1.1.3 / §7.1.2.3 / §7.1.2.4, keys per
   TS 33.220 v19.1 §5.3.2 and Annex B.
-* ETSI TS 102 223 §6.4.16 RUN AT COMMAND (proactive 0x34)
+* ETSI TS 102 223 v18.3 §6.4.23 RUN AT COMMAND (proactive 0x34)
   terminal-response latching: the AT Response TLV (``A9``) is
   captured into ``state.toolkit.last_at_response`` and decoded
   into ``last_at_response_text`` for log-side correlation.
-* ETSI TS 102 223 §7.4.13 HCI Connectivity Event (event 0x13)
+* ETSI TS 102 223 v18.3 §7.5.18 HCI connectivity event (event 0x13)
   decode; the high nibble of TLV ``40`` toggles
   ``state.toolkit.hci_connectivity_active``.
 """
@@ -88,7 +88,7 @@ class _EngineHarness(unittest.TestCase):
 
 
 class RetrieveDataTests(_EngineHarness):
-    """ETSI TS 102 221 §11.1.14 RETRIEVE DATA dispatch."""
+    """ETSI TS 102 221 v18.4 §11.3.1 RETRIEVE DATA dispatch."""
 
     def test_retrieve_data_returns_card_capabilities_tlv(self) -> None:
         # Tag 0x0066 (Card Capabilities). P1=0x00, P2=0x66, Le=0.
@@ -111,7 +111,7 @@ class RetrieveDataTests(_EngineHarness):
 
 
 class SetDataTests(_EngineHarness):
-    """ETSI TS 102 221 §11.1.15 SET DATA dispatch."""
+    """ETSI TS 102 221 v18.4 §11.3.2 SET DATA dispatch."""
 
     def test_set_data_writes_then_retrieves_back(self) -> None:
         # Force the registry to seed first so SET DATA replaces an
@@ -468,7 +468,7 @@ class _ToolkitHarness(unittest.TestCase):
 
 
 class RunAtCommandResponseLatchTests(_ToolkitHarness):
-    """ETSI TS 102 223 §6.4.16 RUN AT COMMAND TR latch."""
+    """ETSI TS 102 223 v18.3 §6.4.23 RUN AT COMMAND TR latch."""
 
     def test_terminal_response_latches_at_response_bytes_and_text(self) -> None:
         result = self.toolkit.queue_run_at_command(at_command="AT+CGSN")
@@ -502,7 +502,7 @@ class RunAtCommandResponseLatchTests(_ToolkitHarness):
 
 
 class HciConnectivityEventTests(_ToolkitHarness):
-    """3GPP TS 31.111 §7.5.x HCI Connectivity Event (0x13)."""
+    """ETSI TS 102 223 v18.3 §7.5.18 HCI connectivity event (0x13)."""
 
     def _envelope(self, *body: bytes) -> bytes:
         joined = b"".join(body)

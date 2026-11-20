@@ -40,7 +40,7 @@ page.
 | `yggdrasim-apdu-dissect` | [APDU Dissector](../subsystems/apdu-dissector.md) |
 | `yggdrasim-eum-diag` | [EUM Diagnostics](../subsystems/eum-diagnostics.md) |
 | `yggdrasim-suci-tool` | [SUCI Tool](../subsystems/suci-tool.md) |
-| `yggdrasim-asn1`, `yggdrasim-card-clone`, `yggdrasim-hil-reset` | [Command Suite section 12](command-suite.md#12-standalone-helper-commands) |
+| `yggdrasim-asn1`, `yggdrasim-card-clone`, `yggdrasim-hil-reset`, `yggdrasim-hil-modem-diag` | [Command Suite section 12](command-suite.md#12-standalone-helper-commands) |
 | `yggdrasim-session-diff` | [Diff Two Session Recordings](../how-to/diff-two-session-recordings.md) |
 | `yggdrasim-mcp` | [Run the MCP Server](../how-to/run-the-mcp-server.md) |
 | `yggdrasim-yggdracore` | [3GPP NAA](../concepts/3gpp-naa.md), [Operator Surfaces](../operator-surfaces.md) |
@@ -119,7 +119,7 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `YGGDRASIM_RUNTIME_ROOT` | force a specific runtime root directory |
 | `YGGDRASIM_CARD_BACKEND` | preselect `reader` / `sim` when no `--card-backend` is passed |
 | `YGGDRASIM_FLAVOR` | force `clean` / `full` / `source` when probing from a shared tree |
-| `YGGDRASIM_5GCORE_MODE` | switch YggdraCore between in-process stub and BYO-Open5GS bridge |
+| `YGGDRASIM_5GCORE_MODE` | `stub` lets `yggdrasim-yggdracore` serve the stub AUSF; `off` (the default) keeps YggdraCore library-only |
 | `YGGDRASIM_SIM_BEHAVIOUR_PROFILE` | card-behaviour profile the simulator loads; `none` disables it |
 | `YGGDRASIM_5GCORE_HOST` / `YGGDRASIM_5GCORE_PORT` | bind address / port for the YggdraCore stub AUSF |
 | `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK` | permit a non-loopback bind for the stub AUSF (sealed lab only) |
@@ -151,6 +151,7 @@ python -m Tools.ProfilePackage --cmd "USE profile.der; LINT --strict; EXIT"
 | `yggdrasim-eum-diag` | `python -m Tools.EumDiag` | EUM / SM-DP+ diagnostics: session-key staging and the BF36 BPP Lua dissector. |
 | `yggdrasim-gui` | `python main/main.py --gui` | Desktop GUI: the loopback server plus a pywebview window. |
 | `yggdrasim-hil-bridge` | `python -m Tools.HilBridge.main` | SIMtrace2-backed HIL bridge (direct). |
+| `yggdrasim-hil-modem-diag` | `python -m Tools.HilBridge.modem_diag` | Modem-side SIM log from a Qualcomm DIAG port, mirrored into the HIL GSMTAP stream. |
 | `yggdrasim-hil-reset` | `python -m Tools.HilBridge.device_reset` | Remote equivalent of the SIMtrace2 reset button. |
 | `yggdrasim-hil-supervisor` | `python -m Tools.HilBridge.supervisor` | HIL supervisor that manages the bridge and remsim-client lifecycle. |
 | `yggdrasim-lab` | _(installed command only)_ | Operator-side Remote Lab client: list rigs, reserve, release, heartbeat. |

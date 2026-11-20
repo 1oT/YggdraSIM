@@ -47,7 +47,7 @@
   font-family: var(--font-sans);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -15,8 +15,9 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from yggdrasim_common import reader_locks
 from yggdrasim_common.card_backend import (
     card_relay_marker_path,
     clear_card_relay_marker,
@@ -36,7 +37,7 @@ from yggdrasim_common.card_bridge_auth import (
 
 from .apdu_relay import ApduRelayConfig, HilBridgeApduRelayService
 from .pcsc import DEFAULT_APDU_TIMEOUT_MS, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
-from .proactive import FETCH_INS, ProactiveRefreshBroker
+from .proactive import FETCH_INS, TERMINAL_RESPONSE_INS, ProactiveRefreshBroker
 from .remote_card import (
     RemoteRelayCardChannel,
     resolve_remote_card_token,
@@ -88,6 +89,37 @@ _MALFORMED_ENVELOPE_STATUS = b"\x6F\x00"
 UICC_RESET_GRACE_SECONDS = 10.0
 MODEM_RESET_EDGE_RST_ASSERTED = "RST asserted"
 MODEM_RESET_EDGE_VCC_REMOVED = "VCC removed"
+# TS 102 221 V18.4.0 clause 10.1.2, table 10.5. Each continues an exchange
+# begun earlier: FETCH and TERMINAL RESPONSE a proactive command, which no
+# card holds before TERMINAL PROFILE (TS 102 223 V18.3.0 clause 5.1), and
+# GET RESPONSE the data of a previous command. None can open a card session.
+GET_RESPONSE_INS = 0xC0
+_SESSION_CONTINUATION_INS = frozenset({FETCH_INS, TERMINAL_RESPONSE_INS, GET_RESPONSE_INS})
+# TS 102 221 V18.4.0 clause 10.2.1.5.0, table 10.11: "Technical problem, no
+# precise diagnosis". The modem's answer to a TPDU whose card transmit failed.
+TECHNICAL_PROBLEM_SW = bytes.fromhex("6F00")
+# SIMtrace2 cardem RX-DATA framing: an 8-byte message header and a 6-byte
+# rx_data header ahead of the command data, on a 64-byte bulk endpoint.
+_SIMTRACE2_RX_DATA_OVERHEAD = 14
+_SIMTRACE2_BULK_PACKET_SIZE = 64
+
+
+def _simtrace2_unterminated_message_size(apdu: bytes) -> int:
+    """Size of the cardem USB message that carried *apdu*'s data, when it ends unterminated.
+
+    SIMtrace2 firmware sends a zero-length packet after an IN message that
+    fills whole packets only when it is one packet long, so a 128-, 192-
+    or 256-byte message sits on the host until the board sends another.
+    Evidence and the firmware patch: upstream_patches/osmocom-simtrace2-cardem-zlp.
+    Returns 0 for every other command, so the check retires itself on
+    fixed firmware: such a TPDU then never arrives late.
+    """
+    if len(apdu) <= 5 or apdu[4] != len(apdu) - 5:
+        return 0
+    size = _SIMTRACE2_RX_DATA_OVERHEAD + apdu[4]
+    if size > _SIMTRACE2_BULK_PACKET_SIZE and size % _SIMTRACE2_BULK_PACKET_SIZE == 0:
+        return size
+    return 0
 
 
 def _describe_flag(value: bool | None, when_true: str, when_false: str) -> str:
@@ -111,6 +143,10 @@ def _create_simulated_card_connection() -> Any:
 
 _PCSC_CONNECT_MAX_RETRIES = 5
 _PCSC_CONNECT_BACKOFF_BASE = 0.5
+# How long the bridge waits for a short holder of its reader in another
+# process (a GUI card read finishing); one that runs until stopped is not
+# waited for (yggdrasim_common.reader_locks).
+_READER_HOLD_WAIT_S = 5.0
 
 
 def _transmit_with_timeout(channel: Any, apdu: bytes, timeout_ms: int) -> tuple[bytes, int, int]:
@@ -301,6 +337,7 @@ class BackendCardChannel:
     _backend_name: str = field(default="", init=False, repr=False)
     _channel: Any = field(default=None, init=False, repr=False)
     _reader_label: str = field(default="", init=False, repr=False)
+    _reader_hold: Any = field(default=None, init=False, repr=False)
 
     @property
     def backend_name(self) -> str:
@@ -363,13 +400,18 @@ class BackendCardChannel:
             self._reader_label = str(channel.reader_label or "").strip() or remote_url
             return
 
-        # PC/SC reader -- retry on transient sharing violations.
+        # PC/SC reader -- held against other YggdraSIM processes for the
+        # bridge's life, and retried on transient sharing violations.
         last_exc: Exception | None = None
         for attempt in range(_PCSC_CONNECT_MAX_RETRIES):
             try:
                 channel = PcscCardChannel(reader_index=self.reader_index, reader_name=self.reader_name)
+                self._hold_local_reader(channel)
                 channel.connect()
             except Exception as exc:
+                if isinstance(exc.__cause__, reader_locks.ReaderBusyError):
+                    # Another YggdraSIM process keeps the reader; a retry cannot help.
+                    raise
                 last_exc = exc
                 if attempt < _PCSC_CONNECT_MAX_RETRIES - 1:
                     delay = _PCSC_CONNECT_BACKOFF_BASE * (2 ** attempt)
@@ -387,9 +429,36 @@ class BackendCardChannel:
             self._reader_label = str(channel.reader_label or "").strip() or "PC/SC reader"
             return
 
+        self._release_local_reader()
         raise PcscBridgeError(
             f"PC/SC connect failed after {_PCSC_CONNECT_MAX_RETRIES} attempts"
         ) from last_exc
+
+    def _hold_local_reader(self, channel: PcscCardChannel) -> None:
+        """Hold the local reader against other YggdraSIM processes until :meth:`disconnect`.
+
+        The bridge resets the card for every modem session and keeps the
+        reader across its own reconnects and resets, so one hold spans them
+        all. A console command in a terminal, a GUI card read or an MCP card session on the
+        same reader would reset the card under the modem and lose it to the
+        bridge's resets in turn (yggdrasim_common.reader_locks); a holder
+        there that runs until stopped refuses the bridge at once.
+        """
+        if self._reader_hold is not None:
+            return
+        reader = channel.selected_reader_name()
+        try:
+            self._reader_hold = reader_locks.acquire(
+                reader, "HIL bridge", long_running=True, wait_s=_READER_HOLD_WAIT_S
+            )
+        except reader_locks.ReaderBusyError as busy:
+            raise PcscBridgeError(str(busy)) from busy
+
+    def _release_local_reader(self) -> None:
+        hold = self._reader_hold
+        self._reader_hold = None
+        if hold is not None:
+            hold.release()
 
     def reconnect(self) -> None:
         """Close and re-open the WebSocket connection."""
@@ -415,15 +484,17 @@ class BackendCardChannel:
         return {"mode": "backend-reconnect"}
 
     def disconnect(self) -> None:
-        """Close the WebSocket connection."""
+        """Close the active channel and give the local reader back to other processes."""
         channel = self._channel
         self._channel = None
-        if channel is None:
-            return
         try:
-            channel.disconnect()
-        except (OSError, RuntimeError):
-            pass
+            if channel is not None:
+                try:
+                    channel.disconnect()
+                except (OSError, RuntimeError):
+                    pass
+        finally:
+            self._release_local_reader()
 
     def get_atr(self) -> bytes:
         channel = self._require_channel()
@@ -539,6 +610,19 @@ class BridgeSession:
     # follows, or reported when none comes.
     pending_uicc_reset_reason: str = ""
     pending_uicc_reset_deadline: float = 0.0
+    # osmo-remsim-client-st2 hands the card's next answer to whatever
+    # command the modem is on, so answering a TPDU the modem has
+    # abandoned shifts every later answer by one. A modem TPDU records
+    # the card session (one per reset) and its own sequence number; the
+    # answer to anything but the latest TPDU of the current session is
+    # never forwarded.
+    card_session: int = 0
+    modem_tpdu_sequence: int = 0
+    # From a reset until the modem's first TPDU of the new session.
+    awaiting_first_tpdu: bool = False
+    # Modem TPDUs in a row whose card transmit PC/SC reported as failed.
+    # The first is answered with '6F00'; the second resets the card side.
+    failed_card_transmits: int = 0
     client_slot: dict[str, Any] = field(init=False)
     bank_slot: dict[str, Any] = field(init=False)
 
@@ -561,6 +645,7 @@ class BridgeSession:
         self.atr_sent = False
         self.modem_reset_active = False
         self.modem_vcc_present = None
+        self.failed_card_transmits = 0
         self.take_pending_uicc_reset()
 
     def note_modem_slot_status(self, status: SlotPhysStatus) -> SlotStatusTransition:
@@ -584,6 +669,12 @@ class BridgeSession:
             self.modem_vcc_present = status.vcc_present
         self.modem_reset_active = bool(status.reset_active)
         return SlotStatusTransition(edge=edge, changed=changed)
+
+    def start_card_session(self) -> None:
+        """Begin a card session; every TPDU sent before it is abandoned."""
+        self.card_session += 1
+        self.awaiting_first_tpdu = True
+        self.failed_card_transmits = 0
 
     def expect_uicc_reset(self, reason: str, *, deadline: float) -> None:
         self.pending_uicc_reset_reason = str(reason or "").strip()
@@ -622,6 +713,8 @@ class _PendingApduExchange:
     bank_slot: dict[str, Any]
     client_slot: dict[str, Any]
     request_apdu: bytes
+    card_session: int = 0
+    sequence: int = 0
 
 
 @dataclass(slots=True)
@@ -651,11 +744,15 @@ class CardWorker:
         *,
         apdu_timeout_ms: int = DEFAULT_APDU_TIMEOUT_MS,
         card_trace_enabled: bool = False,
+        abandoned_reason: Callable[[_PendingApduExchange], str] | None = None,
     ) -> None:
         self._card = card
         self._card_lock = card_lock
         self._apdu_timeout_ms = resolve_apdu_timeout_ms(apdu_timeout_ms)
         self._card_trace_enabled = bool(card_trace_enabled)
+        # Asked again just before a queued modem TPDU goes to the card:
+        # one the modem has abandoned by then never reaches it.
+        self._abandoned_reason = abandoned_reason
         self._wakeup_r, self._wakeup_w = os.pipe()
         os.set_blocking(self._wakeup_r, False)
         self._shutdown = threading.Event()
@@ -695,6 +792,8 @@ class CardWorker:
         tag: int,
         bank_slot: dict[str, Any],
         client_slot: dict[str, Any],
+        card_session: int = 0,
+        sequence: int = 0,
     ) -> None:
         """Enqueue *apdu* for the worker; the response lands in :meth:`poll_responses`.
 
@@ -706,6 +805,8 @@ class CardWorker:
             bank_slot=dict(bank_slot),
             client_slot=dict(client_slot),
             request_apdu=apdu,
+            card_session=card_session,
+            sequence=sequence,
         )
         self._request_queue.put((None, apdu, pending))
 
@@ -785,6 +886,16 @@ class CardWorker:
                 # apdu is the threading.Event to signal
                 apdu.set()
                 continue
+
+            if pending is not None and self._abandoned_reason is not None:
+                reason = self._abandoned_reason(pending)
+                if len(reason) > 0:
+                    LOGGER.warning(
+                        "Not sending modem APDU %s to the card: %s",
+                        bytes(apdu).hex().upper(),
+                        reason,
+                    )
+                    continue
 
             trace_label = self._trace_label(pending)
             start_time = time.monotonic()
@@ -883,6 +994,7 @@ class HilBridgeServer:
             self._card_lock,
             apdu_timeout_ms=config.apdu_timeout_ms,
             card_trace_enabled=config.card_trace_enabled,
+            abandoned_reason=self._abandoned_reason,
         )
         self._wakeup_sentinel = object()
         self._selector.register(
@@ -1105,6 +1217,23 @@ class HilBridgeServer:
         self._handle_connection_loss(context, "connection role could not be determined")
 
     def _classify_connection(self, context: ConnectionContext, message_name: str) -> None:
+        """Give a new connection the role that is still open: control first, then bankd.
+
+        osmo-remsim-client-st2 1.2.0 sends byte-identical connectClientReq
+        PDUs on its server and bankd links (the bankd connection copies the
+        server connection's component identity and both carry the client
+        slot), and checks the identity type in the answer. A link that gets
+        the other role's answer is closed by the client and never re-dialled
+        on its own, so a client re-dialling both links at once, with its
+        bankd link first, was left with neither.
+
+        Nothing in the first PDU tells the links apart, so the order has to
+        hold by construction: the close paths drop one link at a time, and
+        no connection takes the bankd role until the control link has
+        answered configClientIdReq, which only the client's server link does.
+        An arrival before that is closed unanswered; the client re-dials it
+        at once, and by then the roles are settled.
+        """
         if message_name != "connectClientReq":
             self._handle_connection_loss(context, f"first PDU was not connectClientReq: {message_name}")
             return
@@ -1114,6 +1243,13 @@ class HilBridgeServer:
             self._session.control = context
             LOGGER.info("Assigned %s as control connection", context.label)
             self._publish_card_relay_marker()
+            return
+
+        if self._session.control_stage == "await_config_id_res":
+            self._handle_connection_loss(
+                context,
+                "control link not confirmed yet; the client re-dials this link",
+            )
             return
 
         if self._session.bankd is None:
@@ -1150,7 +1286,7 @@ class HilBridgeServer:
             body = get_pdu_message_body(pdu)
             result = str(body.get("result", ""))
             if result != "ok":
-                self._reset_session(f"configClientIdRes rejected: {result}")
+                self._close_control_side(f"configClientIdRes rejected: {result}")
                 return
             self._queue_rspro_pdu(
                 context,
@@ -1168,7 +1304,7 @@ class HilBridgeServer:
             body = get_pdu_message_body(pdu)
             result = str(body.get("result", ""))
             if result != "ok":
-                self._reset_session(f"configClientBankRes rejected: {result}")
+                self._close_control_side(f"configClientBankRes rejected: {result}")
                 return
             self._session.control_stage = "configured"
             LOGGER.info("Control connection configured; waiting for bankd connect")
@@ -1233,16 +1369,16 @@ class HilBridgeServer:
             body = get_pdu_message_body(pdu)
             result = str(body.get("result", ""))
             if result != "ok":
-                self._reset_session(f"setAtrRes rejected: {result}")
+                self._close_bankd_side(f"setAtrRes rejected: {result}")
             return
 
         if message_name == "tpduModemToCard":
             try:
                 self._handle_apdu_exchange(context, pdu)
             except PcscBridgeError as exc:
-                self._reset_session(f"PC/SC bridge failure: {exc}")
+                self._reset_card_side(f"PC/SC bridge failure: {exc}")
             except Exception as exc:
-                self._reset_session(f"APDU relay failure: {exc}")
+                self._reset_card_side(f"APDU relay failure: {exc}")
             return
 
         if message_name == "resetStateReq":
@@ -1262,6 +1398,26 @@ class HilBridgeServer:
             raise PcscBridgeError("Received empty tpduModemToCard payload.")
 
         LOGGER.info("Modem -> bridge APDU %s", request_data.hex().upper())
+        self._session.modem_tpdu_sequence += 1
+        if self._session.awaiting_first_tpdu:
+            if len(request_data) >= 2 and request_data[1] in _SESSION_CONTINUATION_INS:
+                # Unanswered on purpose: the board already discarded it, so
+                # an answer would land on the modem's next command.
+                stuck_size = _simtrace2_unterminated_message_size(request_data)
+                LOGGER.warning(
+                    "Dropping modem APDU %s: the modem sent it before resetting the "
+                    "UICC, and it cannot open a card session%s",
+                    request_data.hex().upper(),
+                    (
+                        f"; its {stuck_size}-byte SIMtrace2 USB message fills whole "
+                        "packets and the board firmware ends it without a zero-length "
+                        "packet, so the host only saw it after the reset"
+                    )
+                    if stuck_size > 0
+                    else "",
+                )
+                return
+            self._session.awaiting_first_tpdu = False
         self._warn_if_uicc_reset_overdue()
 
         envelope_rejection_reason = _malformed_envelope_rejection_reason(request_data)
@@ -1325,7 +1481,17 @@ class HilBridgeServer:
             tag=get_pdu_tag(pdu),
             bank_slot=reply_bank_slot,
             client_slot=reply_client_slot,
+            card_session=self._session.card_session,
+            sequence=self._session.modem_tpdu_sequence,
         )
+
+    def _abandoned_reason(self, pending: _PendingApduExchange) -> str:
+        """Why the modem no longer waits for the answer to *pending*, or ""."""
+        if pending.card_session != self._session.card_session:
+            return "the modem reset the UICC after sending it"
+        if pending.sequence != self._session.modem_tpdu_sequence:
+            return "the modem has sent another command since"
+        return ""
 
     def _process_completed_exchanges(self) -> None:
         """Pick up every finished async APDU exchange and forward the response.
@@ -1342,30 +1508,63 @@ class HilBridgeServer:
             pending = completed.pending
             if pending.context.closed:
                 continue
+            abandoned = self._abandoned_reason(pending)
+            if len(abandoned) > 0:
+                # The card ran it, so the SIM-side trace keeps the exchange;
+                # the modem never sees the answer.
+                LOGGER.warning(
+                    "Not forwarding the card's answer %s to modem APDU %s: %s",
+                    completed.response.hex().upper() if completed.error is None else completed.error,
+                    pending.request_apdu.hex().upper(),
+                    abandoned,
+                )
+                if completed.error is None:
+                    self._session.gsmtap.mirror_exchange(pending.request_apdu, completed.response)
+                continue
             if completed.error is not None:
+                cause = completed.error.__cause__
                 LOGGER.error(
-                    "Card APDU transmit failed for %s: %s",
+                    "Card APDU transmit failed for %s: %s%s",
                     pending.request_apdu.hex().upper(),
                     completed.error,
+                    "" if cause is None else f" ({type(cause).__name__}: {cause})",
                 )
-                self._reset_session(
+                # A failure PC/SC reports (it carries the reader's error as its
+                # cause) ends the exchange at the reader, so the card can take
+                # the modem's next command; osmo-remsim-client-st2 1.2.0 forwards
+                # a TPDU whose APDU case it cannot tell as a bare header, which
+                # ends this way. A bridge timeout leaves the call outstanding.
+                if cause is not None and self._session.failed_card_transmits == 0:
+                    self._session.failed_card_transmits = 1
+                    LOGGER.warning(
+                        "Answering modem APDU %s with %s; a second failed transmit in a row "
+                        "resets the card side",
+                        pending.request_apdu.hex().upper(),
+                        TECHNICAL_PROBLEM_SW.hex().upper(),
+                    )
+                    self._forward_to_modem(pending, TECHNICAL_PROBLEM_SW)
+                    continue
+                self._reset_card_side(
                     f"Card APDU transmit failed: {completed.error}"
                 )
                 return
+            self._session.failed_card_transmits = 0
             LOGGER.info("Card -> modem APDU %s", completed.response.hex().upper())
-            self._note_card_response(pending.request_apdu, completed.response)
-            self._session.gsmtap.mirror_exchange(
-                pending.request_apdu, completed.response
-            )
-            self._queue_rspro_pdu(
-                pending.context,
-                build_tpdu_card_to_modem(
-                    tag=pending.tag,
-                    bank_slot=pending.bank_slot,
-                    client_slot=pending.client_slot,
-                    data=completed.response,
-                ),
-            )
+            self._forward_to_modem(pending, completed.response)
+
+    def _forward_to_modem(self, pending: _PendingApduExchange, response: bytes) -> None:
+        """Queue *response* to the modem as the answer to *pending*, on its bankd link."""
+        self._note_card_response(pending.request_apdu, response)
+        self._session.gsmtap.mirror_exchange(pending.request_apdu, response)
+        self._queue_rspro_pdu(
+            pending.context,
+            build_tpdu_card_to_modem(
+                tag=pending.tag,
+                bank_slot=pending.bank_slot,
+                client_slot=pending.client_slot,
+                data=response,
+            ),
+        )
 
     def _handle_relay_apdu(self, apdu: bytes, *, session_id: str = "") -> tuple[bytes, int, int]:
         if len(apdu) == 0:
@@ -1388,6 +1587,7 @@ class HilBridgeServer:
         return response_data, sw1, sw2
 
     def _reset_card_for_modem_session(self) -> None:
+        self._session.start_card_session()
         self._card_worker.drain(timeout=5.0)
         with self._card_lock:
             reset_payload = self._card.reset_card()
@@ -1418,9 +1618,14 @@ class HilBridgeServer:
 
         Runs on the event-loop thread, ahead of the modem's first
         post-reset TPDU, which arrives on this same connection behind
-        the indication.
+        the indication. A TPDU the modem sent before the reset can arrive
+        there too, when the board held it; the new card session set here
+        keeps it, and the card's answer to anything in flight, away from
+        the modem.
         """
         previous_atr = self._session.atr_bytes
+        # Before the drain, so a TPDU still queued is skipped, not sent.
+        self._session.start_card_session()
         self._card_worker.drain(timeout=5.0)
         with self._card_lock:
             reset_payload = self._card.reset_card()
@@ -1703,10 +1908,35 @@ class HilBridgeServer:
 
     def _handle_connection_loss(self, context: ConnectionContext, reason: str) -> None:
         LOGGER.warning("Closing %s: %s", context.label, reason)
-        if context is self._session.control or context is self._session.bankd:
-            self._reset_session(reason)
+        # Only the link that failed: the client re-dials it alone, and
+        # _classify_connection gives it the one role left open.
+        if context is self._session.control:
+            self._close_control_side(reason)
+            return
+        if context is self._session.bankd:
+            self._close_bankd_side(reason)
             return
         self._close_socket(context)
+
+    def _close_control_side(self, reason: str) -> None:
+        LOGGER.warning("Closing control side: %s", reason)
+        control = self._session.control
+        self._session.control = None
+        self._session.control_stage = "idle"
+        if control is not None:
+            self._close_socket(control)
+        self._publish_card_relay_marker()
+
+    def _reset_card_side(self, reason: str) -> None:
+        """After a card-side failure: drop the bankd link and re-open the reader, keep control.
+
+        The client then re-establishes bankd alone and the modem's next
+        activation gets the card's ATR again; the control link it keeps is
+        what lets the new bankd connection be classified.
+        """
+        self._session.failed_card_transmits = 0
+        self._close_bankd_side(reason)
+        self._refresh_card(reconnect=True)
 
     def _close_bankd_side(self, reason: str) -> None:
         LOGGER.warning("Closing bankd side: %s", reason)

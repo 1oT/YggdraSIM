@@ -345,10 +345,16 @@ class Sgp32ResultListAndAckTests(_Sgp32TestBase):
         self.assertEqual(list_outer_tag, b"\xBF\x2B")
         a2_tag, a2_value, _raw, _next = read_tlv(list_outer_value, 0)
         self.assertEqual(a2_tag, b"\xA2")
-        # First inner element is the original A0 euiccPackageResultSigned.
-        first_tag, _first_value, first_raw, _first_next = read_tlv(a2_value, 0)
-        self.assertEqual(first_tag, b"\xA0")
-        self.assertEqual(first_raw, self.state.euicc_package_results[0].payload)
+        # SGP.32 v1.3 p.43, p.134: each element is an EuiccPackageResult 'BF51' (p.40),
+        # the same TLV LoadEuiccPackage answered with.
+        first_tag, _first_value, first_raw, first_next = read_tlv(a2_value, 0)
+        self.assertEqual(first_tag, b"\xBF\x51")
+        self.assertEqual(first_raw, load_response)
+        self.assertEqual(first_next, len(a2_value))
+        by_seq, _sw1, _sw2 = self.logic.handle_store_data(
+            tlv(b"\xBF\x2B", tlv(b"\xA0", tlv(b"\x80", encode_der_integer(seq_number))))
+        )
+        self.assertEqual(by_seq, list_response)
 
         # ES10b.RemoveNotificationFromList over BF30 with seqNumber drains
         # the package result list as well as notifications.

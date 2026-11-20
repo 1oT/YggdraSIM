@@ -3549,6 +3549,9 @@ class Sgp22Manager:
             return
         print(f"{Config.Colors.HEADER}--- EID ---{Config.Colors.ENDC}")
         print(f"    {eid}")
+        from SCP11.eim_local.engine.detected import register_detected_eid
+
+        register_detected_eid(eid, "the SCP03 admin shell")
 
     def get_rat(self) -> None:
         """ES10b.GetRAT (SGP.22/32) - Rules Authorisation Table. Retrieval only."""

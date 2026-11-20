@@ -182,7 +182,7 @@ URL, ATR) each iteration.
 
 Sub-tooling spawned from `[B]`:
 
-- **Wireshark live capture** -- `wireshark -k -i <iface> -f "udp port 4729"`. `iface` defaults to `lo`/`lo0`; override via `YGGDRASIM_HIL_CAPTURE_INTERFACE`. Binary override via `YGGDRASIM_HIL_WIRESHARK_BIN`.
+- **Wireshark live capture** -- `wireshark -k -i <iface> -f "udp port 4729" -C <profile> -t u`, followed by the APDU dissector's `-X lua_script:` pair when it is present. `iface` defaults to `lo`/`lo0`; override via `YGGDRASIM_HIL_CAPTURE_INTERFACE`. Binary override via `YGGDRASIM_HIL_WIRESHARK_BIN`, profile via `YGGDRASIM_HIL_WIRESHARK_PROFILE` (default `YggdraSIM-HIL`), Time column format via `YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT` (default `u`, UTC time of day); `off` in either drops its option.
 - **Decoded-APDU Textual TUI** -- `Tools.HilBridge.live_decode_tui.run_live_decode_tui` driving either the live pcap with `tshark -i` (live mode) or a saved pcap with `tshark -r` (offline review mode). Override via `YGGDRASIM_HIL_TERMSHARK_BIN`, warmup via `YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS`. In offline mode, a keybag JSON can be layered in via the `[3]` prompt or `--keybag`.
 - **Raw APDU stream view** -- tails `journalctl --user -u yggdrasim-hil-supervisor.service -f -n 0 -o cat`, filtered to APDU-flavored lines.
 - **Pcap writers** -- `Tools/HilBridge/termshark_capture_pcap.py` (preferred) or `tshark`/`dumpcap`. Mirror fan-out via `termshark_capture_mirror.py` when `--gsmtap-capture-mirror-fifo-path` is set.
@@ -241,6 +241,9 @@ picks delegate to `SCP03.interface.guides.ShellGuides`.
 
 | Pick | Target |
 | --- | --- |
+| `U` | User manual: start, shared concepts, real-card work -- `guides/USER_MANUAL.md` |
+| `UG` | User manual, GUI chapter -- `guides/USER_MANUAL_GUI.md` |
+| `UC` | User manual, CLI chapter -- `guides/USER_MANUAL_CLI.md` |
 | `1` | Admin Shell guide topics (`ShellGuides.print_guide("WIZARD")`) |
 | `2` | OTA Simulator guide (`ShellGuides._print_ota_guide`) |
 | `3` | eSIM Management Relay -- `SCP11/live/README.md` |
@@ -276,6 +279,7 @@ Defined in `pyproject.toml`/`yggdrasim_common/console_scripts.py`:
 | `yggdrasim-hil-bridge` | `Tools.HilBridge.main.entry` |
 | `yggdrasim-hil-supervisor` | `Tools.HilBridge.supervisor.entry` |
 | `yggdrasim-hil-reset` | `Tools.HilBridge.device_reset.run_standalone` |
+| `yggdrasim-hil-modem-diag` | `Tools.HilBridge.modem_diag.entry` |
 | `yggdrasim-card-bridge` | `Tools.CardBridge.server.main` |
 | `yggdrasim-lab-agent` | `yggdrasim_common.remote_lab.agent.main` |
 | `yggdrasim-lab` | `yggdrasim_common.remote_lab.cli.run_standalone` |
@@ -443,6 +447,7 @@ Each wizard is tag-granular -- every sub-prompt is its own step.
 | `RUN-AUTH` | -- | -- | GSM / USIM / ISIM authentication wizard: `ctx` [1=GSM, 2=USIM, 3=ISIM] → `rand` [32 hex chars] → `autn` [32 hex chars, non-GSM only]. |
 | `RUN-AUTH-TEST` | -- | -- | Offline 3GPP TS 35.207 Milenage vector validation. |
 | `DERIVE-OPC` | `<Ki_hex> <OP_hex>` | -- | Derive OPc per 3GPP TS 35.206 (32 hex chars each). |
+| `DERIVE-TOPC` | `<TOP_hex> <K_hex>` | `[Keccak iterations]` | Derive TOPc per 3GPP TS 35.231 (TOP 64 hex chars, K 32 or 64; 1 to 16 iterations, default 1). The same checks as the Offline Tools TUAK entry. |
 
 #### `MANAGE-PROFILE` wizard
 
@@ -609,7 +614,7 @@ answering. A reconnect ends the mode.
 
 Enforced by `CommandRegistry.get_arg_requirements`:
 
-- **Mandatory argument** (dispatcher errors out if absent): `SET-AID-ALIAS`, `SELECT`, `UPDATE`, `LOCK`, `UNLOCK`, `DEL`, `SCRIPT`, `STORE-DATA`, `DERIVE-OPC`, `SET-GOLD-PROFILE`.
+- **Mandatory argument** (dispatcher errors out if absent): `SET-AID-ALIAS`, `SELECT`, `UPDATE`, `LOCK`, `UNLOCK`, `DEL`, `SCRIPT`, `STORE-DATA`, `DERIVE-OPC`, `DERIVE-TOPC`, `SET-GOLD-PROFILE`.
 - **Optional argument** (handler called with or without tail): `REPORT`, `KEYS`, `READ`, `RECORD`, `RUN`, `GUIDE`, `STK`, `DEBUG`, `VERBOSE`, `TRACE`, `DUMP-FS`, `MANAGE-PIN`, `EXPORT-EUICC`, `EXPORT-KEYBAG`, `ARR`, `VALIDATE`, `GOLD-PROFILE`, `CLEAR-GOLD-PROFILE`, `PROFILE-DIFF`.
 - Everything else is called with no arguments; extra tokens are silently ignored.
 
@@ -740,6 +745,8 @@ Exact section titles emitted by the consoles:
 | --- | --- | --- | --- |
 | `DISCOVER` | `EIM-DISCOVER` | `DISCOVER` | IPAd consolidated eUICC + eIM discovery (SGP.32 get_all_data compact). |
 | `DOWNLOAD` | `EIM-DOWNLOAD` | `DOWNLOAD` | IPAd eIM package request + relay flow. If the argument parses as an LPA activation code, falls through to `DOWNLOAD-PROFILE`. Triggers notification sync. |
+| `EIM-LISTEN` | -- | `EIM-LISTEN [port=<n>] [calls=<n>] [idle=<seconds>] [notifications=deliver|keep] [host=<address> cert=<pem> key=<pem> client-ca=<pem>]` | IPAd eIM Package Injection (SGP.32 v1.3 §3.1.1.2): answers ESipa.TransferEimPackage on `127.0.0.1:8746` until Ctrl-C, `calls` calls or `idle` seconds without one. Plain HTTP on the loopback, or HTTPS on `host` with a required client certificate that verifies against `client-ca`; `notifications=keep` leaves pending Notifications on the eUICC; no profile download. |
+| `EIM-LISTEN-CERT` | -- | `EIM-LISTEN-CERT <host name or address>... [out=<directory>]` | Makes the self-signed certificate and key an HTTPS `EIM-LISTEN` serves with; a file that exists is never replaced. |
 
 ### 4.7 Optional extension commands
 
@@ -1064,7 +1071,9 @@ Preferences persisted in `Workspace/SAIP/saip_tool_config.json`.
 
 `saip-tool` resolution order: `TOOL` override → `YGGDRASIM_SAIP_TOOL`
 env → `saip-tool.py` / `saip-tool` on `PATH` →
-`<workspace|bundle|module-root>/pysim/contrib/saip-tool.py`.
+`<workspace|bundle|module-root>/pysim/contrib/saip-tool.py`. With none of
+these, the bundled adapter (`Tools/ProfilePackage/saip_cli_adapter.py`) runs
+over the installed `pySim.esim.saip`; frozen builds use it directly.
 Subprocess timeout: 60 s (override via
 `YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS`).
 
@@ -1313,6 +1322,7 @@ Inherits every bridge runtime flag **except** `--list-readers`. Signals:
 | `--remsim-client-id` | int | unset | no | Forwarded via `-c` (defaults to `--client-id`). |
 | `--remsim-client-slot` | int | unset | no | Forwarded via `-n` (defaults to `--client-slot`). |
 | `--remsim-arg` | append str | `[]` | yes | Raw forwarded args to `osmo-remsim-client-st2`. |
+| `--modem-diag-device` | str | `""` | no | DIAG tty of the modem, or `auto` for USB interface 0 of a modem the Linux `option` or `qcserial` driver serves: also run `yggdrasim-hil-modem-diag` for the supervisor's lifetime, sending to the bridge's GSMTAP host and port. A separate child on its own backoff (30 s, 600 s after exit code 2); its state is the `modemDiag` field, and it never changes the bridge, the REMSIM client or `status`. The launcher and the GUI set it from `YGGDRASIM_HIL_MODEM_DIAG`. |
 
 ### 10.3 Bridge flags forwarded to the child
 
@@ -1431,7 +1441,7 @@ plane is the relay service in `Tools/HilBridge/apdu_relay.py`.
 | `--audit` | off | One record per exchange: header bytes and status word only. |
 | `--audit-full-apdu` | off | Also logs full APDU and response hex. Captures PINs. Implies `--audit`. |
 | `--audit-logger-name` | `yggdrasim.card_bridge.audit` | Logger that receives audit records. |
-| `--apdu-timeout-ms` | `YGGDRASIM_CARD_RELAY_APDU_TIMEOUT_MS`, else the built-in default | PC/SC wait per APDU. |
+| `--apdu-timeout-ms` | `YGGDRASIM_HIL_APDU_TIMEOUT_MS`, else `30000` | PC/SC wait per APDU. |
 | `--pcsc-share-mode` | `shared` | `exclusive` when no other local process may touch the reader. |
 
 Endpoints: `/apdu` (data plane), `/ping`, `/status`, `/card/reset`, `/lease`.
@@ -1506,12 +1516,24 @@ Details: [APDU Dissector](../subsystems/apdu-dissector.md).
 `python -m Tools.Asn1TlvDecode`. Decodes BER/DER or a command APDU from a hex
 argument, a file (`--file`), or stdin.
 
+A BF-tagged GSMA RSP object is read against the compiled SGP.22 / SGP.32
+modules: the request or response type its content fits (both directions share
+a tag), field names, named bits and numbers (every one the type defines,
+the taken ones marked), versions, certificates as their subject, issuer,
+validity, key and RSP role, and the members a tag list
+selects (`IpaEuiccDataRequest` per SGP.32 v1.3 §2.11.1.2,
+`ProfileInfoListRequest` per SGP.22 v3.1 §5.7.15). That reading is the output;
+`--ber` adds the BER tree, and a terminal gets it in the CLI theme's colours.
+
 | Flag | Effect |
 | --- | --- |
 | `--format {json,asn1,both}` | Output form; `asn1` value notation by default. |
 | `--schema` / `--type` / `--codec` | Compile a schema with `asn1tools` and decode one type against it; `--schema` repeats. |
-| `--context` | Classify each APDU by CLA/INS and decode the payload against that specification; accepts a whole exchange trace. |
-| `--domain` | Force the decode domain instead of detecting it: `apdu`, `response`, `es10`, `gp`, `uicc`, `cat`, `tlv`, `sw`. |
+| `--context` | Classify each APDU by CLA/INS and decode the payload against that specification; accepts several commands, one per row as in a script file (a row that starts with `#` is a comment), a whole exchange trace, `AT+CSIM` / `+CRSM` / `+CGLA` / `+CRLA` lines, and where the text is not hex a PEM certificate, a JSON body with base64 RSP objects, base64, an EID, ICCID or IMSI in digits, an ATR, a PC/SC return code and TLS records. |
+| `--domain` | Force the decode domain instead of detecting it: `apdu` (every row is a command), `response` (every row is an answer), `es10`, `gp`, `uicc`, `cat`, `tlv`, `sw`, or `ef` for the content of one file (the file identifier on the first line, the content below). |
+| `--ber` | After the schema reading of an RSP object, print its BER-TLV tree as well. |
+| `--color {auto,always,never}` | Colour from the active CLI theme; `auto` (the default) colours a terminal unless `NO_COLOR` is set. |
+| `--each` | Decode every input line on its own, one JSON object per line. A line is hex, or a label, a tab and hex; a label naming an RSP type (an ES9+ or ESipa JSON member such as `smdpSigned2`) is tried as that type first. |
 
 ### 12.3 `yggdrasim-card-clone`
 
@@ -1542,7 +1564,7 @@ the default truncates. Walkthrough:
 `python -m Tools.EumDiag`. Injects session keys into the bundled Lua
 dissector so a failed BF36 Bound Profile Package frame can be read.
 Sub-commands: `inject-keys` (write the repository and invoke tshark),
-`store-keys` (write only), `decode-bpp` (offline decode through pySim).
+`store-keys` (write only), `decode-bpp` (offline summary of the BF36 layout and its segments).
 Details: [EUM Diagnostics](../subsystems/eum-diagnostics.md).
 
 ### 12.6 `yggdrasim-apdu-fuzzer`
@@ -1567,7 +1589,9 @@ values.
 `python -m Tools.YggdraCore.http_app`. Runs the stub AUSF over HTTP. Off
 unless `YGGDRASIM_5GCORE_MODE=stub`. `--host` / `--port` (`127.0.0.1:8089`),
 `--token-file`, `--no-token` (loopback only), `--allow-nonloopback` for a
-sealed lab.
+sealed lab. In the GUI, Advanced > YggdraCore runs the same stub in the GUI
+process (subscriptions, the AKMA actions, the Open5GS bridge, diagnostics)
+whatever the mode says; it starts no HTTP server.
 
 ### 12.9 `yggdrasim-mcp`
 
@@ -1575,6 +1599,24 @@ sealed lab.
 tools over MCP on stdio; needs the `mcp` extra. Card-reaching tools stay
 behind `YGGDRASIM_MCP_ALLOW_CARD` and `YGGDRASIM_MCP_ACCESS`. Setup:
 [Run the MCP Server](../how-to/run-the-mcp-server.md).
+
+### 12.10 `yggdrasim-hil-modem-diag`
+
+`python -m Tools.HilBridge.modem_diag --device <DIAG tty | auto>`. Reads
+the modem's own SIM interface log (Qualcomm DIAG `LOG_UIM_DATA_C`, 0x1098,
+or 0x14CE on dual-SIM builds), rebuilds the T=0 exchanges and sends them
+into the HIL GSMTAP stream in the bridge's frame layout, on GSMTAP antenna 1
+and from `127.0.0.2`. NULL bytes, long holds, the PPS exchange and an
+exchange cut by a reset follow as libosmocore log records. `auto` takes USB
+interface 0 of a modem the Linux `option` or `qcserial` driver serves, again
+on every reconnect.
+`--gsmtap-host` / `--gsmtap-port` / `--gsmtap-compat` match the bridge,
+`--capture-path` also writes a pcap, `--no-notes` sends APDU and ATR frames
+only. Waits for the port and reopens it after the modem re-enumerates; exit
+code 2 means a condition a restart will not change. With
+`YGGDRASIM_HIL_MODEM_DIAG` set, the HIL supervisor runs it for the whole
+session (section 10.2). Walkthrough: the HIL Bridge guide, *Modem-side SIM
+log*.
 
 ---
 
@@ -1621,7 +1663,7 @@ For eIM Local the plugin writes directly into the shell instance:
 - pre-defined handlers or dispatch shims for optional commands.
 
 Runtime dispatch is the capability's own: the plugin registers its handlers
-through the hooks above, and the host holds no polling-specific helpers.
+through the hooks above, and the host holds no capability-specific helpers.
 
 See [Plugin Contract](../internals/plugin-contract.md) for the formal
 spec.

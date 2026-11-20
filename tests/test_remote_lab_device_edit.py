@@ -73,10 +73,10 @@ def test_an_explicit_empty_string_clears_a_free_text_field(registry: None) -> No
 
 
 def test_host_is_stored_normalised(registry: None) -> None:
-    update_device("rig-a", {"agent_host": "ESIM-RaspberryPi.INT.1ot.mobi."})
+    update_device("rig-a", {"agent_host": "Bench-Rig.LAB.Example.TEST."})
     device = get_device("rig-a")
-    assert device.agent_host == "esim-raspberrypi.int.1ot.mobi"
-    assert device.control_base_url == "http://esim-raspberrypi.int.1ot.mobi:8700"
+    assert device.agent_host == "bench-rig.lab.example.test"
+    assert device.control_base_url == "http://bench-rig.lab.example.test:8700"
 
 
 def test_repointing_host_and_port_together(registry: None) -> None:

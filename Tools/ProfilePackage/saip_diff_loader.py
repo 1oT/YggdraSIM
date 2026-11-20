@@ -248,9 +248,9 @@ def _decode_der_bytes(
         # whether the environment ships pySim via pip or via a source
         # checkout.
         raise SaipDiffLoadError(
-            f"{path}: DER diff needs pySim. Install the PyPI wheel "
-            "(pip install pySim) or clone the upstream tree "
-            "(git clone https://gitlab.com/osmocom/pysim.git pysim) "
+            f"{path}: DER diff needs pySim. Install the pinned fork "
+            "(pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git') "
+            "or clone it (git clone https://github.com/hampushellsberg-dev/pysim.git pysim) "
             f"into {workspace_root}. Underlying error: {exc}"
         ) from exc
     try:

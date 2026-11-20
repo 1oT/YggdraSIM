@@ -15,7 +15,7 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 | `SCP11/live/` | the workflow is relay-first | `DOWNLOAD-PROFILE`, `DISCOVER`, `DOWNLOAD`, optional local extensions, explicit ES9 CA controls | `python -m SCP11.live` |
 | `SCP11/test/` | older imports still reference the test namespace | compatibility shims over the eSIM management relay implementation | import only |
 | `SCP11/local_access/` | the task is direct local `ISD-R` bring-up or one-shot profile load | local SCP11 auth, metadata upload, profile enable, disable, and delete | `python -m SCP11.local_access` |
-| `SCP11/eim_local/` | the task is on the eIM side rather than the relay side | `ADD-EIM`, package queues, hotfolders, handover, response logs | `python -m SCP11.eim_local` |
+| `SCP11/eim_local/` | the task is on the eIM side rather than the relay side | operation queue, ESipa service, `ADD-INITIAL-EIM`, hotfolders, handover, response logs | `python -m SCP11.eim_local` |
 | `Tools/ProfilePackage/` | the task is SAIP package inspection or transcode work | inspect, lint, transcode, encode, split, extract | `python -m Tools.ProfilePackage` |
 | `Tools/SuciTool/` | the task is SUCI key handling | key selection, key generation, public-key export | `python -m Tools.SuciTool` |
 | `Tools/HilBridge/` | a live card must be bridged to a modem through SIMtrace2 | HIL bridge, supervisor lifecycle, GSMTAP mirroring, APDU side-channel access, AT+CSIM/CRSM transcoder | `python -m Tools.HilBridge.supervisor` |

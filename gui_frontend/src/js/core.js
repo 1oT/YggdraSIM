@@ -23,7 +23,12 @@
     "catppuccin-frappe": 1, "catppuccin-macchiato": 1,
     "dracula": 1, "github-dark": 1, "github-light": 1,
     "islands-light": 1, "graphite-light": 1,
+    "bench-dark": 1, "bench-light": 1,
   };
+  var SKIN_KEY = "ygg-gui-skin";
+  // VALID_SKINS sourced from window.YGG_VALID_SKINS (theme-init.js), like
+  // the themes above; add new skins there.
+  var VALID_SKINS = window.YGG_VALID_SKINS || { "bench": 1, "classic": 1 };
 
   function captureTokenFromUrl() {
     try {
@@ -79,6 +84,22 @@
     return resolved;
   }
 
+  function getCurrentSkin() {
+    var attr = document.documentElement.getAttribute("data-skin") || "bench";
+    return VALID_SKINS[attr] ? attr : "bench";
+  }
+
+  function applySkin(name) {
+    var resolved = VALID_SKINS[name] ? name : "bench";
+    document.documentElement.setAttribute("data-skin", resolved);
+    try {
+      window.localStorage.setItem(SKIN_KEY, resolved);
+    } catch (err) {
+      // localStorage may be unavailable in restricted WebViews; fall through.
+    }
+    return resolved;
+  }
+
   async function apiErrorDetail(response) {
     var text = "";
     try {
@@ -113,7 +134,13 @@
     if (token && token.length > 0) {
       headers["Authorization"] = "Bearer " + token;
     }
-    if (opts.body && !headers["Content-Type"]) {
+    // Header names are case-insensitive: a caller's "content-type" beside a
+    // "Content-Type" added here reaches the server as one doubled value,
+    // which it does not read as JSON.
+    var hasContentType = Object.keys(headers).some(function (name) {
+      return name.toLowerCase() === "content-type";
+    });
+    if (opts.body && !hasContentType) {
       headers["Content-Type"] = "application/json";
     }
     var response = await fetch(path, Object.assign({}, opts, { headers: headers, credentials: "same-origin" }));
@@ -225,7 +252,7 @@
     if (name === "about" && typeof loadGuidesForAboutPanel === "function") {
       loadGuidesForAboutPanel();
     }
-    setText("crumb-subsystem", {
+    var crumbLabel = {
       overview: "Overview",
       registry: "Registry browser",
       backend: "Card backend",
@@ -238,7 +265,14 @@
       remote_lab: "APDU Streaming · Remote Lab",
       plugin_console: "Plugin consoles",
       command_center: (options && options.crumb) || "Command Center",
-    }[name] || "Overview");
+    }[name] || "Overview";
+    setText("crumb-subsystem", crumbLabel);
+    // The status line names the view by the crumb's words, so it follows
+    // every switch (a module leaf, a standalone view, Meta).
+    setStatusAction("viewing: " + crumbLabel);
+    if (window.YggdraSimPanes && typeof window.YggdraSimPanes.sync === "function") {
+      window.YggdraSimPanes.sync();
+    }
     highlightSidebar(name);
   }
 
@@ -298,6 +332,9 @@
         body: JSON.stringify({ backend: backend }),
       });
       await loadBackend();
+      // The reader list follows the backend: the SIM backend lists the
+      // simulator alone. Ask now rather than on the next reader poll.
+      if (typeof readerBarRefresh === "function") readerBarRefresh({ manual: true });
       setStatusAction("backend now: " + backend);
     } catch (err) {
       setStatusError("failed to switch backend: " + err.message);
@@ -560,6 +597,9 @@
       value.classList.add("not-set");
       value.textContent = flag.default_hint || "(unset)";
     }
+    // Values are paths and hints cut at the column edge; keep the whole
+    // value one hover away.
+    value.title = value.textContent;
 
     var editor = document.createElement("div");
     editor.className = "env-flag-editor";
@@ -580,11 +620,15 @@
       input.value = flag.is_set ? String(flag.current_value) : "";
     } else {
       input = document.createElement("input");
-      input.type = flag.sensitive ? "password" : "text";
+      // Only a credential is typed blind. A sensitive flag is confirmed
+      // instead, and what is confirmed has to be readable.
+      input.type = flag.secret ? "password" : "text";
       input.placeholder = flag.default_hint || "";
       input.value = flag.is_set ? String(flag.current_value) : "";
     }
     input.className = "env-flag-input";
+    // The flag name beside the field is plain text; name the field after it.
+    input.setAttribute("aria-label", String(flag.name || ""));
 
     var persistLabel = document.createElement("label");
     persistLabel.className = "env-flag-persist";
@@ -599,15 +643,45 @@
     setBtn.type = "button";
     setBtn.className = "btn btn-primary env-flag-action";
     setBtn.textContent = "Set";
+    // A sensitive flag is written in two steps, as the launcher's flag menu
+    // asks before it takes the value: Set shows the confirmation, Confirm
+    // writes what the field and the persist box held at that moment, and a
+    // change to either withdraws it. Clearing a flag is not asked about on
+    // either surface, and an empty field clears.
+    var confirmStrip = null;
+    function withdrawConfirmation() {
+      if (confirmStrip && confirmStrip.parentNode) {
+        confirmStrip.parentNode.removeChild(confirmStrip);
+      }
+      confirmStrip = null;
+    }
     setBtn.addEventListener("click", function () {
-      applyEnvFlag(flag.name, input.value, persistBox.checked, setBtn);
+      var typed = input.value;
+      var persist = persistBox.checked;
+      if (!flag.sensitive || String(typed || "").trim().length === 0) {
+        withdrawConfirmation();
+        applyEnvFlag(flag.name, typed, persist, setBtn);
+        return;
+      }
+      if (confirmStrip) {
+        return;
+      }
+      confirmStrip = envFlagConfirmStrip(flag, function () {
+        withdrawConfirmation();
+        applyEnvFlag(flag.name, typed, persist, setBtn);
+      }, withdrawConfirmation);
+      row.appendChild(confirmStrip);
     });
+    input.addEventListener("input", withdrawConfirmation);
+    input.addEventListener("change", withdrawConfirmation);
+    persistBox.addEventListener("change", withdrawConfirmation);
 
     var clearBtn = document.createElement("button");
     clearBtn.type = "button";
     clearBtn.className = "btn env-flag-action env-flag-action--clear";
     clearBtn.textContent = "Clear";
     clearBtn.addEventListener("click", function () {
+      withdrawConfirmation();
       applyEnvFlag(flag.name, "", persistBox.checked, clearBtn);
     });
 
@@ -620,6 +694,36 @@
     row.appendChild(value);
     row.appendChild(editor);
     return row;
+  }
+
+  // The confirmation of a sensitive flag: its name and the registry's note,
+  // never the value typed, since the same row serves the API token.
+  function envFlagConfirmStrip(flag, onConfirm, onCancel) {
+    var strip = document.createElement("div");
+    strip.className = "env-flag-confirm";
+    strip.setAttribute("role", "alert");
+    var text = document.createElement("div");
+    text.className = "env-flag-confirm-text";
+    var lead = document.createElement("strong");
+    lead.textContent = String(flag.name || "") + " is security-sensitive.";
+    text.appendChild(lead);
+    if (flag.notes) {
+      text.appendChild(document.createTextNode(" " + String(flag.notes)));
+    }
+    var confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "btn btn-primary env-flag-action env-flag-confirm-yes";
+    confirmBtn.textContent = "Confirm";
+    confirmBtn.addEventListener("click", onConfirm);
+    var cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn env-flag-action env-flag-confirm-no";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", onCancel);
+    strip.appendChild(text);
+    strip.appendChild(confirmBtn);
+    strip.appendChild(cancelBtn);
+    return strip;
   }
 
   async function applyEnvFlag(name, value, persist, btn) {
@@ -676,7 +780,6 @@
       entry.addEventListener("click", function () {
         var view = entry.getAttribute("data-view");
         showView(view);
-        setStatusAction("viewing: " + view);
         if (view === "registry") {
           loadRegistry("");
         } else if (view === "backend") {
@@ -687,6 +790,7 @@
         } else if (view === "overview") {
           loadHealth();
           loadBackend();
+          ccRefreshOverviewModuleStates();
         } else if (view === "terminal") {
           loadTerminalModules();
           var activeTab = getActiveTerminalTab();
@@ -767,6 +871,16 @@
         var chosen = applyTheme(themeSelect.value);
         themeSelect.value = chosen;
         setStatusAction("theme: " + chosen);
+      });
+    }
+
+    var skinSelect = $("skin-select");
+    if (skinSelect) {
+      skinSelect.value = getCurrentSkin();
+      skinSelect.addEventListener("change", function () {
+        var chosen = applySkin(skinSelect.value);
+        skinSelect.value = chosen;
+        setStatusAction("skin: " + chosen);
       });
     }
   }
@@ -1203,7 +1317,7 @@
   }
 
   // The legacy dedicated "Download profile" panel was superseded by the
-  // Command Center action (scp11.download_profile). We still expose the
+  // Command Center's download action. We still expose the
   // reader cache so action forms of kind "reader" can pull the latest list.
   function populateFlowReaders(_readers) {
     /* intentionally empty -- kept for back-compat; readers render inside
@@ -1474,7 +1588,7 @@
   function remoteLabStartSessionPoll() {
     if (remoteLabState.sessionPollTimer != null) return;
     remoteLabState.sessionPollTimer = window.setInterval(function () {
-      if (document.hidden) return;
+      if (!backgroundPollDue("remote-lab-sessions")) return;
       remoteLabRefreshSessionState();
     }, 10000);
   }
@@ -2317,7 +2431,7 @@
     var configured = !!data.configured;
     cbSetBadge("cb-status-badge", configured ? "configured" : "not-configured");
     cbRefreshGlobalBridgeStatus();
-    setText("cb-status-url", data.url || "-");
+    cbSetUrlText("cb-status-url", data.url || "-");
     setText("cb-status-source", data.url_source || "-");
     var fp = data.token_fingerprint || "";
     setText(
@@ -3302,7 +3416,14 @@
 
   function cbRigUpdateGuiUrl() {
     var port = cbRigNumber("cb-rig-gui-port", CB_RIG_DEFAULT_GUI_PORT);
-    setText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+    cbSetUrlText("cb-rig-gui-url", "http://127.0.0.1:" + port);
+  }
+
+  // A URL value keeps one line (CSS ellipsis); the whole URL is its title.
+  function cbSetUrlText(id, value) {
+    setText(id, value);
+    var el = $(id);
+    if (el) el.title = value && value !== "-" ? String(value) : "";
   }
 
   function cbRigUpdatePortPlan() {
@@ -3363,7 +3484,7 @@
     cbSetSemanticStatus("cb-rig-usb-status", usbStatus, "SIMtrace2");
     cbSetSemanticStatus("cb-rig-remsim-status", remsimStatus, "REMSIM");
     cbSetSemanticStatus("cb-rig-modem-link-status", linkStatus, "Modem link");
-    if (state.local_gui_url) setText("cb-rig-gui-url", state.local_gui_url);
+    if (state.local_gui_url) cbSetUrlText("cb-rig-gui-url", state.local_gui_url);
     if (Object.prototype.hasOwnProperty.call(state, "local_card_bridge_running")) {
       cbState.lastRigBridgeRunning = !!state.local_card_bridge_running;
     }
@@ -3624,7 +3745,63 @@
     }
   }
 
+  // Remote Bridge sections: Host (where the rig runs and how to reach it),
+  // Rig (start, stop, its stages and status) and Status (the bridge this
+  // GUI uses, probes, latency). The chosen tab is kept in the browser.
+  var CB_TAB_KEY = "yggdrasim:remote-bridge-tab";
+
+  function cbSelectTab(name, focus) {
+    var tabs = document.querySelectorAll(".cb-tab[data-cb-tab]");
+    var known = false;
+    tabs.forEach(function (tab) {
+      if (tab.getAttribute("data-cb-tab") === name) known = true;
+    });
+    if (!known) name = "host";
+    tabs.forEach(function (tab) {
+      var on = tab.getAttribute("data-cb-tab") === name;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      if (on && focus) tab.focus();
+    });
+    document.querySelectorAll(".cb-tabpanel[data-cb-tabpanel]").forEach(function (panel) {
+      panel.hidden = panel.getAttribute("data-cb-tabpanel") !== name;
+    });
+    try {
+      window.localStorage.setItem(CB_TAB_KEY, name);
+    } catch (_err) {
+      // Private mode: the tab lasts for this page only.
+    }
+  }
+
+  function cbWireTabs() {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll(".cb-tab[data-cb-tab]"));
+    if (tabs.length === 0) return;
+    tabs.forEach(function (tab, index) {
+      tab.addEventListener("click", function () {
+        cbSelectTab(tab.getAttribute("data-cb-tab"), false);
+      });
+      tab.addEventListener("keydown", function (event) {
+        var next = -1;
+        if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = tabs.length - 1;
+        if (next < 0) return;
+        event.preventDefault();
+        cbSelectTab(tabs[next].getAttribute("data-cb-tab"), true);
+      });
+    });
+    var saved = "";
+    try {
+      saved = window.localStorage.getItem(CB_TAB_KEY) || "";
+    } catch (_err) {
+      saved = "";
+    }
+    cbSelectTab(saved || "host", false);
+  }
+
   function wireCardBridgePanel() {
+    cbWireTabs();
     ["cb-status-summary", "cb-rig-note"].forEach(function (id) {
       var region = $(id);
       if (!region) return;
@@ -3789,11 +3966,59 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  // Background polls (health, readers, Remote Lab sessions, plugin pills)
+  // run at their own rate while the window has focus, once per
+  // BACKGROUND_POLL_UNFOCUSED_MS while it is shown without focus, and not
+  // at all while the page is hidden. A window on a workspace that is not
+  // displayed still reports itself visible, so focus is the signal that
+  // somebody is looking; the focus event runs each poll again at once.
+  var BACKGROUND_POLL_UNFOCUSED_MS = 30000;
+  var backgroundPollLastRun = {};
+
+  function backgroundPollDue(key) {
+    if (document.hidden) return false;
+    var now = Date.now();
+    var focused = typeof document.hasFocus !== "function" || document.hasFocus();
+    if (!focused && now - (backgroundPollLastRun[key] || 0) < BACKGROUND_POLL_UNFOCUSED_MS) {
+      return false;
+    }
+    backgroundPollLastRun[key] = now;
+    return true;
+  }
+
   function scheduleHealthPoll() {
     setInterval(function () {
-      if (document.hidden) return;
+      if (!backgroundPollDue("health")) return;
       loadHealth();
     }, 10000);
+    window.addEventListener("focus", function () {
+      if (backgroundPollDue("health")) loadHealth();
+    });
+  }
+
+  // QtWebEngine 6.11.1 does not collect renderer garbage on its own: an
+  // idle window grows by what its polls allocate until it is closed
+  // (upstream_patches/qt-qtwebengine-renderer-gc). The desktop window
+  // starts V8 with --expose-gc and the page asks for a collection once a
+  // minute. Another engine has no window.gc and collects by itself.
+  var ENGINE_COLLECTION_INTERVAL_MS = 60000;
+
+  function scheduleEngineCollection() {
+    if (typeof window.gc !== "function") {
+      if (String(navigator.userAgent || "").indexOf("QtWebEngine/") !== -1) {
+        logBus.emit({
+          level: "warn",
+          source: "gui",
+          message: "The window's engine does not expose its garbage collector "
+            + "(--js-flags lacks --expose-gc); its memory grows until the window is closed.",
+        });
+      }
+      return false;
+    }
+    setInterval(function () {
+      try { window.gc(); } catch (_err) { /* a collection that fails is retried next minute */ }
+    }, ENGINE_COLLECTION_INTERVAL_MS);
+    return true;
   }
 
   // Coalesce a burst of resize events into one callback per frame so

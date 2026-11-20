@@ -22,9 +22,10 @@ import os
 import re
 import sys
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 from yggdrasim_common.apdu_chunking import plan_oversized_command
+from yggdrasim_common.batch_outcome import BatchOutcome
 from yggdrasim_common.command_log import run_with_command_log
 from yggdrasim_common.process_debug import is_global_debug_enabled
 from yggdrasim_common.quit_control import quit_all
@@ -122,35 +123,63 @@ class SmartDecoder:
             pass
         return current_fid, last_le
 
+    # INS of the commands whose P3 is always Le, which TS 102 226 v19 §5.1.1
+    # allows once in a command string, as the last command.
+    LAST_ONLY_COMMANDS = {0xB0: "READ BINARY", 0xB2: "READ RECORD", 0xC0: "GET RESPONSE"}
+
+    @classmethod
+    def compact_commands(cls, payload_hex: str) -> list[bytes] | None:
+        """Split a compact command string into its commands; None when it does not divide.
+
+        TS 102 226 v19 §5.1.1: every command is a T=0 TPDU, CLA INS P1 P2 P3
+        and P3 data octets, except that P3 is Le for a case 2 command or a
+        GET RESPONSE; a P3 with nothing behind it is read as Le too.
+        """
+        try:
+            raw = Utils.to_bytes(payload_hex)
+        except ValueError:
+            return None
+        commands: list[bytes] = []
+        offset = 0
+        while offset < len(raw):
+            end = offset + 5
+            if end > len(raw):
+                return None
+            if raw[offset + 1] not in cls.LAST_ONLY_COMMANDS and end < len(raw):
+                end += raw[offset + 4]
+            if end > len(raw):
+                return None
+            commands.append(raw[offset:end])
+            offset = end
+        if len(commands) == 0:
+            return None
+        return commands
+
+    @staticmethod
+    def last_reply(por_info) -> tuple[str, str] | None:
+        """Return ``(data, sw)`` of the last command a successful PoR reports, else None."""
+        if not isinstance(por_info, dict) or not por_info.get("valid"):
+            return None
+        if por_info.get("status_code") != "00":
+            return None
+        command_sw = str(por_info.get("command_sw") or "").strip().upper()
+        if len(command_sw) != 4:
+            return None
+        return str(por_info.get("command_response") or "").strip().upper(), command_sw
+
     @staticmethod
     def _extract_command_payload(le, por_hex, por_info=None):
+        if isinstance(por_info, dict):
+            # TS 102 226 v19 table 5.1 puts the status of the last command
+            # ahead of its data, so command_response is that data alone,
+            # however much a P3 of '00' drew (§5.1.1).
+            reply = SmartDecoder.last_reply(por_info)
+            if reply is None or reply[1] != "9000":
+                return ""
+            return reply[0]
+
         if le <= 0:
             return ""
-        if isinstance(por_info, dict):
-            if not por_info.get("valid"):
-                return ""
-            if por_info.get("status_code") != "00":
-                return ""
-            command_response = (
-                str(por_info.get("command_response") or "").strip().upper()
-            )
-            if len(command_response) == 0:
-                return ""
-            command_sw = por_info.get("command_sw")
-            response_body = command_response
-            if command_sw is not None:
-                sw_text = str(command_sw or "").strip().upper()
-                if sw_text != "9000":
-                    return ""
-                if response_body.endswith(sw_text):
-                    response_body = response_body[: -len(sw_text)]
-            elif int(por_info.get("command_count") or 0) == 1:
-                return ""
-            needed = le * 2
-            if len(response_body) < needed:
-                return ""
-            return response_body[-needed:]
-
         if por_hex.strip().upper().startswith("D0"):
             return ""
         if len(por_hex) >= (le * 2):
@@ -158,18 +187,52 @@ class SmartDecoder:
         return ""
 
     def try_decode(self, fid, le, por_hex, por_info=None):
-        """Attempt to decode a successful PoR command payload and print a summary."""
-        if not SCP03_AVAIL or not por_hex:
+        """Decode the data the last command of a successful PoR returned, and print it.
+
+        An EF read after a SELECT goes through the SCP03 content decoders;
+        other data through the context decoder, which names GlobalPlatform
+        registry entries, FCP templates and other BER-TLV objects.
+        """
+        if not por_hex:
             return
         payload = self._extract_command_payload(le, por_hex, por_info)
 
-        if fid and payload:
+        if SCP03_AVAIL and fid and payload:
             fid_name = self.fid_lookup.get(fid, fid)
             decoded = ContentDecoder.decode(fid, payload)
             if decoded:
                 print(f"{Colors.CYAN}--- Decoded ({fid_name}) ---{Colors.ENDC}")
                 for line in decoded.strip().split("\n"):
                     print(f"    {Colors.GREEN}{line}{Colors.ENDC}")
+                return
+        self._print_context_decode(por_info)
+
+    @classmethod
+    def _print_context_decode(cls, por_info) -> None:
+        reply = cls.last_reply(por_info)
+        if reply is None:
+            return
+        data, sw = reply
+        # Data beside an error status is not a response; beside a warning
+        # it is, e.g. the entries before a GET STATUS '63 10' (GPC v2.4
+        # §11.4.3.2).
+        if len(data) == 0 or sw[:2] not in ("90", "62", "63"):
+            return
+        try:
+            from Tools.Asn1TlvDecode.context import decode_context_text
+        except ImportError:
+            return
+        try:
+            result = decode_context_text(data + sw, hint="response")
+        except Exception:  # noqa: BLE001 -- the reply line already shows the raw hex
+            return
+        lines = str(result.get("notation") or "").splitlines()
+        if len(lines) < 2:
+            return
+        label = (result.get("context") or {}).get("label") or "response"
+        print(f"{Colors.CYAN}--- Decoded ({label}) ---{Colors.ENDC}")
+        for line in lines[1:]:
+            print(f"  {Colors.GREEN}{line}{Colors.ENDC}")
 
 
 class OtaShell:
@@ -302,11 +365,32 @@ class OtaShell:
             # rejects the variable still completes on Tab.
             pass
 
+    def _sets_key_material(self, command_line: str) -> bool:
+        """Report whether a line is ``set kic|kid <value>``, in any spelling the shell accepts."""
+        words = str(command_line or "").split()
+        if len(words) < 3 or words[0].lower() != "set":
+            return False
+        setting = self.SET_KEY_ALIASES.get(words[1].lower(), words[1].lower())
+        return setting in self.KEY_MATERIAL_SETTINGS
+
+    def _scrub_key_material_history(self) -> None:
+        """Drop the lines that carry a key from the in-memory readline history."""
+        index = readline.get_current_history_length()
+        while index > 0:
+            # get_history_item is 1-based, remove_history_item 0-based.
+            if self._sets_key_material(readline.get_history_item(index) or ""):
+                readline.remove_history_item(index - 1)
+            index -= 1
+
     def _save_history(self) -> None:
         if readline is None:
             return
         try:
+            # Scrubbing the whole history also clears the key lines an
+            # earlier release wrote, since the file is read back at start.
+            self._scrub_key_material_history()
             readline.write_history_file(self.history_file)
+            os.chmod(self.history_file, 0o600)
         except OSError:
             pass
 
@@ -496,15 +580,29 @@ class OtaShell:
             except Exception as e:
                 print(f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
 
-    def run_commands(self, cmd_line: str) -> None:
-        """Execute a semicolon-delimited list of CLI commands non-interactively."""
+    def run_commands(self, cmd_line: str) -> bool:
+        """Execute a semicolon-delimited list of CLI commands non-interactively.
+
+        Returns False when a command failed: an OTA delivery that failed or a
+        refused line (``last_command_ok``), a ``[-]`` line or a ``[!]`` line
+        other than a warning, an exception.
+        """
+        outcome = BatchOutcome()
         for raw_command in str(cmd_line or "").split(";"):
             command_text = str(raw_command or "").strip()
             if len(command_text) == 0:
                 continue
-            keep_running = self._process_line(command_text)
+            with outcome.command(command_text, verdict=self._batch_verdict):
+                keep_running = self._process_line(command_text)
             if not keep_running:
                 break
+        return outcome.ok
+
+    def _batch_verdict(self) -> Optional[bool]:
+        """A failed delivery decides; otherwise the lines the command printed do."""
+        if getattr(self, "last_command_ok", True) is False:
+            return False
+        return None
 
     def _process_line(self, line: str) -> bool:
         """Run one OTA shell line; one carrying ``--log <file>`` runs under a command log."""
@@ -559,7 +657,7 @@ class OtaShell:
         elif all(c in "0123456789ABCDEFabcdef " for c in line):
             self.do_ota(line)
         else:
-            print(f"{Colors.FAIL}Unknown command or invalid hex.{Colors.ENDC}")
+            print(f"{Colors.FAIL}[!] Unknown command or invalid hex.{Colors.ENDC}")
         return True
 
     def do_history(self, *args):
@@ -573,7 +671,7 @@ class OtaShell:
         print(f"{Colors.CYAN}--- Configuration ---{Colors.ENDC}")
         if len(self.current_iccid) > 0:
             print(f"{'iccid':<14}: {self.current_iccid}")
-        hidden = ["header", "cla", "sender"]
+        hidden = ["header", "cla"]
         # KIc/KID print in full; describe_keyset on the *_indicator fields
         # names the algorithm and keyset the two keys belong to.
         indicator_keys = ["kic_indicator", "kid_indicator"]
@@ -595,6 +693,10 @@ class OtaShell:
         "key_enc": "kic",
         "key_mac": "kid",
     }
+
+    #: Settings whose value is a key. A ``set`` line naming one is kept out
+    #: of the readline history file.
+    KEY_MATERIAL_SETTINGS = frozenset({"kic", "kid"})
 
     def do_set(self, *args):
         """Set a runtime configuration key-value pair (persisted in the OTA config)."""
@@ -721,13 +823,13 @@ class OtaShell:
                 self._plan_apdu_list_for_transport(plan), verbose=verbose
             )
             self.last_command_ok = bool(result.get("delivered"))
-            self._print_result(result)
-            por = result.get("por")
             payload_for_decode = getattr(
                 plan,
                 "payload_hex",
                 payload_override or self.config.get("payload") or "",
             )
+            self._print_result(result, payload_hex=payload_for_decode, verbose=verbose)
+            por = result.get("por")
             if por and payload_for_decode:
                 fid, le = self.decoder.sniff_context(payload_for_decode)
                 self.decoder.try_decode(fid, le, por, result.get("por_decoded"))
@@ -807,17 +909,18 @@ class OtaShell:
                 self._plan_apdu_list_for_transport(plan), verbose=verbose
             )
             self.last_command_ok = bool(result.get("delivered"))
-            self._print_result(result)
+            self._print_result(result, payload_hex=raw_apdu, verbose=verbose)
 
             por = result.get("por")
             if por:
-                self.decoder.try_decode(fid, le, por, result.get("por_decoded"))
+                por_info = result.get("por_decoded")
+                self.decoder.try_decode(fid, le, por, por_info)
 
-                if len(por) >= 4:
-                    sw_in_por = por[-4:]
-                    if sw_in_por.startswith("6C"):
-                        correct_le = sw_in_por[2:]
-                        self._handle_wrong_length(raw_apdu, correct_le)
+                # The status of the last command, not the tail of the
+                # carrier: a reply with data ends in the data.
+                reply = SmartDecoder.last_reply(por_info)
+                if reply is not None and reply[1].startswith("6C"):
+                    self._handle_wrong_length(raw_apdu, reply[1][2:])
 
         except Exception as e:
             self.last_command_ok = False
@@ -885,7 +988,14 @@ class OtaShell:
             return s[:-2] + new_le
         return s + new_le
 
-    def _print_result(self, result):
+    def _print_result(self, result, payload_hex: str = "", verbose: bool = False):
+        """Print the card's answer to an OTA send.
+
+        A PoR that reports its last command prints that command's data and
+        status, as the SCP03 shell prints a response; the SEND SHORT MESSAGE
+        or ENVELOPE response that carried it is in the verbose trace. Any
+        other PoR prints raw, beside the ENVELOPE status.
+        """
         sw = result.get("sw")
         por = result.get("por")
         error = result.get("error")
@@ -897,27 +1007,59 @@ class OtaShell:
                     f"{Colors.CYAN}[SMS]{Colors.ENDC} Concatenated sequence with {segment_count} segments."
                 )
         if por:
-            print(f"{Colors.BLUE}[<--]{Colors.ENDC} {por} {sw}")
-            self._print_por_decoded(result.get("por_decoded"))
+            por_info = result.get("por_decoded")
+            reply = SmartDecoder.last_reply(por_info)
+            if reply is not None:
+                text = " ".join(part for part in reply if part)
+                print(f"{Colors.BLUE}[<--]{Colors.ENDC} {text}")
+            else:
+                print(f"{Colors.BLUE}[<--]{Colors.ENDC} {por} {sw}")
+            self._print_por_decoded(por_info, payload_hex=payload_hex, verbose=verbose)
         else:
             print(f"{Colors.BLUE}[<--]{Colors.ENDC} {sw}")
+        for events in result.get("answered_event_lists") or []:
+            listed = " ".join(events[index : index + 2] for index in range(0, len(events), 2))
+            print(
+                f"{Colors.CYAN}[STK]{Colors.ENDC} SET UP EVENT LIST after the PoR "
+                f"answered OK: {f'events {listed}' if listed else 'no events'}"
+            )
+        pending = result.get("pending_proactive")
+        if pending:
+            print(
+                f"{Colors.WARNING}[STK]{Colors.ENDC} Proactive command after the PoR "
+                f"left unanswered: {pending}"
+            )
         if failed_segment is not None:
             print(f"{Colors.FAIL}[!] Failed at segment {failed_segment}.{Colors.ENDC}")
         if error:
             print(f"{Colors.FAIL}[!] {error}{Colors.ENDC}")
 
-    def _print_por_decoded(self, por_info):
+    def _print_por_decoded(self, por_info, payload_hex: str = "", verbose: bool = False):
+        """Summarise the PoR on a ``[POR]`` line.
+
+        A PoR OK whose last command answered '90 00' after every command ran
+        stays quiet unless *verbose*; the reply line already said it all.
+        """
         if not por_info:
             return
-        if por_info.get("status_code") == "00":
-            command_sw = por_info.get("command_sw")
-            if command_sw is None or str(command_sw).upper() == "9000":
-                return
         if not por_info.get("valid"):
             error = por_info.get("error")
             if error:
                 print(f"{Colors.WARNING}[POR]{Colors.ENDC} decode unavailable: {error}")
             return
+        command_count = por_info.get("command_count")
+        command_sw = str(por_info.get("command_sw") or "").upper()
+        commands = SmartDecoder.compact_commands(payload_hex) if payload_hex else None
+        # The table 5.1 count against what was sent; a string that does not
+        # divide, or a count above it, leaves the total unknown.
+        sent_count = None
+        if commands is not None and command_count is not None:
+            if command_count <= len(commands):
+                sent_count = len(commands)
+        cut_short = sent_count is not None and command_count < sent_count
+        if por_info.get("status_code") == "00" and not verbose and not cut_short:
+            if command_sw in ("", "9000"):
+                return
         status_code = por_info.get("status_code") or "??"
         status_meaning = por_info.get("status_meaning") or "Unknown"
         parts = [
@@ -926,22 +1068,49 @@ class OtaShell:
             f"CNTR {por_info.get('cntr')}",
             f"PCNTR {por_info.get('pcntr')}",
         ]
-        command_count = por_info.get("command_count")
-        if command_count is not None:
+        if sent_count is not None:
+            parts.append(f"commands {command_count} of {sent_count}")
+        elif command_count is not None:
             parts.append(f"commands {command_count}")
-        command_sw = por_info.get("command_sw")
         command_response = por_info.get("command_response")
         if command_sw:
             parts.append(f"response {command_sw}")
         elif command_response:
             parts.append(f"response {command_response}")
+        carrier = por_info.get("por_carrier")
+        if carrier:
+            parts.append(f"via {carrier}")
+        segments = por_info.get("sms_segments")
+        if segments:
+            parts.append(f"{segments} SMS segments")
         fetch_sw = por_info.get("fetch_sw")
         if fetch_sw:
-            parts.append(f"fetch SW {fetch_sw}")
+            if carrier == "ENVELOPE response":
+                parts.append(f"envelope SW {fetch_sw}")
+            else:
+                parts.append(f"fetch SW {fetch_sw}")
         print(
             f"{Colors.CYAN}[POR]{Colors.ENDC} "
             + ", ".join(str(part) for part in parts if part)
         )
+        if command_sw.startswith("61"):
+            # The command session ends with the string (TS 102 226 v19 §4),
+            # so the data cannot be fetched by a later message.
+            print(
+                f"{Colors.WARNING}[POR]{Colors.ENDC} '61 {command_sw[2:]}' leaves the "
+                "response on the card: end the command string with GET RESPONSE "
+                f"00C00000{command_sw[2:]} (TS 102 226 v19 §5.1.1)."
+            )
+        if cut_short and command_count > 0:
+            name = SmartDecoder.LAST_ONLY_COMMANDS.get(commands[command_count - 1][1])
+            if name is not None:
+                skipped = sent_count - command_count
+                after = "the command" if skipped == 1 else f"the {skipped} commands"
+                print(
+                    f"{Colors.WARNING}[POR]{Colors.ENDC} Command {command_count} is a "
+                    f"{name}, which TS 102 226 v19 §5.1.1 allows only as the last "
+                    f"command; {after} sent after it did not run."
+                )
 
     def do_help(self, *args):
         """Print the command reference for the interactive SCP80 CLI."""
@@ -970,6 +1139,7 @@ class OtaShell:
         print("  kid_identifier  - Alias for kid_indicator")
         print("  pid             - SMS TP-PID byte")
         print("  dcs             - SMS TP-DCS byte")
+        print("  sender          - ENVELOPE source device: 82 terminal, 83 network")
         print("  concat_sms      - ON or OFF automatic concatenation")
         print("  tp_ud_max       - Per-segment TP-UD ceiling (8-140)")
 

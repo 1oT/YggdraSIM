@@ -31,6 +31,11 @@ GSMTAP_HDR_LEN_WORDS = 4
 GSMTAP_TYPE_SIM = 0x04
 GSMTAP_SIM_APDU = 0x00
 GSMTAP_SIM_ATR = 0x01
+# libosmocore include/osmocom/core/gsmtap.h (GSMTAP_TYPE_OSMOCORE_LOG) and
+# include/osmocom/core/logging.h (LOGL_NOTICE, LOGL_ERROR).
+GSMTAP_TYPE_OSMOCORE_LOG = 0x10
+GSMTAP_LOG_LEVEL_NOTICE = 5
+GSMTAP_LOG_LEVEL_ERROR = 7
 GSMTAP_UDP_PORT = 4729
 GSMTAP_ARFCN_F_UPLINK = 0x4000
 GSMTAP_COMPAT_NATIVE = "native"
@@ -651,25 +656,79 @@ def build_reset_state_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any
     )
 
 
-def build_gsmtap_packet(payload: bytes, *, subtype: int, uplink: bool = False) -> bytes:
-    """Wrap *payload* in a GSMTAP v2 header of the given *subtype* (GSMTAP §3.1)."""
+def _gsmtap_header(*, gsmtap_type: int, subtype: int, uplink: bool, antenna: int) -> bytes:
     arfcn = GSMTAP_ARFCN_F_UPLINK if uplink else 0
-    header = struct.pack(
+    return struct.pack(
         "!BBBBHbbIBBBB",
         GSMTAP_VERSION,
         GSMTAP_HDR_LEN_WORDS,
-        GSMTAP_TYPE_SIM,
+        gsmtap_type,
         0,
         arfcn,
         0,
         0,
         0,
         subtype,
-        0,
+        int(antenna) & 0xFF,
         0,
         0,
     )
+
+
+def build_gsmtap_packet(
+    payload: bytes, *, subtype: int, uplink: bool = False, antenna: int = 0
+) -> bytes:
+    """Wrap *payload* in a GSMTAP v2 header of the given *subtype* (GSMTAP §3.1).
+
+    ``antenna`` fills ``antenna_nr``. The bridge leaves it 0; the modem-side
+    DIAG mirror (``modem_diag``) sends 1, so one capture holds both views of
+    the same exchanges. Wireshark 4.4 hands SIM and log frames to their
+    sub-dissector before it decodes the GSMTAP header, so ``gsmtap.antenna``
+    stays empty for them; filter on the raw byte, ``udp.payload[13:1] == 01``.
+    """
+    header = _gsmtap_header(
+        gsmtap_type=GSMTAP_TYPE_SIM, subtype=subtype, uplink=uplink, antenna=antenna
+    )
     return header + ensure_bytes(payload)
+
+
+def _fixed_ascii(text: str, size: int) -> bytes:
+    return str(text).encode("ascii", "replace")[: size - 1].ljust(size, b"\x00")
+
+
+def build_gsmtap_log_packet(
+    text: str,
+    *,
+    process: str,
+    subsystem: str,
+    level: int = GSMTAP_LOG_LEVEL_NOTICE,
+    timestamp: float | None = None,
+    antenna: int = 0,
+) -> bytes:
+    """Wrap *text* as a libosmocore log record (GSMTAP type 0x10).
+
+    The record follows ``struct gsmtap_osmocore_log_hdr`` in libosmocore
+    ``include/osmocom/core/gsmtap.h``: seconds and microseconds, a 16-byte
+    process name, the pid, the level, three pad bytes, a 16-byte subsystem
+    and a 32-byte source file name with a line number, then the text.
+    Integers go in network byte order, which is how Wireshark's
+    ``gsmtap_log`` dissector reads them.
+    """
+    stamp = time.time() if timestamp is None else float(timestamp)
+    seconds = int(stamp)
+    microseconds = int(round((stamp - seconds) * 1_000_000)) % 1_000_000
+    log_header = (
+        struct.pack("!II", seconds & 0xFFFFFFFF, microseconds)
+        + _fixed_ascii(process, 16)
+        + struct.pack("!IB3x", os.getpid() & 0xFFFFFFFF, int(level) & 0xFF)
+        + _fixed_ascii(subsystem, 16)
+        + _fixed_ascii("", 32)
+        + struct.pack("!I", 0)
+    )
+    header = _gsmtap_header(
+        gsmtap_type=GSMTAP_TYPE_OSMOCORE_LOG, subtype=0, uplink=False, antenna=antenna
+    )
+    return header + log_header + str(text).encode("utf-8", "replace") + b"\x00"
 
 
 def build_simtrace_apdu_payload(
@@ -898,6 +957,10 @@ class GsmtapTap:
     _socket: socket.socket | None = field(default=None, init=False, repr=False)
     capture_path: str = ""
     capture_mirror_fifo_path: str = ""
+    antenna: int = 0
+    # Optional local address for the UDP socket; the modem-side mirror sends
+    # from 127.0.0.2 so its frames stand apart in Wireshark's Source column.
+    source_host: str = ""
     _capture_writer: GsmtapPcapWriter | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -917,6 +980,14 @@ class GsmtapTap:
             )
         if self.enabled:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            source_host = str(self.source_host or "").strip()
+            if len(source_host) > 0:
+                try:
+                    self._socket.bind((source_host, 0))
+                except OSError:
+                    self._socket.close()
+                    self._socket = None
+                    raise
 
     def close(self) -> None:
         """Flush pending writes, close the capture writer, and tear down the IPA socket."""
@@ -937,7 +1008,9 @@ class GsmtapTap:
             capture_writer.write_gsmtap_packet(packet)
 
     def send_apdu(self, payload: bytes, *, uplink: bool) -> None:
-        packet = build_gsmtap_packet(payload, subtype=GSMTAP_SIM_APDU, uplink=uplink)
+        packet = build_gsmtap_packet(
+            payload, subtype=GSMTAP_SIM_APDU, uplink=uplink, antenna=self.antenna
+        )
         self._send_packet(packet)
 
     def mirror_exchange(self, command: bytes, response: bytes) -> None:
@@ -946,11 +1019,32 @@ class GsmtapTap:
             build_simtrace_apdu_payload(command, response),
             subtype=GSMTAP_SIM_APDU,
             uplink=True,
+            antenna=self.antenna,
         )
         self._send_packet(packet)
 
     def send_atr(self, payload: bytes) -> None:
         if self.compat_mode == GSMTAP_COMPAT_WIRESHARK44:
             return
-        packet = build_gsmtap_packet(payload, subtype=GSMTAP_SIM_ATR, uplink=False)
+        packet = build_gsmtap_packet(
+            payload, subtype=GSMTAP_SIM_ATR, uplink=False, antenna=self.antenna
+        )
+        self._send_packet(packet)
+
+    def send_log(
+        self,
+        text: str,
+        *,
+        process: str,
+        subsystem: str,
+        level: int = GSMTAP_LOG_LEVEL_NOTICE,
+    ) -> None:
+        """Send *text* as a libosmocore log record on this tap's antenna."""
+        packet = build_gsmtap_log_packet(
+            text,
+            process=process,
+            subsystem=subsystem,
+            level=level,
+            antenna=self.antenna,
+        )
         self._send_packet(packet)

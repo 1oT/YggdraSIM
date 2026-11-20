@@ -13,8 +13,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CSS_ROOT = ROOT / "gui_frontend" / "src" / "css"
 TOKEN_ROOT = CSS_ROOT / "tokens"
+SKIN_ROOT = CSS_ROOT / "skins"
+
+# Skins carry the non-colour half of the design (typefaces, type scale,
+# shape, separation, chrome); themes carry the palette. Every skin renders
+# in every theme. ``fonts.css`` holds the @font-face rules the skins name.
+SKINS = {"bench", "classic"}
+DEFAULT_SKIN = "bench"
 
 THEMES = {
+    "bench-dark",
+    "bench-light",
     "catppuccin-frappe",
     "catppuccin-latte",
     "catppuccin-macchiato",
@@ -372,7 +381,6 @@ BARE_COLOUR_BUDGET = {
     "views/saip/workbench-shell.css": 6,
     "views/scp03-bulk.css": 1,
     "views/workbench-context-menu.css": 1,
-    "views/workbench-ribbon.css": 1,
 }
 
 _VAR_FALLBACK = re.compile(
@@ -440,6 +448,7 @@ def _tokens_defined_everywhere() -> set[str]:
     base = set(
         re.findall(r"--([\w-]+)\s*:", (TOKEN_ROOT / "base.css").read_text(encoding="utf-8"))
     )
+    base |= set.intersection(*(set(_skin_tokens(skin)) for skin in SKINS))
     per_theme = [
         set(re.findall(r"--([\w-]+)\s*:", path.read_text(encoding="utf-8")))
         for path in TOKEN_ROOT.glob("*.css")
@@ -488,3 +497,79 @@ def test_text_colour_never_hardcodes_a_literal_outside_the_token_files() -> None
             if re.search(r"#[0-9a-fA-F]{3,8}\b", stripped):
                 offenders.append(f"{relative}:{number}: {stripped}")
     assert offenders == [], offenders
+
+
+def _skin_tokens(skin: str) -> dict[str, str]:
+    css = re.sub(
+        r"/\*.*?\*/",
+        "",
+        (SKIN_ROOT / f"{skin}.css").read_text(encoding="utf-8"),
+        flags=re.DOTALL,
+    )
+    return dict(re.findall(r"--([\w-]+)\s*:\s*([^;]+);", css))
+
+
+def test_every_skin_file_is_a_registered_skin() -> None:
+    present = {path.stem for path in SKIN_ROOT.glob("*.css")}
+    assert present == SKINS | {"fonts"}
+
+
+def test_skin_files_declare_custom_properties_only() -> None:
+    """A skin is a token file: one root rule, custom properties, nothing else.
+
+    Components and views read the tokens; a selector in a skin file would let
+    one skin restyle a component behind the others' backs.
+    """
+    for skin in sorted(SKINS):
+        css = re.sub(
+            r"/\*.*?\*/",
+            "",
+            (SKIN_ROOT / f"{skin}.css").read_text(encoding="utf-8"),
+            flags=re.DOTALL,
+        )
+        rules = re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+        assert len(rules) == 1, f"{skin}: expected one rule, found {len(rules)}"
+        selector, body = rules[0]
+        expected = f'html[data-skin="{skin}"]'
+        if skin == DEFAULT_SKIN:
+            expected = f":root,\n{expected}"
+        assert selector.strip() == expected, f"{skin}: selector {selector.strip()!r}"
+        for declaration in filter(None, (part.strip() for part in body.split(";"))):
+            assert declaration.startswith("--"), f"{skin}: {declaration[:60]!r}"
+
+
+def test_skins_declare_the_same_token_set() -> None:
+    sets = {skin: set(_skin_tokens(skin)) for skin in SKINS}
+    reference = sets[DEFAULT_SKIN]
+    for skin, names in sorted(sets.items()):
+        assert names == reference, (
+            f"{skin}: missing {sorted(reference - names)}, extra {sorted(names - reference)}"
+        )
+
+
+def test_skins_are_registered_everywhere_they_are_named() -> None:
+    src = ROOT / "gui_frontend" / "src"
+    init = (src / "theme-init.js").read_text(encoding="utf-8")
+    block = re.search(r"var VALID_SKINS = \{([^}]*)\}", init)
+    assert block is not None
+    assert set(re.findall(r'"([\w-]+)": 1', block.group(1))) == SKINS
+    assert f'"{DEFAULT_SKIN}"' in init.split("VALID_SKINS", 1)[1]
+
+    core = (src / "js" / "core.js").read_text(encoding="utf-8")
+    fallback = re.search(r"var VALID_SKINS = window\.YGG_VALID_SKINS \|\| \{([^}]*)\}", core)
+    assert fallback is not None
+    assert set(re.findall(r'"([\w-]+)": 1', fallback.group(1))) == SKINS
+
+    html = (src / "index.html").read_text(encoding="utf-8")
+    picker = re.search(r'<select id="skin-select"[^>]*>(.*?)</select>', html, re.DOTALL)
+    assert picker is not None
+    assert set(re.findall(r'<option value="([\w-]+)"', picker.group(1))) == SKINS
+
+    order = (CSS_ROOT / ".css_order").read_text(encoding="utf-8").split()
+    for skin in SKINS | {"fonts"}:
+        assert f"skins/{skin}.css" in order
+    # Skins follow the themes (a skin token may read a palette token) and
+    # precede the Matrix override, which swaps the skin's typefaces.
+    last_theme = max(order.index(f"tokens/{theme}.css") for theme in THEMES)
+    first_skin = min(order.index(f"skins/{skin}.css") for skin in SKINS)
+    assert last_theme < first_skin < order.index("tokens/matrix-font-override.css")

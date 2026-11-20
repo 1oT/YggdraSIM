@@ -215,6 +215,7 @@
       refresh.addEventListener("click", function () { pcPollSoon(); });
     }
     pcWireForms();
+    window.addEventListener("focus", function () { pcSchedulePills(0); });
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) return;
       pcSchedulePills(0);

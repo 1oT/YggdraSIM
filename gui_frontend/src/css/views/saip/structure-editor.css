@@ -359,7 +359,7 @@
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--border-strong);
 }
 

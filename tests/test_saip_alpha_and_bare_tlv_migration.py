@@ -22,7 +22,7 @@ per-tag ``value_decoders`` map so spec-typed fields surface the right
 primitive shape (and the rest stays raw):
 
 * EF.AAS (TS 31.102 §4.4.2.13) -- tag 0x80 = Annex A alpha string.
-* EF.REID (TS 102 310 §5.2.2)  -- tag 0x80 = UTF-8 identity.
+* EF.REID (TS 102 310 v9.1 §7.6, EFReID) -- tag 0x80 = UTF-8 identity.
 * EF.PBR  (TS 31.102 §4.4.2.1) -- tags 0xC0..0xCB = 2-byte FID refs.
 * EF.ARR security condition     -- tags 0x83 / 0x95 = small integers.
 * 5G ProSe TLV EFs              -- tags 85/92/94/95 = integer timers.

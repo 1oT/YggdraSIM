@@ -383,6 +383,21 @@ class MainWrapperGuideTests(unittest.TestCase):
 
         mocked_show_doc.assert_called_once_with("YggdraSIM README", "README.md")
 
+    def test_show_guides_routes_user_manual_chapters(self) -> None:
+        with mock.patch.object(main_wrapper, "clear_screen"):
+            with mock.patch.object(main_wrapper, "_show_text_document") as mocked_show_doc:
+                with mock.patch("builtins.input", side_effect=["U", "UG", "uc", "Q"]):
+                    main_wrapper.show_guides()
+
+        shown = [call.args[1] for call in mocked_show_doc.call_args_list]
+        self.assertEqual(
+            shown,
+            ["guides/USER_MANUAL.md", "guides/USER_MANUAL_GUI.md", "guides/USER_MANUAL_CLI.md"],
+        )
+        repo = Path(__file__).resolve().parents[1]
+        for relative in shown:
+            self.assertTrue((repo / relative).is_file(), relative)
+
     def test_show_guides_invalid_choice_reprompts_until_quit(self) -> None:
         with mock.patch.object(main_wrapper, "clear_screen"):
             with mock.patch("builtins.input", side_effect=["bad", "", "Q"]):

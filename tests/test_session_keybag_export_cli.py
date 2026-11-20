@@ -100,6 +100,7 @@ class _Scp03ShellExportKeybagTests(unittest.TestCase):
             do_dump_fs=lambda *args, **kwargs: None,
             _handle_validate=lambda *args, **kwargs: None,
             _handle_derive_opc=lambda *args, **kwargs: None,
+            _handle_derive_topc=lambda *args, **kwargs: None,
             show_config=lambda *args, **kwargs: None,
             list_aids=lambda *args, **kwargs: None,
             _set_aid_alias=lambda *args, **kwargs: None,

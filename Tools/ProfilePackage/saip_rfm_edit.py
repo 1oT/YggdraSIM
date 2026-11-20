@@ -105,7 +105,7 @@ def locate_rfm_sections(decoded_document: dict[str, Any]) -> list[tuple[str, dic
 
 
 def add_tar(rfm: dict[str, Any], tar_hex: str) -> str:
-    """Append a TAR value (ETSI TS 101 220 §6.2, 3-byte identifier).
+    """Append a TAR value (ETSI TS 101 220 v19 §6, 3-byte identifier).
 
     Duplicate TARs are rejected: SMS OTA dispatch matches the first
     entry and an extra row would be dead weight that confuses audits.

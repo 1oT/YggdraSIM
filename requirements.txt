@@ -23,7 +23,7 @@ pytlv
 
 # ASN.1 and profile-package handling
 asn1crypto
-asn1tools @ git+https://github.com/hampushellsberg-dev/asn1tools-loop-fix.git@46b7dc2fed57f086c5aed6b22f5a34d76f9ecc21
+asn1tools @ git+https://github.com/hampushellsberg-dev/asn1tools-loop-fix.git@2a06a6dc92856d5bc0757acd5f0701cf050099dc
 jsonpath-ng
 construct>=2.10.70
 bidict
@@ -40,8 +40,9 @@ requests>=2.31,<3.0
 # lineage. The wire-format helpers stay YggdraSIM-specific --
 # tests/test_scp03_pysim_parity.py and tests/test_scp80_pysim_parity.py
 # pin the deliberate divergences. Upstream does not publish wheels;
-# the install pulls the canonical tree from GitHub.
-pySim @ git+https://github.com/osmocom/pysim.git@c50f4b4a0222a964710ce3124a66fe13c804be65
+# the install pulls hampushellsberg-dev/pysim from GitHub: osmocom pySim
+# master with the upstream_patches/osmocom-pysim-* fixes on top.
+pySim @ git+https://github.com/hampushellsberg-dev/pysim.git@3322531ecb506956dbbb13bb9122152fac7db47e
 
 # Interactive TUI
 textual>=0.47.0

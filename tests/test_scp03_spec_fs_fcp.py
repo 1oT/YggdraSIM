@@ -405,15 +405,14 @@ class PysimParityTests(unittest.TestCase):
         "no_info_given": "Tree",
     }
     FILE_TYPES = {"working_ef": "EF", "internal_ef": "EF", "df": "DF"}
-    # TS 102 221 v18.4 §11.1.1.4.9 table 11.7b, in pySim's spelling. The
-    # termination state is absent on purpose: no pySim name maps to it, which
-    # is the upstream gap pinned by the test at the end of this class.
+    # TS 102 221 v18.4 §11.1.1.4.9 table 11.7b, in pySim's spelling.
     LIFE_CYCLE_NAMES = {
         "no_information": "No information given",
         "creation": "Creation state",
         "initialization": "Initialisation state",
         "operational_activated": "Operational state - activated",
         "operational_deactivated": "Operational state - deactivated",
+        "termination": "Termination state",
     }
 
     @staticmethod
@@ -450,12 +449,7 @@ class PysimParityTests(unittest.TestCase):
         if "life_cycle_status_integer" in theirs:
             state = theirs["life_cycle_status_integer"]
             expected = self.LIFE_CYCLE_NAMES.get(state)
-            self.assertIsNotNone(
-                expected,
-                f"no name mapped for pySim's {state!r}; if this is "
-                "'termination', pySim has been fixed -- see "
-                "upstream_patches/osmocom-pysim-lcsi-termination/",
-            )
+            self.assertIsNotNone(expected, f"no name mapped for pySim's {state!r}")
             self.assertEqual(ours["lcs_name"], expected)
         if "file_identifier" in theirs:
             self.assertEqual(ours["fid"], theirs["file_identifier"].hex().upper())
@@ -496,37 +490,15 @@ class PysimParityTests(unittest.TestCase):
             with self.subTest(lcsi=f"{value:02X}"):
                 self._check(template)
 
-    def test_pysim_termination_state_is_a_known_upstream_gap(self) -> None:
-        """pySim reports the termination state as an operational one.
+    def test_termination_state_matches_pysim(self) -> None:
+        """Table 11.7b's '0C'..'0F' are the termination state on both sides.
 
-        ``LifeCycleStatusInteger._from_bytes`` tests the operational states
-        before the termination state and looks for its bits in b8 b7 instead
-        of b4 b3, so table 11.7b's '0C'..'0F' never decode as `termination`.
-        The evidence, the patch and the repro are in
-        ``upstream_patches/osmocom-pysim-lcsi-termination/``.
-
-        This test is the compensation for the pin, and it retires itself: the
-        day the pinned pySim carries the fix it fails and says so.
+        Upstream pySim reads them as operational states; the pinned pySim
+        carries ``upstream_patches/osmocom-pysim-lcsi-termination/``.
         """
         for value in (0x0C, 0x0D, 0x0E, 0x0F):
-            template = fcp(descriptor(0x41), FID_IMSI, tlv(0x8A, bytes([value])), ARR_REF_2, tlv(0x80, b"\x00\x09"))
-            theirs = self._flatten(template)["life_cycle_status_integer"]
-            if theirs == "termination":
-                self.fail(
-                    f"pySim now decodes LCSI '{value:02X}' as the termination "
-                    "state. Delete upstream_patches/"
-                    "osmocom-pysim-lcsi-termination/, add 'termination' to "
-                    "PysimParityTests.LIFE_CYCLE_NAMES and drop this test."
-                )
-            # The upstream answer for these four values, wrong and pinned.
-            self.assertIn(
-                theirs,
-                ("operational_activated", "operational_deactivated"),
-                f"unexpected upstream decoding of LCSI '{value:02X}'",
-            )
-            # YggdraSIM's own decoder reads the table correctly, which is why
-            # no product-code compensation is needed.
-            self.assertEqual(decode(template)["lcs_name"], "Termination state")
+            with self.subTest(lcsi=f"{value:02X}"):
+                self._check(fcp(descriptor(0x41), FID_IMSI, tlv(0x8A, bytes([value])), ARR_REF_2, tlv(0x80, b"\x00\x09")))
 
 
 class BinaryCommandTests(unittest.TestCase):

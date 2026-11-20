@@ -13,7 +13,13 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_APDU_TIMEOUT_MS = 5000
+# An eUICC holds some commands for seconds (AuthenticateServer inside a
+# TERMINAL RESPONSE took 10.5 s on a lab card) while the SIMtrace2 board keeps
+# the modem waiting with NULL procedure bytes, which "provide additional work
+# waiting time" (ETSI TS 102 221 V18.4.0 clause 7.2.2.3.1, table 7.1). A
+# timeout here tears the whole bridge session down and the modem sees a reset,
+# so the limit only has to catch a reader that stopped answering.
+DEFAULT_APDU_TIMEOUT_MS = 30000
 APDU_TIMEOUT_ENV = "YGGDRASIM_HIL_APDU_TIMEOUT_MS"
 PCSC_SHARE_MODE_EXCLUSIVE = "exclusive"
 PCSC_SHARE_MODE_SHARED = "shared"
@@ -95,6 +101,21 @@ class PcscCardChannel:
     @property
     def reader_label(self) -> str:
         return self._reader_label
+
+    def selected_reader_name(self) -> str:
+        """The PC/SC name of the reader :meth:`connect` opens; enumerates, never touches the card."""
+        readers, _, _, _, _, _, error_type = _load_smartcard_runtime()
+        from smartcard.pcsc.PCSCExceptions import BaseSCardException
+
+        try:
+            available_readers = list(readers())
+        except BaseSCardException as error:
+            # No resource manager to ask (SCARD_E_NO_SERVICE on a host without
+            # pcscd): for the caller that is "no reader", not a crash.
+            raise error_type(f"PC/SC is not available: {error}") from error
+        if len(available_readers) == 0:
+            raise error_type("No PC/SC readers are available.")
+        return str(self._select_reader(available_readers))
 
     def connect(self) -> None:
         """Connect to the PCSC reader identified by *reader_name* and return True on success."""

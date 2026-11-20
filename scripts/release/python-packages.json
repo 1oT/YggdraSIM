@@ -33,6 +33,7 @@
     "SCP80",
     "SCP11",
     "SCP11.eim_local",
+    "SCP11.eim_local.engine",
     "SCP11.live",
     "SCP11.local_access",
     "SCP11.relay",

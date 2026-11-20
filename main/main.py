@@ -1307,6 +1307,8 @@ def _build_hil_bridge_service_options(
         uhubctl_binary=uhubctl_binary,
         uhubctl_location=uhubctl_location,
         uhubctl_port=uhubctl_port,
+        modem_diag_device=hil_bridge_runtime.resolve_modem_diag_device(),
+        apdu_timeout_ms=hil_bridge_runtime.resolve_apdu_timeout_service_setting(),
         documentation_path=documentation_path,
         environment_overrides=tuple(environment_overrides),
     )
@@ -1370,6 +1372,41 @@ def _hil_bridge_apdu_dissector_args() -> list:
         return []
 
 
+def _hil_bridge_wireshark_profile_args() -> list:
+    """Return ``-C <profile>`` and its style sheet for the HIL filter profile, or nothing.
+
+    The profile carries the SIM-side / modem-side filter buttons, coloring
+    rules and the Qt style sheet for the rest of the window. Any failure to
+    prepare it leaves Wireshark to start as it did before: on its last-used
+    profile.
+    """
+    if hil_bridge_runtime is None:
+        return []
+    try:
+        from Tools.HilBridge.wireshark_profile import (
+            ensure_hil_wireshark_profile,
+            hil_wireshark_stylesheet_args,
+        )
+
+        profile = ensure_hil_wireshark_profile(hil_bridge_runtime.resolve_wireshark_profile())
+        stylesheet = hil_wireshark_stylesheet_args(profile)
+    except Exception:  # noqa: BLE001 - a filter profile must never stop Wireshark from starting
+        return []
+    if len(profile) == 0:
+        return []
+    return ["-C", profile, *stylesheet]
+
+
+def _hil_bridge_wireshark_time_format_args() -> list:
+    """Return ``-t <format>`` for the Time column, or nothing to keep the profile's own."""
+    if hil_bridge_runtime is None:
+        return []
+    time_format = hil_bridge_runtime.resolve_wireshark_time_format()
+    if len(time_format) == 0:
+        return []
+    return ["-t", time_format]
+
+
 def _launch_hil_bridge_wireshark() -> None:
     wireshark_binary = _hil_bridge_wireshark_binary_path()
     if len(wireshark_binary) == 0:
@@ -1385,6 +1422,8 @@ def _launch_hil_bridge_wireshark() -> None:
         capture_interface,
         "-f",
         _hil_bridge_gsmtap_capture_filter(),
+        *_hil_bridge_wireshark_profile_args(),
+        *_hil_bridge_wireshark_time_format_args(),
         *_hil_bridge_apdu_dissector_args(),
     ]
     subprocess.Popen(
@@ -3154,6 +3193,11 @@ def show_guides():
         print(" \\____|\\__,_|_|\\__,_|\\___||___/\\____|\\__,_|_|\\__,_|\\___|")
         print(f"{Colors.ENDC}")
         print(f"{Colors.HEADER}=== Suite Guides & Documentation ==={Colors.ENDC}\n")
+        print(f"{Colors.BOLD}User manual:{Colors.ENDC}")
+        print(f"  {Colors.WHITE}[U]{Colors.ENDC} Start here: modules, concepts, real-card work")
+        print(f"  {Colors.WHITE}[UG]{Colors.ENDC} GUI, module by module")
+        print(f"  {Colors.WHITE}[UC]{Colors.ENDC} CLI, module by module")
+        print("")
         print("Select a module-specific guide or reference document:")
         print(f"  {Colors.GREEN}[1]{Colors.ENDC} Admin Shell guide topics")
         print(f"  {Colors.CYAN}[2]{Colors.ENDC} OTA Simulator guide")
@@ -3178,6 +3222,15 @@ def show_guides():
 
         if choice == "Q":
             return
+        if choice == "U":
+            _show_text_document("YggdraSIM User Manual", "guides/USER_MANUAL.md")
+            continue
+        if choice == "UG":
+            _show_text_document("YggdraSIM User Manual -- GUI", "guides/USER_MANUAL_GUI.md")
+            continue
+        if choice == "UC":
+            _show_text_document("YggdraSIM User Manual -- CLI", "guides/USER_MANUAL_CLI.md")
+            continue
         if choice == "1":
             _show_shell_guide_wizard()
             continue
@@ -3499,14 +3552,14 @@ def _dispatch_main_menu_choice(choice: str) -> None:
     plugin_launcher_menu().dispatch(normalized_choice)
 
 
-def run_scp03_cmd(cmd_line: str, yaml_out: str = None):
-    """Run SCP03 commands non-interactively (for --cmd entrypoint)."""
+def run_scp03_cmd(cmd_line: str, yaml_out: str = None) -> bool:
+    """Run SCP03 commands non-interactively (for --cmd entrypoint); False when one failed."""
     try:
         import SCP03.main as scp03_entry
 
-        scp03_entry.entry_cmd(cmd_line, yaml_out=yaml_out)
-    except SystemExit:
-        pass
+        return scp03_entry.entry_cmd(cmd_line, yaml_out=yaml_out) is not False
+    except SystemExit as stop:
+        return stop.code in (None, 0)
     except Exception as e:
         print(f"{Colors.FAIL}[!] SCP03 Error: {e}{Colors.ENDC}")
         raise
@@ -3835,6 +3888,56 @@ def _add_gui_arguments(parser):
     return parser
 
 
+def _apply_launch_session_arguments(args) -> int | None:
+    """Apply --debug, --card-backend, the --sim-* options and a profile import for this run.
+
+    Every mode of the launcher reads them, the GUI ones included. The card
+    backend and the simulator paths are set for this process only; the
+    saved selection changes in menu [C]. Returns 1 when the profile import
+    fails, else None.
+    """
+    # When --debug is passed, promote to a process-global default and
+    # persist it.  When omitted, leave any previously persisted value
+    # in place so debug state survives across sessions.
+    if bool(getattr(args, "debug", False)):
+        set_global_debug(True)
+    install_noisy_warning_filters()
+    card_backend_value = getattr(args, "card_backend", None)
+    if card_backend_value is None:
+        set_card_backend(get_card_backend(), persist=False)
+    else:
+        set_card_backend(card_backend_value, persist=False)
+    sim_isdr_config_value = getattr(args, "sim_isdr_config", None)
+    if sim_isdr_config_value is not None:
+        set_sim_isdr_config_path(sim_isdr_config_value, persist=False)
+    sim_euicc_store_value = getattr(args, "sim_euicc_store", None)
+    if sim_euicc_store_value is not None:
+        set_sim_euicc_store_root(sim_euicc_store_value, persist=False)
+    sim_quirks_value = getattr(args, "sim_quirks", None)
+    if sim_quirks_value is not None:
+        set_sim_quirks_path(sim_quirks_value, persist=False)
+    sim_eim_identity_value = getattr(args, "sim_eim_identity", None)
+    if sim_eim_identity_value is not None:
+        set_sim_eim_identity_path(sim_eim_identity_value, persist=False)
+    sim_profile_store_value = getattr(args, "sim_profile_store", None)
+    if sim_profile_store_value is not None:
+        set_sim_profile_store_path(sim_profile_store_value, persist=False)
+    sim_import_profile_value = str(
+        getattr(args, "sim_import_profile", "") or ""
+    ).strip()
+    if len(sim_import_profile_value) > 0:
+        if (
+            _import_simulator_profile(
+                sim_import_profile_value,
+                bool(getattr(args, "sim_import_enable", False)),
+                persist_backend=False,
+            )
+            != 0
+        ):
+            return 1
+    return None
+
+
 def _route_gui_modes(args):
     """Dispatch --gui / --web-server to the GUI server layer.
 
@@ -3974,55 +4077,20 @@ def run_cli(argv=None):
         from yggdrasim_common.runtime_paths import runtime_root
 
         return run_doctor(Path(runtime_root()))
+    # Before the GUI branch: --gui and --web-server take these options too,
+    # and a GUI started with --card-backend sim used to come up on the reader.
+    session_exit = _apply_launch_session_arguments(args)
+    if session_exit is not None:
+        return session_exit
     gui_exit = _route_gui_modes(args)
     if gui_exit is not None:
         return int(gui_exit)
-    # When --debug is passed, promote to a process-global default and
-    # persist it.  When omitted, leave any previously persisted value
-    # in place so debug state survives across sessions.
-    if bool(getattr(args, "debug", False)):
-        set_global_debug(True)
-    install_noisy_warning_filters()
-    card_backend_value = getattr(args, "card_backend", None)
-    if card_backend_value is None:
-        set_card_backend(get_card_backend(), persist=False)
-    else:
-        set_card_backend(card_backend_value, persist=False)
-    sim_isdr_config_value = getattr(args, "sim_isdr_config", None)
-    if sim_isdr_config_value is not None:
-        set_sim_isdr_config_path(sim_isdr_config_value, persist=False)
-    sim_euicc_store_value = getattr(args, "sim_euicc_store", None)
-    if sim_euicc_store_value is not None:
-        set_sim_euicc_store_root(sim_euicc_store_value, persist=False)
-    sim_quirks_value = getattr(args, "sim_quirks", None)
-    if sim_quirks_value is not None:
-        set_sim_quirks_path(sim_quirks_value, persist=False)
-    sim_eim_identity_value = getattr(args, "sim_eim_identity", None)
-    if sim_eim_identity_value is not None:
-        set_sim_eim_identity_path(sim_eim_identity_value, persist=False)
-    sim_profile_store_value = getattr(args, "sim_profile_store", None)
-    if sim_profile_store_value is not None:
-        set_sim_profile_store_path(sim_profile_store_value, persist=False)
-    sim_import_profile_value = str(
-        getattr(args, "sim_import_profile", "") or ""
-    ).strip()
-    if len(sim_import_profile_value) > 0:
-        if (
-            _import_simulator_profile(
-                sim_import_profile_value,
-                bool(getattr(args, "sim_import_enable", False)),
-                persist_backend=False,
-            )
-            != 0
-        ):
-            return 1
     open_pcap_value = str(getattr(args, "open_pcap", None) or "").strip()
     if len(open_pcap_value) > 0:
         keybag_value = str(getattr(args, "keybag", None) or "").strip()
         return _open_hil_bridge_pcap_offline(open_pcap_value, keybag_path=keybag_value)
     if args.scp03 and args.cmd:
-        run_scp03_cmd(args.cmd, yaml_out=args.out)
-        return 0
+        return 0 if run_scp03_cmd(args.cmd, yaml_out=args.out) else 1
     try:
         main_menu()
     except QuitAllRequested:

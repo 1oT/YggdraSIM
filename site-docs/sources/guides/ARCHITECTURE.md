@@ -504,12 +504,27 @@ Private cards:
   (`before_store_data` / `after_store_data`). Neither is attached to
   any card unless its owner registers it.
 - `conformance_strict` (in `isdr_config.json` or the eUICC store) makes
-  the card verify an RSP Server certificate chain up to an eSIM CA
-  RootCA it holds (its own CI and those listed in
-  `ci_certificates_der_hex`) and require the role OID, makes
-  ES10b.AddInitialEim follow SGP.32 v1.2 §5.9.4 without the simulator's
-  upsert convenience, and makes the `enable` PSMO answer an already
-  Enabled Profile with profileNotInDisabledState(2) instead of ok(0).
+  the card require the keyUsage and role OID of an RSP Server
+  certificate, makes ES10b.AddInitialEim follow SGP.32 v1.2 §5.9.4
+  without the simulator's upsert convenience, and makes the `enable`
+  PSMO answer an already Enabled Profile with
+  profileNotInDisabledState(2) instead of ok(0).
+- In both modes the card verifies an RSP Server certificate chain, each
+  certificate in `otherCertsInChain` included, up to an eSIM CA RootCA
+  whose key it holds (its own CI and those listed in
+  `ci_certificates_der_hex`). A certificate that names a CI the card
+  holds without that CI's signature is invalidCertificate(1); a chain
+  to a CI without a held key, or a certificate without an
+  authorityKeyIdentifier, is ciPKUnknown(7). A configured CI PKID
+  without a held key is still listed in EUICCInfo1 and EUICCInfo2, and
+  a chain to it answers ciPKUnknown(7).
+- In LoadBoundProfilePackage the card refuses a Profile Package that is
+  not a run of TLVs from one ProfileHeader to one PE-End (SAIP V3.4.1
+  §8.2, §8.10) with installFailedDueToPEProcessingError(12) and the
+  interpreter's invalid-request-format(5) in ppiResponse, and a section
+  member that runs past the length its section header declared with
+  bspStructureError(7). Each RSP Session starts from a random
+  euiccChallenge.
 
 ## 12. HIL bridge architecture
 

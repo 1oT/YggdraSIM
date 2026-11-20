@@ -103,6 +103,16 @@ KEY_TYPE_LABELS: dict[int, str] = {
 # ----------------------------------------------------------------------
 
 
+
+def _key_version_protocol(key_version: int) -> str:
+    """The range label the decoded view gives a key version number, or ''."""
+    from .saip_asn1_decode import _decode_key_version_number
+
+    if not 0 <= int(key_version) <= 0xFF:
+        return ""
+    reading = _decode_key_version_number(bytes([int(key_version)])) or {}
+    return str(reading.get("reservedFor") or "")
+
 def _hex_to_bytes(value: Any, *, label: str = "value", expect_length: int | None = None) -> bytes:
     text = re.sub(r"\s+|0x|0X|-|:", "", str(value or ""))
     if len(text) == 0:
@@ -469,6 +479,9 @@ def security_domain_summary(sd: dict[str, Any]) -> dict[str, Any]:
             keys_out.append(
                 {
                     "key_version": kvn_int,
+                    # What the version number is reserved for (SCP80, SCP02,
+                    # SCP03, SCP81, ...); '' outside the known ranges.
+                    "key_version_protocol": _key_version_protocol(kvn_int),
                     "key_identifier": kid_int,
                     "usage_qualifier_hex": _hex_or_empty(entry.get("keyUsageQualifier")),
                     "key_access_hex": _hex_or_empty(entry.get("keyAccess")),

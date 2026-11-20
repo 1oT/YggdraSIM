@@ -36,7 +36,7 @@ exactly that case.
 
 ### 1b. (Optional) Enable SAIP spreadsheet extensions
 
-The base dependency set already installs the commit-pinned upstream `pySim`
+The base dependency set already installs the commit-pinned `pySim` fork
 used by SAIP, SCP03/SCP80, and SCP11-local flows. Add the `[saip]` extra on
 workstations that host an Excel import/export extension; it installs the
 reviewed `openpyxl` and hardened XML parser dependency stack:
@@ -56,16 +56,18 @@ or `.yaml` record set needs no extra and no plugin; see
 probe succeeds. Spreadsheet extensions publish their GUI actions only when
 their own dependency health checks pass.
 
-**Developer checkout (advanced).** If you want to iterate on an
-unreleased upstream branch, drop a checkout at `<repo>/pysim` and that
-tree wins over the installed wheel:
+**Developer checkout (advanced).** If you want to work on pySim itself,
+drop a checkout of the pinned fork at `<repo>/pysim` and that tree wins
+over the installed wheel:
 
 ```bash
-git clone https://github.com/osmocom/pysim.git pysim
+git clone https://github.com/hampushellsberg-dev/pysim.git pysim
 ```
 
-`pysim/` is gitignored so the checkout never ships in the
-distribution.
+The fork is osmocom pySim master with the fixes in
+`upstream_patches/osmocom-pysim-*` on top; the SAIP tools refuse a pySim
+without them, so a checkout has to carry the same fixes as the pin.
+`pysim/` is gitignored so the checkout never ships in the distribution.
 
 ### Optional -- let the installer script handle it
 
@@ -151,8 +153,8 @@ makes `runtime_root()` resolve to the checkout, so plugins, profiles and
 state match a source run.
 
 `pipx install yggdrasim` by name does not resolve from PyPI. Two base
-dependencies are PEP 508 direct references (the pinned `asn1tools` fork
-and Osmocom `pySim`), and PyPI rejects a `Requires-Dist` containing one.
+dependencies are PEP 508 direct references (the pinned `asn1tools`
+and `pySim` forks), and PyPI rejects a `Requires-Dist` containing one.
 A path or git specifier is what lets pip honour them.
 
 A pipx install always reports the `source` flavor, since the clean/full

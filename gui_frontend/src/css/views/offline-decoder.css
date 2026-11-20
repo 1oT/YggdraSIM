@@ -21,7 +21,7 @@
   border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
   border-radius: var(--radius-lg);
   background: var(--bg-elev);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .cc-decoder-head {
@@ -202,6 +202,12 @@
   color: var(--warn);
 }
 
+.cc-decoder-chip--fail {
+  border-color: color-mix(in oklab, var(--fail) 45%, var(--border));
+  background: var(--fail-soft);
+  color: var(--fail);
+}
+
 .cc-decoder-chip--muted {
   text-transform: none;
   letter-spacing: 0;
@@ -362,6 +368,20 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* What the EUICCResponse of a payload reports, over the tree it was read from. */
+.cc-decoder-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.cc-decoder-outcome-text {
+  color: var(--fg);
+  overflow-wrap: anywhere;
 }
 
 .cc-decoder-sw {

@@ -664,6 +664,119 @@ class EncryptedAlertsAreNotGuessedAt(BipPayloadBase):
         self.assertEqual([row[0] for row in rows if row and row[0]], ["True"])
 
 
+def receive_data_response(payload: bytes, *, remaining: int = 0) -> bytes:
+    """TERMINAL RESPONSE to RECEIVE DATA: ETSI TS 102 223 V18.3.0 clause 6.8,
+    with Channel data (8.53) and Channel data length (8.54)."""
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014200")),
+            comprehension_tlv("82", bytes.fromhex("8281")),
+            comprehension_tlv("83", bytes.fromhex("00")),
+            comprehension_tlv("36", payload),
+            comprehension_tlv("37", bytes([remaining])),
+        ]
+    )
+
+
+#: A fatal alert from the peer: level 2, description 40 (handshake_failure).
+TLS_HANDSHAKE_FAILURE = bytes.fromhex("15030300020228")
+
+
+class AlertsReachTheDetailColumn(BipPayloadBase):
+    """An alert shows on its row, not only in the tree.
+
+    The Detail column is the line a BIP trace is scanned by, and a SEND
+    DATA that carried the card's certificate rejection read the same as
+    any other seven-byte block. Both directions: the card's alert rides in
+    SEND DATA, the peer's in the response to RECEIVE DATA.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        encrypted = bytes.fromhex("1503030014") + bytes(range(0x14))
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                fetch(send_data(TLS_BAD_CERTIFICATE)),
+                terminal_response(receive_data_response(TLS_HANDSHAKE_FAILURE)),
+                fetch(send_data(encrypted)),
+            ],
+            "alert-detail.pcap",
+        )
+
+    def _details(self) -> dict[str, str]:
+        rows = decode_fields(self.capture, ["frame.number", "yapdu.detail"])
+        return {row[0]: row[1] for row in rows if len(row) > 1}
+
+    def test_the_cards_alert_follows_the_send_data_size(self) -> None:
+        self.assertEqual(
+            self._details()["2"],
+            "SEND DATA: channel 1, 7 bytes, fatal TLS alert bad_certificate (42)",
+        )
+
+    def test_the_peers_alert_follows_the_receive_data_result(self) -> None:
+        self.assertEqual(
+            self._details()["3"],
+            "RECEIVE DATA: command performed successfully, fatal TLS alert handshake_failure (40)",
+        )
+
+    def test_an_encrypted_alert_is_named_as_one_without_a_description(self) -> None:
+        self.assertEqual(
+            self._details()["4"], "SEND DATA: channel 1, 25 bytes, encrypted TLS alert"
+        )
+
+
+#: A certificate alert sent at warning level, which TLS 1.2 allows.
+TLS_WARNING_CERTIFICATE_EXPIRED = bytes.fromhex("1503030002012D")
+
+#: The orderly end of a session: warning close_notify.
+TLS_CLOSE_NOTIFY = bytes.fromhex("15030300020100")
+
+
+class TheHilProfileColoursTlsFailures(BipPayloadBase):
+    """The HIL profile's red rule matches what this dissector hands over.
+
+    The rule reads the stock ``tls`` fields, which exist only because a
+    whole alert record is handed to Wireshark's TLS dissector; a change
+    to that handoff would leave the rule compiling and matching nothing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        encrypted = bytes.fromhex("1503030014") + bytes(range(0x14))
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                fetch(send_data(TLS_BAD_CERTIFICATE)),
+                terminal_response(receive_data_response(TLS_HANDSHAKE_FAILURE)),
+                fetch(send_data(TLS_WARNING_CERTIFICATE_EXPIRED)),
+                fetch(send_data(TLS_CLOSE_NOTIFY)),
+                fetch(send_data(encrypted)),
+            ],
+            "tls-failures.pcap",
+        )
+
+    def test_certificate_and_fatal_alerts_are_red_and_nothing_else(self) -> None:
+        from Tools.HilBridge.wireshark_profile import TLS_FAILURE_FILTER
+
+        result = run_tshark(
+            [
+                "-X",
+                f"lua_script:{DISSECTOR_PATH}",
+                "-r",
+                str(self.capture),
+                "-Y",
+                TLS_FAILURE_FILTER,
+                "-T",
+                "fields",
+                "-e",
+                "frame.number",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["2", "3", "4"])
+
+
 class AlertTableConformance(unittest.TestCase):
     """Spot-check the alert table against RFC 5246 / RFC 8446."""
 

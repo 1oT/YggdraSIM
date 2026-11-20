@@ -10,6 +10,8 @@ site-oneot/
 YggdraSIM-data/
 Workspace/
 state/
+# Operator SCP80 keys; the shell keeps its state in the inventory.
+SCP80/ota_config.ini
 eim_last_response.bin
 eim_last_response_hex.txt
 tmp_*.bin

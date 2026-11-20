@@ -228,24 +228,6 @@ def _dispatch_euicc_store_list(
 # ----------------------------------------------------------------------
 
 
-def _decode_hex_bytes(field_name: str, raw: Any, *, allowed_lengths: tuple[int, ...]) -> bytes:
-    cleaned = str(raw or "").replace(" ", "").replace(":", "").strip().upper()
-    if len(cleaned) == 0:
-        raise ValueError(f"{field_name}: hex string is empty")
-    if len(cleaned) % 2 != 0:
-        raise ValueError(f"{field_name}: hex string has odd length")
-    try:
-        value = bytes.fromhex(cleaned)
-    except ValueError as error:
-        raise ValueError(f"{field_name}: invalid hex -- {error}") from error
-    if len(value) not in allowed_lengths:
-        allowed = ", ".join(str(n) for n in allowed_lengths)
-        raise ValueError(
-            f"{field_name}: length must be one of [{allowed}] bytes, got {len(value)}"
-        )
-    return value
-
-
 def _dispatch_tuak_derive_topc(
     ctx: ActionContext,
     *,
@@ -253,29 +235,11 @@ def _dispatch_tuak_derive_topc(
     key: Any = None,
     number_of_keccak: Any = None,
 ) -> dict[str, Any]:
-    top_bytes = _decode_hex_bytes("top", top, allowed_lengths=(32,))
-    key_bytes = _decode_hex_bytes("key", key, allowed_lengths=(16, 32))
-    rounds = 1
-    if number_of_keccak is not None:
-        try:
-            rounds = int(number_of_keccak)
-        except (TypeError, ValueError) as error:
-            raise ValueError(f"number_of_keccak: not an integer: {number_of_keccak!r}") from error
-    if rounds < 1 or rounds > 16:
-        raise ValueError("number_of_keccak must be in [1, 16].")
+    # The SCP03 shell's DERIVE-TOPC runs the same function, so both surfaces
+    # take and refuse the same input.
+    from SIMCARD.tuak import derive_topc_from_text
 
-    from SIMCARD.tuak import derive_topc
-
-    try:
-        topc = derive_topc(top_bytes, key_bytes, number_of_keccak=rounds)
-    except Exception as error:  # noqa: BLE001 -- surface the validator
-        raise ValueError(f"derive_topc failed: {error}") from error
-
-    return {
-        "key_length_bits": len(key_bytes) * 8,
-        "number_of_keccak": rounds,
-        "topc_hex": topc.hex().upper(),
-    }
+    return derive_topc_from_text(top, key, number_of_keccak)
 
 
 # ----------------------------------------------------------------------

@@ -891,8 +891,9 @@ def _native_template_target(
     section_key: str | None = None,
 ) -> tuple[dict[str, Any], Any, Any]:
     ensure_workspace_pysim_on_path(workspace_root)
-    from pySim.esim.saip.templates import ProfileTemplateRegistry
+    from yggdrasim_common.pysim_saip_import import import_saip_templates
 
+    ProfileTemplateRegistry = import_saip_templates().ProfileTemplateRegistry
     resolved_section_key = str(section_key or spec.menu_id)
     section = document.get("sections", {}).get(resolved_section_key)
     if not isinstance(section, dict):

@@ -223,8 +223,9 @@ class LogicalChannelFallbackTests(unittest.TestCase):
 
     def _assert_link_fault_fallback(self, module):
         # The other half of the rule: when the link itself is down the
-        # reset is the only thing that can recover, and the card session
-        # it starts is where TERMINAL PROFILE belongs (TS 102 223 §5.4).
+        # reset is the only thing that can recover, and the UICC
+        # initialization it starts is where TERMINAL PROFILE belongs
+        # (profile download, TS 102 223 v18.3 §5.1).
         console = self._build_console(module, channel_class=LinkFaultFallbackApduChannel)
 
         eid = console._get_eid()
@@ -255,6 +256,26 @@ class LogicalChannelFallbackTests(unittest.TestCase):
             bytes.fromhex("BF3E"),
             module._build_tlv(bytes.fromhex("5A"), bytes.fromhex(eid_hex)),
         )
+
+    def test_a_read_eid_is_registered_with_the_local_eim(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        from SCP11.eim_local.engine.service import LocalEim
+
+        console = self._build_scripted_console(
+            self.live_module,
+            {"GET: EID": self._eid_answer(self.live_module, TEST_EID)},
+        )
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(
+            os.environ, {"YGGDRASIM_LOCAL_EIM_STORE": store}
+        ):
+            with redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(console._get_eid(), TEST_EID)
+            record = LocalEim(Path(store)).record(TEST_EID)
+        self.assertEqual(record.label, "detected by the eSIM Management console")
+        self.assertIn(f"EID {TEST_EID} registered", output.getvalue())
 
     def _assert_tagged_request_goes_first(self, module):
         console = self._build_scripted_console(

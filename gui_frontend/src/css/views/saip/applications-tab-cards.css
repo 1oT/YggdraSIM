@@ -40,7 +40,7 @@
 
 .saip-app-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   padding: 12px;
   display: flex;
@@ -210,7 +210,7 @@
   font-size: 10px;
   letter-spacing: 0.02em;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
@@ -242,7 +242,7 @@
 .saip-app-foot-chip {
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -257,7 +257,7 @@
 .saip-file-card {
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -462,7 +462,7 @@
   gap: 8px;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   border: 1px solid var(--border);
   background: var(--surface-alt);
 }
@@ -500,7 +500,7 @@
   margin: 0 0 6px 0;
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   font-size: 0.82rem;
 }
@@ -553,7 +553,7 @@
   gap: 6px;
   padding: 1px 7px;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--surface-alt);
   color: var(--fg);
   font: inherit;
@@ -644,7 +644,7 @@
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-gfm-addbar-submit {
@@ -653,7 +653,7 @@
   background: var(--accent);
   color: var(--bg);
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 0.82rem;
   cursor: pointer;
 }
@@ -855,7 +855,7 @@
   gap: 8px;
   padding: 8px 10px;
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   border: 1px solid var(--border);
   background: var(--surface-alt);
 }
@@ -908,7 +908,7 @@
 
 .saip-form-section {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev1);
   margin: 1px 0;
 }
@@ -925,7 +925,7 @@
 .saip-form-section-summary {
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -960,7 +960,7 @@
 .saip-form-section-chip {
   font-size: 9px;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   letter-spacing: 0.05em;
@@ -1029,7 +1029,7 @@
   background: var(--bg-input);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 3px 5px;
   flex: 1 1 auto;
   min-width: 0;
@@ -1058,7 +1058,7 @@
   background: var(--bg-input);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 3px 6px;
   flex: 1 1 auto;
   min-width: 160px;
@@ -1092,7 +1092,7 @@
 .saip-form-hex-chip {
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   letter-spacing: 0.04em;
@@ -1141,7 +1141,7 @@
   font-size: 12px;
   padding: 2px 6px;
   border: 1px dashed var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--bg-elev2);
   color: var(--fg);
   user-select: text;
@@ -1157,7 +1157,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-elev3);
   color: var(--fg-muted);
   border: 1px solid var(--border);
@@ -1182,7 +1182,7 @@
   padding: 5px 6px;
   margin: 0 0 6px 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-elev2);
 }
 

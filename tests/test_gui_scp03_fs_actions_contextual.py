@@ -78,6 +78,31 @@ def test_action_bar_builder_present() -> None:
         "renderFcpResult no longer calls the action bar builder"
 
 
+
+def test_destructive_keys_sit_in_a_danger_group_at_the_end() -> None:
+    """Delete, Resize and SUSPEND UICC sit apart from the file actions.
+
+    The file group keeps Create file, Lifecycle and Search rec.; the
+    "Danger" group closes the strip so a click meant for a file action
+    cannot land on a destructive key.
+    """
+    js = _read("app.js")
+    bar = js.split("function scp03BuildFsActionBar(tab, data)", 1)[1]
+    bar = bar.split("function renderFcpResult", 1)[0]
+    file_group = bar.split('group.setAttribute("aria-label", "File");', 1)[1]
+    file_group = file_group.split("bar.appendChild(group);", 1)[0]
+    for key in ("createBtn", "lifecycleBtn", "searchBtn"):
+        assert f"group.appendChild({key});" in file_group, key
+    for key in ("deleteBtn", "resizeBtn", "suspendBtn"):
+        assert f"group.appendChild({key});" not in file_group, key
+    danger = bar.split('dangerGroup.setAttribute("aria-label", "Danger");', 1)[1]
+    danger = danger.split("bar.appendChild(dangerGroup);", 1)[0]
+    assert 'dangerLegend.textContent = "Danger";' in danger
+    order = [danger.index(f"dangerGroup.appendChild({key});") for key in ("deleteBtn", "resizeBtn", "suspendBtn")]
+    assert order == sorted(order)
+    assert bar.index("bar.appendChild(group);") < bar.index("bar.appendChild(dangerGroup);")
+    assert "cc-fs-actions-group--card" not in bar
+
 def test_render_fcp_result_accepts_tab() -> None:
     """``renderFcpResult`` gains the optional tab parameter."""
     js = _read("app.js")
@@ -202,7 +227,8 @@ def test_css_tokens_for_action_bar_present() -> None:
         ".cc-fs-action-btn.is-disabled",
         ".cc-fs-kind.cc-fs-kind--df",
         ".cc-fs-kind.cc-fs-kind--transparent",
-        ".cc-fs-actions-group--card",
+        ".cc-fs-actions-group--danger",
+        ".cc-fs-actions-legend",
     ):
         assert selector in css, f"CSS missing selector: {selector}"
 

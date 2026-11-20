@@ -108,6 +108,47 @@ IPAd:
 
 - `DISCOVER`
 - `DOWNLOAD [matchingId] [--<n>[,<n>...]]` (`--n` polls only the n-th configured eIM entry)
+- `EIM-LISTEN [port=<n>] [calls=<n>] [idle=<seconds>] [notifications=deliver|keep]
+  [host=<address> cert=<pem> key=<pem> client-ca=<pem>]`: eIM Package Injection
+  (SGP.32 v1.3 §3.1.1.2). The shell connects to the card, prints its EID and
+  answers ESipa.TransferEimPackage on `127.0.0.1:8746` (ASN.1 and JSON
+  bindings) until Ctrl-C, after `calls` calls or after `idle` seconds without
+  one. An injected eUICC Package or data request runs as one fetched with
+  `DOWNLOAD` does and its result is the answer; an EimAcknowledgements
+  package removes the named sequence numbers from the eUICC (§5.14.4).
+  `notifications=keep` leaves the card's pending Notifications where they
+  are instead of delivering them after each package. After an injected
+  enable or disable the shell resets the card, so the state change is
+  complete while the listener stays up. Without TLS: plain HTTP on the
+  loopback only. With `cert`, `key` and `client-ca` the listener serves
+  HTTPS on `host` and takes a call only from a client certificate that
+  verifies against `client-ca` (§3.1.2.1: the eIM is the side that is
+  authenticated); another address than a loopback one is taken only that
+  way. No profile download: an injected trigger is answered undefinedError.
+  The Local eIM's `INJECT` is the caller (`SCP11/eim_local/GUIDE.md` section
+  6.4.5). In the GUI the verb is Listen for injected eIM packages on the
+  SGP.32 IoT (IPA-d) tab, on the loopback over plain HTTP, ended with Cancel.
+- `EIM-LISTEN-CERT <host name or address>... [out=<directory>]`: makes the
+  self-signed certificate and key an HTTPS `EIM-LISTEN` serves with
+  (`eim-listen-cert.pem`, `eim-listen-key.pem`, never replaced).
+- `ADD-INITIAL-EIM`: a wizard asks for each EimConfigurationData member
+  (SGP.32 v1.3 §2.11.1.1.1), with the certificates from the builder store and
+  the last build's values as defaults. Options take a number, a name or
+  shorthand (`oid`, `fqdn`, `cert`, `key`); a certificate file can be given as
+  a path (PEM, DER, base64 or hex) and is stored under a name you confirm. It
+  prints the request and the APDU sequence (`s` at the send prompt prints the
+  full script) and, once confirmed, sends eUICCMemoryReset
+  (resetEimConfigData, resetImmediateEnableConfig) and then AddInitialEim,
+  decoding both answers. No card transport is held while the wizard waits;
+  it is opened after the confirmation and released after the send. The GUI
+  sends the same request with AddInitialEim send, in Offline Tools next to
+  the build and in eSIM Management.
+- `EIM-CERT-STORE [LIST|IMPORT <file> [name] [--overwrite]|RENAME <old> <new>|REMOVE <name>|VALUES|EDIT <field> <old> <new>|FORGET <field> <value>|CONFIGS|CONFIG-RENAME <old> <new>|CONFIG-DELETE <name>]`:
+  the certificates, saved values and configurations of that builder, shared
+  with the Offline Tools AddInitialEim build (`YGGDRASIM_EIM_BUILDER_STORE`,
+  default `~/.yggdrasim/eim_builder/`, never tracked). `ADD-INITIAL-EIM` starts
+  from a saved configuration when one is picked and offers to save the values
+  as one before the send prompt.
 
 
 

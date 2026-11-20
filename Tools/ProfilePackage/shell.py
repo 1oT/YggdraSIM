@@ -1508,6 +1508,9 @@ class ProfilePackageShell:
             decoded["reservedFor"] = "SCP02"
         elif 0x30 <= kvn_value <= 0x3F:
             decoded["reservedFor"] = "SCP03"
+        elif 0x40 <= kvn_value <= 0x4F:
+            # SGP.02 v4.2 section 2.2.5.1, as in saip_asn1_decode.
+            decoded["reservedFor"] = "SCP81"
         elif kvn_value == 0xFF:
             decoded["reservedFor"] = "ISD with SCP02 without SCP80 support"
         return decoded
@@ -3211,10 +3214,10 @@ class ProfilePackageShell:
                 )
             elif "pysim" in detail:
                 print(
-                    f"{ShellStyle.FAIL}[-] INSPECT needs pySim. Install the PyPI "
-                    f"wheel (pip install pySim) or clone the upstream tree at "
-                    f"{self.bridge.workspace_root / 'pysim'} "
-                    f"(git clone https://gitlab.com/osmocom/pysim.git pysim): "
+                    f"{ShellStyle.FAIL}[-] INSPECT needs pySim. Install the pinned fork "
+                    "(pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git') "
+                    f"or clone it at {self.bridge.workspace_root / 'pysim'} "
+                    "(git clone https://github.com/hampushellsberg-dev/pysim.git pysim): "
                     f"{exc}{ShellStyle.END}"
                 )
             else:

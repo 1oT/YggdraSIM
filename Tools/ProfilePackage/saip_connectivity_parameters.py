@@ -15,7 +15,7 @@ Bearer registry (TCA SAIP v3.4.1 §8.2.1 ``connectivityParameters``, coded per G
   Tag  Bearer        Reference
   ----  -----------   --------------------------------------------------
   0xA0  SMS-PP        ETSI TS 102 225 §5.1, TS 31.115 §4
-  0xA1  HTTP / TLS    ETSI TS 102 226 §5.7, GP Amd B §3.2
+  0xA1  HTTP / TLS    SGP.02 v4.2 Table 95, GP Amd B §3.2
   0xA2  CAT_TP        ETSI TS 102 124, TS 102 127
 
 Each bearer block carries a sequence of optional sub-tags. The names
@@ -278,7 +278,7 @@ def _encode_sms_block(payload: dict[str, Any]) -> str:
 
 
 # ----------------------------------------------------------------------
-# CAT_TP bearer (tag 0xA2). Inner sub-tags per TS 102 124 §6 / TS 102 127:
+# CAT_TP bearer (tag 0xA2). Inner sub-tags per SGP.02 v4.2 Table 95 / TS 102 127:
 #
 #   35   bearer description (TS 102 223 §8.52)
 #   47   network access name (TS 102 223 §8.70)
@@ -295,7 +295,7 @@ def _encode_cat_tp_block(payload: dict[str, Any]) -> bytes:
 
 
 # ----------------------------------------------------------------------
-# HTTPS / TLS bearer (tag 0xA1). Sub-tags per ETSI TS 102 226 §5.7 /
+# HTTPS / TLS bearer (tag 0xA1). Sub-tags per SGP.02 v4.2 Table 95 /
 # GP Amd B §3.2:
 #
 #   35   bearer description
@@ -649,7 +649,7 @@ def decode_address_bytes(value: Any) -> dict[str, Any]:
 def bearer_catalog() -> list[dict[str, Any]]:
     return [
         {"bearer": "sms",    "tag_hex": "A0", "spec": "ETSI TS 102 225 §5.1 / 3GPP TS 31.115 §4"},
-        {"bearer": "https",  "tag_hex": "A1", "spec": "ETSI TS 102 226 §5.7 / GP Amd B §3.2"},
+        {"bearer": "https",  "tag_hex": "A1", "spec": "GSMA SGP.02 v4.2 Table 95 / GP Amd B §3.2"},
         {"bearer": "cat_tp", "tag_hex": "A2", "spec": "ETSI TS 102 124 / TS 102 127"},
     ]
 

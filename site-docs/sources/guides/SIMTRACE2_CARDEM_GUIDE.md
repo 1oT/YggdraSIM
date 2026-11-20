@@ -90,13 +90,15 @@ nodes. Grant the node instead:
 sudo tee /etc/udev/rules.d/60-simtrace2-access.rules >/dev/null <<'RULE'
 SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="60e3", MODE="0660", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="4004", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="616e", MODE="0660", GROUP="plugdev"
 RULE
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=usb --attr-match=idVendor=1d50
 ```
 
 The second line covers the board in DFU mode, so a firmware flash needs
-no root either. Confirm the node is now `root:plugdev` with group write,
+no root either. The third is for an ngff-cardem, which keeps `1d50:616e`
+in its bootloader too. Confirm the node is now `root:plugdev` with group write,
 and that your user is in that group.
 
 ## 2. Install `dfu-util`
@@ -127,9 +129,13 @@ cd simtrace2
 git submodule update --init --recursive
 
 sudo apt-get install --no-install-recommends \
-    build-essential gcc-arm-none-eabi libnewlib-arm-none-eabi \
+    build-essential gcc-arm-none-eabi picolibc-arm-none-eabi \
     libusb-1.0-0-dev pkg-config
 ```
+
+The firmware links against picolibc since commit `fffd7d5` (2026-05-27,
+first in 0.9.1); a tree older than that takes `libnewlib-arm-none-eabi`
+instead. The repository's `debian/control` names the current set.
 
 Build the cardem target:
 
@@ -138,7 +144,15 @@ cd firmware
 make APP=cardem BOARD=simtrace
 ```
 
-The resulting artefact lives at `firmware/bin/cardem-simtrace-*.bin`.
+The image to flash is `firmware/bin/simtrace-cardem-dfu.bin`, named
+`<board>-<app>-<memory>` like the published images below.
+
+Firmware built from any tree since December 2019, the published images
+included, ends a USB message of 128, 192 or 256 bytes without a
+zero-length packet, so a modem command carrying 114, 178 or 242 data
+bytes reaches the host late. `upstream_patches/osmocom-simtrace2-cardem-zlp/`
+in this repository carries the patch: apply it with `git apply` in the
+simtrace2 checkout before `make`.
 
 Osmocom also publishes prebuilt images under
 <https://ftp.osmocom.org/binaries/simtrace2/firmware/latest/>, and for
@@ -451,6 +465,11 @@ bricked. Section 4 has the sequence.
   that restarts every few seconds without ever attaching → the device
   node is not writable by your group. See *Visible is not claimable* in
   section 1.
+- The modem waits 120 s on a TERMINAL RESPONSE, receiving NULL procedure
+  bytes, then resets the UICC, and the command reaches the host only after
+  the reset: the board's firmware lacks the zero-length-packet fix in
+  section 3. `HIL_BRIDGE_GUIDE.md` has the details under *The modem resets
+  the UICC after 120 s on a TERMINAL RESPONSE*.
 
 ## Related guides
 

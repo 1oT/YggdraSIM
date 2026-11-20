@@ -234,6 +234,17 @@ def is_simulated_card_backend() -> bool:
     return get_card_backend() == CARD_BACKEND_SIM
 
 
+#: The reader the GUI lists while the SIM backend is selected. Every
+#: connection then goes to the simulated card whatever reader it names
+#: (:func:`create_card_connection`), so the simulator is the one reader there is.
+SIMULATED_READER_NAME = "YggdraSIM Simulator"
+
+
+def is_simulated_reader_name(reader_name: str) -> bool:
+    """True for the simulator's reader name while the SIM backend is selected."""
+    return is_simulated_card_backend() and str(reader_name or "").strip() == SIMULATED_READER_NAME
+
+
 def get_default_sim_quirks_path() -> str:
     return ensure_seeded_workspace_file(
         ("SIMCARD", "sim_quirks_template.py"),

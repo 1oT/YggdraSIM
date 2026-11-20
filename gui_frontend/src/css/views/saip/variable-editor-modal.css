@@ -68,7 +68,7 @@
   height: 30px;
   border: 1px solid var(--border);
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   font-size: 16px;
   line-height: 1;
@@ -136,7 +136,7 @@
   min-width: 0;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   padding: 6px 8px;
   font-family: var(--mono);
@@ -207,7 +207,7 @@
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   color: var(--fg);
   text-align: left;

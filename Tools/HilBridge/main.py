@@ -13,7 +13,13 @@ from typing import Any
 from yggdrasim_common.process_debug import add_debug_argument, set_global_debug
 from yggdrasim_common.quit_control import QuitAllRequested
 
-from .pcsc import APDU_TIMEOUT_ENV, PcscBridgeError, PcscCardChannel, resolve_apdu_timeout_ms
+from .pcsc import (
+    APDU_TIMEOUT_ENV,
+    DEFAULT_APDU_TIMEOUT_MS,
+    PcscBridgeError,
+    PcscCardChannel,
+    resolve_apdu_timeout_ms,
+)
 from .protocol import GSMTAP_COMPAT_MODES, GSMTAP_COMPAT_NATIVE
 from .router import (
     CARD_TRACE_ENV,
@@ -113,7 +119,7 @@ def add_bridge_runtime_arguments(
         default=None,
         help=(
             "Maximum APDU wait time in milliseconds for HIL card traffic "
-            f"(default from {APDU_TIMEOUT_ENV}, fallback 5000)."
+            f"(default from {APDU_TIMEOUT_ENV}, fallback {DEFAULT_APDU_TIMEOUT_MS})."
         ),
     )
     if include_list_readers:

@@ -4,11 +4,13 @@
  */
 
 
-/* -- Matrix font override: use mono everywhere for the terminal look. */
-html[data-theme="matrix"] body,
-html[data-theme="matrix"] input,
-html[data-theme="matrix"] button,
-html[data-theme="matrix"] select {
-  font-family: var(--font-mono);
+/* -- Matrix font override: monospace everywhere for the terminal look, under
+   every skin. Ordered after skins/ so it wins over the skin's typefaces. */
+html[data-theme="matrix"] {
+  --font-sans: var(--font-mono);
+  --font-head: var(--font-mono);
+}
+
+html[data-theme="matrix"] body {
   letter-spacing: 0.01em;
 }

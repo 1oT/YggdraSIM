@@ -151,6 +151,7 @@ class _BuilderConfig:
             "pid": "7F",
             "dcs": "F6",
             "cla": "80",
+            "sender": "82",
             "payload": PAYLOAD.hex().upper(),
             "concat_sms": "ON",
             "tp_ud_max": "140",

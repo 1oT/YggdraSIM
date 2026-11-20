@@ -11,7 +11,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -89,7 +89,7 @@
   font-size: 16px;
   line-height: 1;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .cc-wb-tab-close:hover {

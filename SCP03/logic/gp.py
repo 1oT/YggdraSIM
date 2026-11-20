@@ -1216,6 +1216,9 @@ class GlobalPlatformManager:
                 print(
                     f"{Config.Colors.WARNING}[!] Response is an FCP template, not a GP registry response.{Config.Colors.ENDC}"
                 )
+            elif len(payload) == 0:
+                # An empty scope (no applets, no packages) answers with no data.
+                print(f"{Config.Colors.CYAN}[*] No GP registry entries.{Config.Colors.ENDC}")
             else:
                 print(
                     f"{Config.Colors.WARNING}[!] No GP registry entries decoded from response.{Config.Colors.ENDC}"
@@ -1625,7 +1628,7 @@ class GlobalPlatformManager:
         # Table 11-20: Le '00'; the response carries the delete confirmation.
         cmd = f"80E400{p2:02X}{len(bytes.fromhex(tlv)):02X}{tlv}00"
         print(
-            f"{Config.Colors.WARNING}[!] Deleting {target.hex()}...{Config.Colors.ENDC}"
+            f"{Config.Colors.WARNING}[*] Deleting {target.hex()}...{Config.Colors.ENDC}"
         )
         _, sw1, sw2 = self.tp.transmit(cmd, silent=True)
         if sw1 == 0x90:

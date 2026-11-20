@@ -102,6 +102,9 @@ class _FakePcscChannel:
         self.disconnect_calls = 0
         self.last_apdu = b""
 
+    def selected_reader_name(self) -> str:
+        return self.reader_label
+
     def connect(self) -> None:
         self.connect_calls += 1
 

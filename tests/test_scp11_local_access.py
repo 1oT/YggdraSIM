@@ -13,6 +13,13 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from tests.local_smdp_card_support import (
+    ECASD_AID,
+    INS_GET_DATA,
+    INS_TERMINAL_CAPABILITY,
+    ISD_R_AID,
+    ScriptedEuicc,
+)
 from tests.sgp26_support import require_sgp26_bundle
 from types import SimpleNamespace
 
@@ -300,6 +307,11 @@ def build_profile_installation_success(
     return wrap_tlv(bytes.fromhex("BF37"), wrap_tlv(bytes.fromhex("BF27"), value))
 
 
+# The first command of a card session: TERMINAL CAPABILITY declaring the IPAd
+# (GSMA SGP.32 v1.3 §3.8.2), pinned by tests/test_scp11_ipad_declaration.py.
+IPAD_DECLARATION = "LOCAL: TERMINAL CAPABILITY (IPAd)"
+
+
 class FakeApduChannel:
     def __init__(self):
         self.send_calls = []
@@ -317,6 +329,8 @@ class FakeApduChannel:
 
     def send(self, apdu: bytes, log_name: str) -> bytes:
         self.send_calls.append((log_name, apdu))
+        if log_name == IPAD_DECLARATION:
+            return b""
         if log_name == "LOCAL: Select ISD-R":
             return bytes.fromhex("6F00")
         if log_name == "LOCAL: Select ECASD":
@@ -344,7 +358,11 @@ class FakeApduChannel:
         if log_name == "LOCAL: GetCerts":
             return self.certs_response
         if log_name == "LOCAL: GetEID":
-            return wrap_tlv(b"\x5A", bytes.fromhex("89049032118427504800000000000607"))
+            # ES10 GetEID on the ISD-R: GetEuiccDataResponse 'BF3E' { eidValue '5A' }.
+            return wrap_tlv(
+                bytes.fromhex("BF3E"),
+                wrap_tlv(b"\x5A", bytes.fromhex("89049032118427504800000000000607")),
+            )
         if log_name == "LOCAL: GetIssuerIdentificationNumber":
             return wrap_tlv(b"\x42", bytes.fromhex("89049032"))
         if log_name == "LOCAL: ListNotifications":
@@ -579,9 +597,10 @@ class LocalAccessSessionTests(unittest.TestCase):
         expected_apdu = bytes([0x80, 0xE2, 0x91, 0x00, len(expected_payload)]) + expected_payload
 
         self.assertEqual(response, b"")
-        self.assertEqual(session.apdu_channel.send_calls[0][0], "LOCAL: Select ISD-R")
-        self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: DeleteProfile [Block 0]")
-        self.assertEqual(session.apdu_channel.send_calls[1][1], expected_apdu)
+        self.assertEqual(session.apdu_channel.send_calls[0][0], IPAD_DECLARATION)
+        self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: Select ISD-R")
+        self.assertEqual(session.apdu_channel.send_calls[2][0], "LOCAL: DeleteProfile [Block 0]")
+        self.assertEqual(session.apdu_channel.send_calls[2][1], expected_apdu)
 
     def _profile_view(self, iccid: str, aid: str, state: str) -> local_access_session.ProfileMetadataView:
         return local_access_session.ProfileMetadataView(
@@ -607,6 +626,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(
             labels,
             [
+                IPAD_DECLARATION,
                 "LOCAL: Select ISD-R",
                 "LOCAL: DisableProfile [Block 0]",
                 "LOCAL: Select ISD-R",
@@ -624,8 +644,8 @@ class LocalAccessSessionTests(unittest.TestCase):
             session.TAG_ICCID,
             encoded_iccid,
         )
-        self.assertTrue(session.apdu_channel.send_calls[1][1].endswith(disable_payload))
-        self.assertTrue(session.apdu_channel.send_calls[3][1].endswith(delete_payload))
+        self.assertTrue(session.apdu_channel.send_calls[2][1].endswith(disable_payload))
+        self.assertTrue(session.apdu_channel.send_calls[4][1].endswith(delete_payload))
         self.assertEqual(session.last_profile_state_steps, ("DisableProfile", "DeleteProfile"))
 
     def test_delete_profile_sends_only_the_delete_for_a_disabled_target(self):
@@ -638,7 +658,7 @@ class LocalAccessSessionTests(unittest.TestCase):
         session.delete_profile("A0000005591010FFFFFFFF8900001100")
 
         labels = [entry[0] for entry in session.apdu_channel.send_calls]
-        self.assertEqual(labels, ["LOCAL: Select ISD-R", "LOCAL: DeleteProfile [Block 0]"])
+        self.assertEqual(labels, [IPAD_DECLARATION, "LOCAL: Select ISD-R", "LOCAL: DeleteProfile [Block 0]"])
         self.assertEqual(session.last_profile_state_steps, ("DeleteProfile",))
 
     def test_delete_profile_aborts_when_the_card_refuses_the_disable(self):
@@ -781,10 +801,11 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertTrue(session.state.authenticate_server_request.startswith(bytes.fromhex("BF38")))
         self.assertIn("F54172BDF98A95D65CBEB88A38A1C11D800A85C3", session.state.allowed_ci_pkids)
         self.assertEqual(session.state.selected_auth_certificate_path, str(cert_path))
-        self.assertEqual(channel.send_calls[0][0], "LOCAL: Select ISD-R")
-        self.assertEqual(channel.send_calls[1][0], "LOCAL: GetEuiccInfo1")
-        self.assertEqual(channel.send_calls[2][0], "LOCAL: GetEuiccConfiguredData")
-        self.assertEqual(channel.send_calls[3][0], "LOCAL: GetEuiccChallenge")
+        self.assertEqual(channel.send_calls[0][0], IPAD_DECLARATION)
+        self.assertEqual(channel.send_calls[1][0], "LOCAL: Select ISD-R")
+        self.assertEqual(channel.send_calls[2][0], "LOCAL: GetEuiccInfo1")
+        self.assertEqual(channel.send_calls[3][0], "LOCAL: GetEuiccConfiguredData")
+        self.assertEqual(channel.send_calls[4][0], "LOCAL: GetEuiccChallenge")
         self.assertEqual(channel.chunked_calls[0][5], "LOCAL: AuthenticateServer")
 
     def test_open_session_accepts_drop_in_smdp_credentials_with_metadata(self):
@@ -872,14 +893,13 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(snapshot["profiles"][0].state, "ENABLED")
         self.assertEqual(snapshot["profiles"][1].nickname, "Secondary")
         self.assertEqual(
-            [name for name, _ in session.apdu_channel.send_calls[:15]],
+            [name for name, _ in session.apdu_channel.send_calls[:14]],
             [
+                IPAD_DECLARATION,
                 "LOCAL: Select ISD-R",
                 "LOCAL: GetProfilesInfo",
                 "LOCAL: GetEuiccConfiguredData",
-                "LOCAL: Select ECASD",
                 "LOCAL: GetEID",
-                "LOCAL: Select ISD-R",
                 "LOCAL: Select ECASD",
                 "LOCAL: GetIssuerIdentificationNumber",
                 "LOCAL: Select ISD-R",
@@ -1903,8 +1923,9 @@ class LocalAccessSessionTests(unittest.TestCase):
             session._extract_transaction_id_from_bpp(built_bpp),
             b"\x10" * 16,
         )
-        self.assertEqual(session.apdu_channel.send_calls[0][0], "LOCAL: Select ECASD")
-        self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: GetEID")
+        self.assertEqual(session.apdu_channel.send_calls[0][0], IPAD_DECLARATION)
+        self.assertEqual(session.apdu_channel.send_calls[1][0], "LOCAL: Select ISD-R")
+        self.assertEqual(session.apdu_channel.send_calls[2][0], "LOCAL: GetEID")
 
     @mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False)
     def test_build_session_bound_profile_package_honors_custom_a3_chunk_size(self):
@@ -2149,6 +2170,195 @@ class LocalAccessSessionTests(unittest.TestCase):
         self.assertEqual(calls[3], ("load", generated_bpp))
         self.assertEqual(calls[4][0], "close")
 
+    def _run_whole_load(self, card, profile_hex="A00100", **config):
+        """Run the load chain with nothing faked on the session side.
+
+        Returns the load result, the session, and one ``(eid, S-ENC, S-MAC)``
+        entry per session key derivation the SM-DP+ side made.
+        """
+        from pySim.esim import bsp as pysim_bsp
+
+        metadata_document = {
+            "profile": {
+                "name": "Local pySim profile",
+                "profile_class": "OPERATIONAL",
+                "iccid": "89880811111111111112",
+                "icon": {"type": "NONE", "data_hex": ""},
+            },
+            "operator": {
+                "name": "YggdraSIM",
+                "gid1": "FFFFFFFFFFFFFFFF",
+                "gid2": "FFFFFFFFFFFFFFFF",
+                "mcc": "999",
+                "mnc": "99",
+            },
+            "notification_events": {"install": False, "enable": True, "disable": True, "delete": True, "address": ""},
+            "policy_rules": {
+                "update_control_forbidden": False,
+                "disable_not_allowed": False,
+                "delete_not_allowed": False,
+            },
+        }
+        derivations: list[tuple[bytes, bytes, bytes]] = []
+        derive = pysim_bsp.BspInstance.from_kdf
+
+        def record(*arguments, **options):
+            instance = derive(*arguments, **options)
+            derivations.append((bytes(arguments[4]), bytes(instance.c_algo.s_enc), bytes(instance.m_algo.s_mac)))
+            return instance
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ("certs", "metadata", "profile", "debug"):
+                (root / name).mkdir()
+            write_custom_smdp_credentials(root / "certs", "local-auth", "auth")
+            write_custom_smdp_credentials(root / "certs", "local-pb", "pb")
+            metadata_path = root / "metadata" / "metadata.json"
+            metadata_path.write_text(json.dumps(metadata_document), encoding="utf-8")
+            (root / "profile" / "local-profile.hex").write_text(profile_hex, encoding="utf-8")
+            session = LocalIsdrSession(
+                cfg=LocalAccessConfig(
+                    CERTS_DIR=str(root / "certs"),
+                    METADATA_DIR=str(root / "metadata"),
+                    PROFILE_DIR=str(root / "profile"),
+                    DEBUG_DIR=str(root / "debug"),
+                    WRAP_SEGMENT_IN_BOOTSTRAP=False,
+                    **config,
+                ),
+                apdu_channel=card,
+            )
+            session.set_metadata_override_path(str(metadata_path))
+            with mock.patch.object(pysim_bsp.BspInstance, "from_kdf", side_effect=record):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    response = session.run_load_profile_chain()
+        return response, session, derivations
+
+    def test_a_whole_load_runs_on_a_card_that_gates_es10_and_answers_no_get_data_on_the_ecasd(self):
+        """The card of a live report: ES10 behind the IPAd declaration, '6D 00' to GET DATA on the ECASD.
+
+        The load used to stop twice on it: at GetEUICCInfo1 for want of the
+        declaration (SGP.32 v1.3 section 3.8.2), then after PrepareDownload
+        at the EID read, which went to the ECASD (SGP.02 v4.2 section 2.2.2)
+        where SGP.22 v3.1 section 5.7.20 has an ISD-R function.
+        """
+        card = ScriptedEuicc()
+
+        response, session, derivations = self._run_whole_load(card)
+
+        self.assertEqual(response[:2], bytes.fromhex("BF37"))
+        self.assertFalse(session._is_failed_profile_installation_result(response))
+        self.assertEqual(card.sent[0][1], INS_TERMINAL_CAPABILITY)
+        self.assertEqual(card.count(INS_TERMINAL_CAPABILITY), 1)
+        # The card was never asked for the ECASD or for GET DATA.
+        self.assertEqual(set(card.selected_aids()), {ISD_R_AID})
+        self.assertEqual(card.count(INS_GET_DATA), 0)
+        # GetEID follows PrepareDownload on the ISD-R, inside the RSP session and ahead of the package.
+        tags = card.es10_tags()
+        self.assertEqual(tags[:7], ["BF20", "BF3C", "BF2E", "BF38", "BF21", "BF3E", "BF36"])
+        self.assertEqual(card.es10[5], bytes.fromhex("BF3E035C015A"))
+        package = tags[6 : tags.index("BF28")]
+        self.assertEqual(package[-1], "86")
+        self.assertLessEqual(set(package), {"BF36", "A0", "A1", "88", "A2", "A3", "87", "86"})
+        # Then the Notification is listed, retrieved and removed, the session closed, the profile enabled.
+        self.assertEqual(tags[tags.index("BF28") :][:5], ["BF28", "BF2B", "BF30", "BF41", "BF31"])
+        # The SM-DP+ side derived the session keys the card derived from its own EID.
+        self.assertEqual(len(derivations), 1)
+        self.assertEqual(derivations[0][0], bytes.fromhex(card.eid))
+        self.assertEqual(derivations[0][1:], card.session_keys[:2])
+        # Installed, its Notification handed over and removed, then enabled by ICCID.
+        self.assertEqual(card.installed_iccid, bytes.fromhex("98888011111111111121"))
+        self.assertEqual(card.notifications, {})
+        self.assertEqual(session.state.auto_enable_status, "enabled")
+        self.assertEqual(session.state.auto_enable_target_kind, "ICCID")
+        self.assertEqual(card.enabled_iccid, bytes.fromhex("98888011111111111121"))
+
+    # 3004 bytes: two full segments of 1007 and one of 990.
+    _LONG_PROFILE_HEX = "A0820BB8" + "5A" * 3000
+
+    def test_a_whole_load_runs_on_a_card_that_takes_no_segment_above_1020_bytes(self):
+        """SGP.22 v3.1 section 2.5.3: an eUICC has to accept segments up to 1020 bytes, not longer ones.
+
+        A live card answered the first profile segment of 1036 bytes with
+        bspStructureError(7) on loadProfileElements(5). The session keys are
+        replaced or not, as the configuration says: both paths cut the profile.
+        """
+        for replace_session_keys in (False, True):
+            with self.subTest(replace_session_keys=replace_session_keys):
+                card = ScriptedEuicc(max_segment=1020)
+
+                response, session, _derivations = self._run_whole_load(
+                    card,
+                    profile_hex=self._LONG_PROFILE_HEX,
+                    BPP_USE_PPK_REPLACE_SESSION_KEYS=replace_session_keys,
+                )
+
+                self.assertFalse(session._is_failed_profile_installation_result(response))
+                self.assertEqual(card.refused_segments, [])
+                profile_segments = [len(payload) for payload in card.es10 if payload[:1] == b"\x86"]
+                self.assertEqual(profile_segments, [1020, 1020, 1004])
+                self.assertEqual("A2" in card.es10_tags(), replace_session_keys)
+                self.assertEqual(card.installed_iccid, bytes.fromhex("98888011111111111121"))
+
+    def test_a_package_with_a_segment_above_1020_bytes_is_refused_before_the_card_sees_it(self):
+        """A pySim that fills a segment with 1008 bytes of plaintext is named, not sent."""
+        from pySim.esim import bsp as pysim_bsp
+        from SCP11.shared.bsp_segment_limit import BspSegmentTooLong
+
+        def cut_at_1008(instance, tag, plaintext):
+            segments = []
+            for start in range(0, len(plaintext), 1008):
+                segments.append(instance.m_algo.auth(tag, instance.c_algo.encrypt(plaintext[start : start + 1008])))
+            return segments
+
+        card = ScriptedEuicc(max_segment=1020)
+        local_access_session._ensure_pysim_session_bound_support()
+        with mock.patch.object(pysim_bsp.BspInstance, "encrypt_and_mac", cut_at_1008):
+            with self.assertRaises(BspSegmentTooLong) as failure:
+                self._run_whole_load(card, profile_hex=self._LONG_PROFILE_HEX)
+
+        self.assertIn("is 1036 bytes", str(failure.exception))
+        self.assertNotIn("BF36", card.es10_tags())
+
+    def test_the_scripted_card_refuses_a_long_segment_as_the_live_card_did(self):
+        card = ScriptedEuicc(max_segment=1020)
+        self._run_whole_load(card)
+        card._rsp_open = True
+
+        result = card._es10(bytes.fromhex("86820408") + bytes(1032))
+
+        self.assertEqual(card.refused_segments, [1036])
+        # finalResult errorResult: bppCommandId loadProfileElements(5), errorReason bspStructureError(7).
+        self.assertIn(bytes.fromhex("A208A106800105810107"), result)
+
+    def test_a_whole_load_falls_back_to_the_ecasd_read_inside_the_session(self):
+        """A card without ES10 GetEID still loads: the ECASD read runs between PrepareDownload and the package."""
+        card = ScriptedEuicc(ecasd_get_data=True, es10_get_eid=False)
+
+        response, session, derivations = self._run_whole_load(card)
+
+        self.assertFalse(session._is_failed_profile_installation_result(response))
+        tags = card.es10_tags()
+        self.assertEqual(tags[:7], ["BF20", "BF3C", "BF2E", "BF38", "BF21", "BF3E", "BF36"])
+        # ISD-R, the ECASD for the read, the ISD-R again for the package, the ISD-R for the enable.
+        self.assertEqual(card.selected_aids(), [ISD_R_AID, ECASD_AID, ISD_R_AID, ISD_R_AID])
+        self.assertEqual(card.count(INS_GET_DATA), 1)
+        self.assertEqual(derivations[0][0], bytes.fromhex(card.eid))
+        self.assertEqual(derivations[0][1:], card.session_keys[:2])
+        self.assertEqual(session.state.auto_enable_status, "enabled")
+
+    def test_a_load_names_both_answers_when_the_card_gives_no_eid(self):
+        card = ScriptedEuicc(es10_get_eid=False)
+
+        with self.assertRaises(RuntimeError) as failure:
+            self._run_whole_load(card)
+
+        message = str(failure.exception)
+        self.assertIn("ES10 GetEID on the ISD-R: APDU Failed: 6A88", message)
+        self.assertIn("GET DATA '5A' on the ECASD: APDU Failed: 6D00", message)
+        # The session is closed on the ISD-R, as after any failed load.
+        self.assertEqual(card.selected_aids()[-1], ISD_R_AID)
+        self.assertEqual(card.es10_tags()[-1], "BF41")
+
     def test_run_load_profile_chain_wraps_when_session_bound_metadata_is_missing(self):
         with tempfile.TemporaryDirectory() as profile_dir:
             profile_path = Path(profile_dir) / "local-profile.hex"
@@ -2213,6 +2423,67 @@ class LocalAccessSessionTests(unittest.TestCase):
             "Session-bound BPP metadata unavailable; used legacy BF36/BF23 wrapper.",
             session.state.last_bpp_crypto_debug_lines,
         )
+        self.assertIn(
+            "Session-bound BPP metadata cause: "
+            "Metadata field profile.iccid must not be empty for local BPP generation.",
+            session.state.last_bpp_crypto_debug_lines,
+        )
+
+    def _load_chain_with_recorded_open(self, profile_dir, file_name: str, content: bytes):
+        (Path(profile_dir) / file_name).write_bytes(content)
+        session = LocalIsdrSession(
+            cfg=LocalAccessConfig(
+                PROFILE_DIR=str(profile_dir),
+                GENERATE_SESSION_BOUND_BPP=True,
+                WRAP_SEGMENT_IN_BOOTSTRAP=True,
+            ),
+            apdu_channel=FakeApduChannel(),
+        )
+        calls = []
+
+        def fake_open(transaction_id_override=None):
+            calls.append(("open", transaction_id_override))
+            raise AssertionError("the session opened for an unloadable profile file")
+
+        session.open_session = fake_open
+        return session, calls
+
+    def test_run_load_profile_chain_refuses_a_variable_template_before_the_session_opens(self):
+        template = (
+            b"\xEF\xBB\xBF"
+            + b"A0128001028101038204546573745830A{iccid:ICCID:10}"
+            + b"A1058003{ki:BINARY:16}{iccid:ICCID:10:nibble_swap}{pin1:UTF-8:4}"
+        )
+        with tempfile.TemporaryDirectory() as profile_dir:
+            session, calls = self._load_chain_with_recorded_open(profile_dir, "profile.varder", template)
+            with self.assertRaises(ValueError) as raised:
+                session.run_load_profile_chain()
+
+        self.assertEqual(calls, [])
+        message = str(raised.exception)
+        self.assertIn("profile.varder", message)
+        self.assertIn("(iccid, ki, pin1)", message)
+        self.assertIn("MATERIALIZE-TEMPLATE", message)
+
+    def test_run_load_profile_chain_refuses_a_file_that_is_no_profile_package(self):
+        for content, expected in (
+            (b"not a profile", "does not start with a complete TLV"),
+            (bytes.fromhex("3003020100"), "starts with tag 30"),
+            (bytes.fromhex("A0820400"), "does not start with a complete TLV"),
+        ):
+            with self.subTest(content=content):
+                with tempfile.TemporaryDirectory() as profile_dir:
+                    session, calls = self._load_chain_with_recorded_open(profile_dir, "profile.bin", content)
+                    with self.assertRaises(ValueError) as raised:
+                        session.run_load_profile_chain()
+                self.assertEqual(calls, [])
+                self.assertIn(expected, str(raised.exception))
+
+    def test_decode_profile_bytes_reads_hex_text_behind_a_byte_order_mark(self):
+        session = LocalIsdrSession(cfg=LocalAccessConfig(), apdu_channel=FakeApduChannel())
+
+        self.assertEqual(session._decode_profile_bytes(b"\xEF\xBB\xBFA001 00\n"), bytes.fromhex("A00100"))
+        self.assertEqual(session._decode_profile_bytes(b"\xEF\xBB\xBF\xA0\x01\x00"), b"\xEF\xBB\xBF\xA0\x01\x00")
 
     def test_run_load_profile_chain_resets_prepare_download_state_between_attempts(self):
         with tempfile.TemporaryDirectory() as profile_dir:
@@ -3143,10 +3414,10 @@ class LocalAccessSessionTests(unittest.TestCase):
         descriptions = session._describe_upp_protected_command_sequence(profile_bytes)
 
         self.assertGreaterEqual(len(descriptions), 2)
-        self.assertIn("plaintext[0:1008]", descriptions[0])
+        self.assertIn("plaintext[0:1007]", descriptions[0])
         self.assertIn("header", descriptions[0])
         self.assertIn("mf", descriptions[0])
-        self.assertIn("plaintext[1008:2016]", descriptions[1])
+        self.assertIn("plaintext[1007:2014]", descriptions[1])
         self.assertIn("telecom", descriptions[1])
 
     def test_the_shipped_local_access_profile_is_a_decodable_upp(self):

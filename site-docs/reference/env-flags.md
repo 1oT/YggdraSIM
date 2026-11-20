@@ -62,14 +62,19 @@ registered flag names are read back.
   *next launch* means the value is read once at startup.
 - **Persistence** -- the file an override lands in, per the table above.
 - **(sensitive)** -- the flag weakens a security posture (insecure TLS, demo
-  keys, the quirks gate, disabling plugins), so the editors ask for
-  confirmation before writing it.
+  keys, the quirks gate, disabling plugins) or names a command YggdraSIM runs
+  (`YGGDRASIM_SUCI_TOOL`, `YGGDRASIM_SAIP_TOOL`), so the editors ask for
+  confirmation before writing it: the launcher menu before it takes the
+  value, the GUI page between **Set** and the write, with the flag's note
+  shown. Clearing a flag is not asked about, and neither is a request sent
+  to `/api/env_flags/{name}/set` directly: the bearer token is the gate
+  there.
 
 ## The flags
 
 <!-- env-flags:start -->
 
-64 flags in 13 categories, generated from `yggdrasim_common/env_flags.py`.
+83 flags in 13 categories, generated from `yggdrasim_common/env_flags.py`.
 
 ### Build / runtime
 
@@ -77,6 +82,7 @@ registered flag names are read back.
 | --- | --- | --- | --- | --- | --- |
 | `YGGDRASIM_FLAVOR` | `clean`, `full`, `source` | auto-detect (frozen build → clean; source checkout → source) | next launch | session only | Force build flavor (clean / full / source) |
 | `YGGDRASIM_RUNTIME_ROOT` | path | source checkout: repo root. Frozen build: YggdraSIM-data next to the exe, else ~/YggdraSIM-data. | next launch | home | Force the writable runtime root |
+| `YGGDRASIM_IPA_INDIRECT_DOWNLOAD` | `1` / unset | unset -> an Activation Code or contactSmds trigger is run directly | immediately | runtime root | IPA: run an Activation Code or contactSmds trigger through the eIM |
 
 ### Card backend
 
@@ -84,6 +90,7 @@ registered flag names are read back.
 | --- | --- | --- | --- | --- | --- |
 | `YGGDRASIM_CARD_BACKEND` | `reader`, `sim` | reader unless the saved selection picks sim | immediately | runtime root | Force reader vs simulated SIM |
 | `YGGDRASIM_CARD_RELAY_URL` | text | unset (no relay) -- local PC/SC or simulator | immediately | runtime root | Remote HIL card-relay URL |
+| `YGGDRASIM_CARD_RELAY_TOKEN_FILE` | path | unset -> the relay marker's token, else no token | immediately | runtime root | Path to the remote card relay's bearer-token file |
 | `YGGDRASIM_SIM_QUIRKS` | path | Workspace/SIMCARD/sim_quirks.py (reseeded from template on first run) | immediately | runtime root | Override the simulated-SIM quirks file |
 | `YGGDRASIM_SIM_ISDR_CONFIG` | path | Workspace/SIMCARD/isdr_config.json | immediately | runtime root | Override the simulated-ISD-R personality JSON |
 | `YGGDRASIM_SIM_EIM_IDENTITY` | path | Workspace/SIMCARD/eim_identity.json | immediately | runtime root | Override the simulated default BF55 eIM identity |
@@ -146,6 +153,10 @@ registered flag names are read back.
 | `YGGDRASIM_HIL_TUI_TERM` | text | auto-detect (prefers screen-256color / tmux-256color / xterm-256color) | immediately | runtime root | Override the TERM value used by the HIL live-decode TUI |
 | `YGGDRASIM_HIL_RELAY_SESSION_RESET` | `1` / unset | enabled | immediately | runtime root | Power-cycle the card at relay-session boundaries |
 | `YGGDRASIM_HIL_SIMTRACE_RESET` | text | usb-reset | immediately | runtime root | How the supervisor clears the SIMtrace2 board before a session |
+| `YGGDRASIM_HIL_MODEM_DIAG` | text | off | immediately | runtime root | Mirror the modem's own SIM log into the HIL GSMTAP stream |
+| `YGGDRASIM_HIL_WIRESHARK_PROFILE` | text | YggdraSIM-HIL | immediately | runtime root | Wireshark profile the HIL session opens with |
+| `YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT` | text | u | immediately | runtime root | Time column format of the Wireshark a HIL session opens |
+| `YGGDRASIM_HIL_APDU_TIMEOUT_MS` | integer | 30000 | immediately | runtime root | Longest wait for the card to answer one APDU |
 | `YGGDRASIM_HIL_UHUBCTL_LOCATION` | text | unset (port-power reset disabled) | immediately | runtime root | Hub location for the port-power SIMtrace2 reset |
 | `YGGDRASIM_HIL_UHUBCTL_PORT` | text | unset (all ports on the hub) | immediately | runtime root | Hub port for the port-power SIMtrace2 reset |
 | `YGGDRASIM_HIL_UHUBCTL_BINARY` | path | uhubctl (resolved from PATH) | immediately | runtime root | Path to the uhubctl binary |
@@ -155,16 +166,29 @@ registered flag names are read back.
 
 | Variable | Accepts | Default | Applies | Persistence | Summary |
 | --- | --- | --- | --- | --- | --- |
-| `YGGDRASIM_SAIP_TOOL` | text | shutil.which('saip-tool') | immediately | runtime root | Explicit saip-tool binary or command |
+| `YGGDRASIM_SAIP_TOOL` | text | shutil.which('saip-tool') | immediately | runtime root | (sensitive) Explicit saip-tool binary or command |
 | `YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS` | number | built-in default (see Tools/ProfilePackage/saip_tool.py) | immediately | runtime root | Default timeout for saip-tool subprocess calls |
 | `YGGDRASIM_SAIP_TOOL_CACHE_MAX_BYTES` | integer | built-in default (see Tools/ProfilePackage/saip_tool.py) | immediately | runtime root | Cap for the on-disk SAIP tool decode cache |
 | `YGGDRASIM_SAIP_UNIVERSAL_TOKENS` | path | ~/.yggdrasim/saip_universal_tokens.csv | immediately | runtime root | Universal placeholder test-value list for SAIP templates |
 | `YGGDRASIM_SAIP_TOKEN_LISTS` | path | ~/.yggdrasim/saip_token_lists/ | immediately | runtime root | Library of profile-specific placeholder test-value lists |
 | `YGGDRASIM_SAIP_PE_LIBRARY` | path | ~/.yggdrasim/saip_pe_library/ | immediately | runtime root | Library of saved profile elements for the SAIP workbench |
+| `YGGDRASIM_EIM_BUILDER_STORE` | path | ~/.yggdrasim/eim_builder/ | immediately | runtime root | Store of the AddInitialEim builder: certificates and typed values |
+| `YGGDRASIM_LOCAL_EIM_STORE` | path | ~/.yggdrasim/local_eim/ | immediately | runtime root | Store of the Local eIM: identity, keys, eUICC records and the operation queue |
+| `YGGDRASIM_LOCAL_EIM_HISTORY_CAP` | integer | 10000 | immediately | runtime root | Finished Local eIM operations kept before the oldest are pruned |
 | `YGGDRASIM_SAIP_UNIVERSAL_DEFAULTS` | `1` / unset | unset → templates are seeded from the list | immediately | runtime root | Seed opened templates from the universal test-value list |
-| `YGGDRASIM_SUCI_TOOL` | text | shutil.which('suci-keytool') | immediately | runtime root | Explicit suci-keytool binary or command |
+| `YGGDRASIM_SUCI_TOOL` | text | suci-keytool.py or suci-keytool on PATH | immediately | runtime root | (sensitive) Explicit suci-keytool binary or command |
 | `YGGDRASIM_SUCI_TIMEOUT` | number | built-in default (see Tools/SuciTool/tool.py) | immediately | runtime root | Default timeout for suci-keytool subprocess calls |
 | `YGGDRASIM_EUM_SESSION_KEYS` | path | unset → no session key material available | immediately | runtime root | Path to the EUM session keys JSON repository |
+| `YGGDRASIM_MCP_ACCESS` | `read`, `write` | read | next launch | session only | (sensitive) MCP server access level: read or write |
+| `YGGDRASIM_MCP_ALLOW_CARD` | `1` / unset | unset -> card tools refuse | next launch | session only | (sensitive) Let MCP tools reach a card or a card relay |
+| `YGGDRASIM_MCP_ALLOW_SCRIPT_FILES` | `1` / unset | unset -> script-file verbs refuse | next launch | session only | (sensitive) Let MCP shell batches run command files |
+| `YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | WARNING | next launch | session only | Log level of pySim, osmocom and construct in the MCP server |
+| `YGGDRASIM_5GCORE_MODE` | `off`, `stub` | off | next launch | session only | YggdraCore stub AUSF: off or stub |
+| `YGGDRASIM_5GCORE_HOST` | text | 127.0.0.1 | next launch | session only | Bind address of the YggdraCore HTTP launcher |
+| `YGGDRASIM_5GCORE_PORT` | integer | 8089 | next launch | session only | Port of the YggdraCore HTTP launcher |
+| `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK` | `1` / unset | unset -> loopback addresses only | next launch | session only | (sensitive) Let the YggdraCore launcher bind beyond loopback |
+| `YGGDRASIM_5GCORE_TOKEN_FILE` | path | unset -> a generated token | next launch | session only | Bearer-token file of the YggdraCore HTTP launcher |
+| `YGGDRASIM_5GCORE_NO_TOKEN` | `1` / unset | unset -> bearer token required | next launch | session only | (sensitive) Run the YggdraCore launcher without bearer tokens |
 
 ### Session recording
 
@@ -176,7 +200,7 @@ registered flag names are read back.
 
 | Variable | Accepts | Default | Applies | Persistence | Summary |
 | --- | --- | --- | --- | --- | --- |
-| `YGGDRASIM_CLI_THEME` | `nord`, `catppuccin-frappe`, `catppuccin-latte`, `catppuccin-macchiato`, `catppuccin-mocha`, `dracula`, `github-dark`, `github-light`, `graphite-light`, `gruv-dark`, `ink-light`, `islands-light`, `matrix`, `mono`, `nord-light`, `ocean-dark`, `oneot-dark`, `oneot-light`, `solarized-dark`, `solarized-light`, `tokyo-night` | nord (the canonical YggdraSIM palette) | next launch | runtime root | Terminal colour palette for the CLI and the shells |
+| `YGGDRASIM_CLI_THEME` | `nord`, `bench-dark`, `bench-light`, `catppuccin-frappe`, `catppuccin-latte`, `catppuccin-macchiato`, `catppuccin-mocha`, `dracula`, `github-dark`, `github-light`, `graphite-light`, `gruv-dark`, `ink-light`, `islands-light`, `matrix`, `mono`, `nord-light`, `ocean-dark`, `oneot-dark`, `oneot-light`, `solarized-dark`, `solarized-light`, `tokyo-night` | nord (the canonical YggdraSIM palette) | next launch | runtime root | Terminal colour palette for the CLI and the shells |
 
 ### Universal GUI
 

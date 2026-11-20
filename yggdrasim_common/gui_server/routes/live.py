@@ -458,10 +458,37 @@ def _local_bridge_card_leases() -> dict[str, str]:
     return {reader_name: holder}
 
 
+def _simulated_reader_row(session_atrs: dict[str, str]) -> ReaderInfo:
+    """The simulated card as the one reader of the SIM backend."""
+    from yggdrasim_common.card_backend import SIMULATED_READER_NAME
+
+    atr_hex = session_atrs.get(SIMULATED_READER_NAME, "")
+    status_text = "simulated card"
+    if len(atr_hex) == 0:
+        try:
+            from SIMCARD.connection import SimulatedCardConnection
+
+            atr_hex = bytes(SimulatedCardConnection().getATR()).hex().upper()
+        except Exception as error:  # noqa: BLE001 -- any start-up failure is shown on the row.
+            status_text = f"simulator unavailable: {error}"
+    return ReaderInfo(name=SIMULATED_READER_NAME, atr_hex=atr_hex, status=status_text, kind="sim")
+
+
 @router.get("/api/live/readers", response_model=ReadersResponse)
 def list_readers() -> ReadersResponse:
     """Return a JSON list of available PCSC readers and simulated-card backends."""
+    from yggdrasim_common.card_backend import is_simulated_card_backend
+
     _reap_idle_card_sessions()
+    if is_simulated_card_backend():
+        # The SIM backend answers every connection from the simulated card,
+        # whatever reader it names, so a PC/SC or remote row would be the
+        # simulator under another reader's name.
+        return ReadersResponse(
+            backend="sim",
+            readers=[_simulated_reader_row(_session_atr_by_reader_name())],
+            note="card backend is SIM -- reader-backed surfaces use the simulated card.",
+        )
     remote_row = None if _should_suppress_remote_rows_for_stubbed_pcsc() else _probe_remote_bridge_reader()
     session_atrs = _session_atr_by_reader_name()
     # Registered remote readers do not depend on PC/SC, so they are listed
@@ -539,12 +566,16 @@ class AtrProbeRequest(BaseModel):
 @router.post("/api/live/atr", response_model=ReaderInfo)
 def probe_single_atr(body: AtrProbeRequest) -> ReaderInfo:
     """Connect to one reader, read the ATR, and return a JSON summary."""
+    from yggdrasim_common.card_backend import is_simulated_reader_name
+
+    needle = body.reader.strip()
+    if is_simulated_reader_name(needle):
+        return _simulated_reader_row(_session_atr_by_reader_name())
     try:
         from smartcard.System import readers as list_pcsc_readers
     except ImportError:
         raise HTTPException(status_code=503, detail="pyscard not installed.")
 
-    needle = body.reader.strip()
     if len(needle) == 0:
         raise HTTPException(status_code=400, detail="reader name is required.")
 
@@ -797,6 +828,18 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
     if ctx.dry_run:
         _post("info", "dry-run: skipping GetBoundProfilePackage + install.")
 
+    # The download holds its reader for as long as this thread runs, which
+    # can be past the socket closing on a cancel (yggdrasim_common.reader_claims).
+    from yggdrasim_common import reader_claims
+
+    claim_key = reader_claims.reader_key(ctx.reader)
+    try:
+        claim_token = reader_claims.claim(claim_key, "Profile download", long_running=True)
+    except reader_claims.ReaderBusyError as busy:
+        _post("error", str(busy))
+        _post("done", "flow aborted.")
+        return
+
     try:
         _post("info", "connecting to reader...")
         reader_index = _resolve_reader_index(ctx.reader)
@@ -809,9 +852,12 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
         from dataclasses import replace
         from SCP11.live.config import SGPConfig
         from SCP11.live.transport import PcscApduChannel
+        from yggdrasim_common.gui_server.live_trace import configure_channel_trace
 
         cfg = replace(SGPConfig(), READER_INDEX=int(reader_index))
-        apdu_channel = PcscApduChannel(reader_index=int(reader_index), quiet_apdu_logging=True)
+        apdu_channel = configure_channel_trace(
+            PcscApduChannel(reader_index=int(reader_index), quiet_apdu_logging=True)
+        )
         _post("info", "card connected; ATR capture complete.")
 
         if ctx.dry_run:
@@ -847,6 +893,8 @@ def _run_flow_worker(ctx: FlowContext, loop: asyncio.AbstractEventLoop, event_qu
         _post("error", f"{type(error).__name__}: {error}")
         _post("error", traceback.format_exc())
         _post("done", "flow aborted.")
+    finally:
+        reader_claims.release(claim_key, claim_token)
 
 
 def _parse_activation_code(code: str) -> tuple[str, str]:

@@ -661,7 +661,7 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-14
+            runner: macos-15
     runs-on: ${{ matrix.runner }}
     outputs:
       signed: ${{ steps.codesign.outputs.signed }}

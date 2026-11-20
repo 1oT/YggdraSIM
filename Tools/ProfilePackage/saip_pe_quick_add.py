@@ -182,14 +182,13 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         must populate the file tree via the filesystem editor before
         encoding to DER -- ``to_der()`` will fail on the bare skeleton.
         """
-        from pySim.esim.saip.templates import ProfileTemplateRegistry
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
 
-        from Tools.ProfilePackage.saip_pysim_compat import install_extra_profile_elements
+        ProfileTemplateRegistry = import_saip_templates().ProfileTemplateRegistry
 
-        # PE-IoT / PE-OPT-IoT have classes once the compensation is in
-        # place; those pre-populate the template's mandatory files the
-        # way ProfileElementUSIM does.
-        install_extra_profile_elements()
+        # PE-IoT / PE-OPT-IoT have classes in the pinned pySim; those
+        # pre-populate the template's mandatory files the way
+        # ProfileElementUSIM does.
         pe_class = ProfileElement.class_for_petype(pe_type)
         if pe_class is not None:
             typed = pe_class()
@@ -216,10 +215,9 @@ def _factory_map() -> Dict[str, Callable[[], Any]]:
         return pe
 
     # TCA SAIP v3.4.1 Annex A template OIDs (§9.7 CSIM, §9.10 IoT) for
-    # filesystem PEs upstream pySim has no class for. The IoT pair is
-    # served by saip_pysim_compat.install_extra_profile_elements; the
-    # CSIM pair has no template yet. ssim (2.23.143.1.2.19) and
-    # ssimEapTLSParameters need the v3.4 ASN.1 module.
+    # filesystem PEs upstream pySim has no class for. The pinned pySim has
+    # classes for the IoT pair; the CSIM pair has no template yet. ssim
+    # (2.23.143.1.2.19) and ssimEapTLSParameters need the v3.4 ASN.1 module.
     _DEFAULT_TEMPLATE_OID: dict[str, str] = {
         "csim": "2.23.143.1.2.10",
         "opt-csim": "2.23.143.1.2.11",

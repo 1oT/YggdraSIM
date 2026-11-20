@@ -151,12 +151,12 @@ on a card rig, is rejected rather than ignored.
 
 ```yaml
 rigs:
-  - id: quectel-a
-    name: Quectel bench
+  - id: modem-a
+    name: Modem bench
     kind: modem
     location: TestLocality
     modem:
-      label: Quectel EC25-E
+      label: LTE modem
       simtrace_vidpid: 1d50:60e3
     consumer:
       enabled: true
@@ -455,7 +455,7 @@ rig can route to:
 ```bash
 ssh -fN -R 8642:127.0.0.1:8642 esim@rig.example.test
 yggdrasim-lab --agent http://rig.example.test:8700 --token-file ~/.config/yggdrasim/remote_lab/alice.token \
-    reserve quectel-a --user alice --offer-card-url http://127.0.0.1:8642/apdu
+    reserve modem-a --user alice --offer-card-url http://127.0.0.1:8642/apdu
 ```
 
 The token for your own bridge is read from the file

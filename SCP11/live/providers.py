@@ -135,6 +135,10 @@ class RemoteEs9Provider(ProfileProvider):
     def handle_notification_esipa(self, request_obj: EimPollRequest) -> dict:
         return self._client.handle_notification_esipa(request_obj)
 
+    def post_esipa(self, eim_fqdn: str, body: bytes, pinned_tls_public_key_data: bytes = b"") -> bytes:
+        """One raw ESipa exchange with the eIM: the steps of an indirect profile download."""
+        return self._client.post_esipa(eim_fqdn, body, pinned_tls_public_key_data)
+
     def poll_eim(self, request_obj: EimPollRequest) -> EimPollResponse:
         return self._client.poll_eim(request_obj)
 

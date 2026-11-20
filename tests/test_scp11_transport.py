@@ -8,7 +8,10 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from SCP11.transport import (
+    PCSC_CARD_SESSION_LOST_STATUS,
     PcscApduChannel,
+    is_card_session_lost,
+    pcsc_status_code,
     print_apdu_trace_note,
     set_apdu_trace_note_renderer,
     set_apdu_trace_renderer,
@@ -690,6 +693,28 @@ class PcscApduChannelReconnectTests(unittest.TestCase):
 
         self.assertEqual(connection.connect_calls, 1)
 
+    def test_reset_under_the_simulated_backend_reconnects_to_the_simulated_card(self):
+        # reset() used to go straight to PC/SC: in a process on the simulated
+        # card it then took whatever card sat in the reader of that index, and
+        # commands meant for the simulator reached a real card.
+        channel = PcscApduChannel.__new__(PcscApduChannel)
+        channel._conn = _ScriptedConnectConnection([])
+        channel._reader_index = 0
+        channel._raw_apdu_logging = False
+        channel._quiet_apdu_logging = True
+        simulated_connection = object()
+
+        with mock.patch("SCP11.transport.is_simulated_card_backend", return_value=True):
+            with mock.patch("SCP11.transport.create_card_connection", return_value=simulated_connection) as create:
+                with mock.patch.object(PcscApduChannel, "_connect_after_power_cycle") as direct_connect:
+                    with mock.patch("smartcard.System.readers", side_effect=AssertionError("PC/SC was opened")):
+                        with mock.patch("SCP11.transport.time.sleep"):
+                            self.assertTrue(channel.reset())
+
+        self.assertIs(channel._conn, simulated_connection)
+        create.assert_called_once_with(reader_index=0)
+        direct_connect.assert_not_called()
+
     def test_reset_leaves_the_channel_disconnected_when_the_reconnect_fails(self):
         channel = PcscApduChannel.__new__(PcscApduChannel)
         channel._conn = _ScriptedConnectConnection([])
@@ -710,6 +735,37 @@ class PcscApduChannelReconnectTests(unittest.TestCase):
         self.assertFalse(channel.is_connected())
         with self.assertRaises(IOError):
             channel.exchange(bytes.fromhex("00A4040000"), "SELECT")
+
+
+class PcscStatusCodeTests(unittest.TestCase):
+    def test_status_code_comes_from_hresult_or_the_message(self):
+        carrying = RuntimeError("Card was reset. (0x80100068)")
+        carrying.hresult = -2146434968  # 0x80100068 as pyscard's signed hresult
+        self.assertEqual(pcsc_status_code(carrying), 0x80100068)
+        self.assertEqual(
+            pcsc_status_code(
+                RuntimeError(
+                    "Failed to transmit with protocol T0. Transaction failed.: "
+                    "Transaction failed. (0x80100016)"
+                )
+            ),
+            0x80100016,
+        )
+        self.assertIsNone(pcsc_status_code(RuntimeError("no card")))
+
+    def test_a_lost_card_session_is_the_reset_family_and_not_a_removed_card(self):
+        # pyscard's own values: SCARD_E_NOT_TRANSACTED, SCARD_W_UNRESPONSIVE_CARD,
+        # SCARD_W_UNPOWERED_CARD, SCARD_W_RESET_CARD.
+        self.assertEqual(
+            PCSC_CARD_SESSION_LOST_STATUS, frozenset({0x80100016, 0x80100066, 0x80100067, 0x80100068})
+        )
+        for code in sorted(PCSC_CARD_SESSION_LOST_STATUS):
+            with self.subTest(code=hex(code)):
+                self.assertTrue(is_card_session_lost(RuntimeError(f"failed (0x{code:08X})")))
+        for code in (0x80100069, 0x8010000C, 0x8010000B):  # removed, no card, sharing violation
+            with self.subTest(code=hex(code)):
+                self.assertFalse(is_card_session_lost(RuntimeError(f"failed (0x{code:08X})")))
+        self.assertFalse(is_card_session_lost(ValueError("malformed answer")))
 
 
 if __name__ == "__main__":

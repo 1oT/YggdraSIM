@@ -7,12 +7,14 @@
 GPC v2.3 Amendment D specifies SCP03 down to the byte. This suite uses
 ``pySim.global_platform.scp`` as an independent oracle and pins:
 
-* GPC §6.2.1 -- ``Scp03SessionKeys`` derivation against our ``_kdf``.
-* GPC §6.2.2.2 / §6.2.2.3 -- host and card cryptograms.
-* GPC §6.2.6 -- C-DEC ICV and ciphertext bytes for the first user APDU
-  after EXTERNAL AUTHENTICATE.
-* GPC §6.2.5 -- C-MAC trailer for an SM-wrapped command on logical
-  channel 0.
+* GP Amd D v1.1.2 §6.2.1 -- AES session keys: ``Scp03SessionKeys``
+  derivation against our ``_kdf``.
+* GP Amd D v1.1.2 §6.2.2.2 / §6.2.2.3 -- card and host authentication
+  cryptograms.
+* GP Amd D v1.1.2 §6.2.6 -- C-DECRYPTION ICV and ciphertext bytes for the
+  first user APDU after EXTERNAL AUTHENTICATE.
+* GP Amd D v1.1.2 §6.2.4 -- C-MAC trailer for an SM-wrapped command on
+  logical channel 0.
 
 The implementation additionally binds a Secure Channel Session to the
 logical channel on which it was authenticated. Cross-channel command
@@ -44,11 +46,14 @@ KMAC = bytes.fromhex("505152535455565758595A5B5C5D5E5F")
 DEK = bytes.fromhex("606162636465666768696A6B6C6D6E6F")
 HOST_CHAL = bytes.fromhex("0102030405060708")
 CARD_CHAL = bytes.fromhex("DEADBEEFC0FFEE00")
-KVN = 0x30  # GPC §E.5 SCP03 KVN range 0x30..0x3f
+# The 0x30..0x3F SCP03 key version range is the toolchain's convention
+# (saip_asn1_decode._decode_key_version_number); no library document
+# defines it (GPC v2.3.1 Annex E is Void, GP Amd D v1.1.2 has no range).
+KVN = 0x30
 
 
 def _synthetic_init_update_resp() -> bytes:
-    """Synthesize a §7.1.1.6 INIT UPDATE response body for the fixed
+    """Synthesize a GP Amd D v1.1.2 §7.1.1.6 INIT UPDATE response body for the fixed
     vectors above. The card cryptogram is computed via our KDF so the
     cross-check happens on derived state, not on a hardcoded blob."""
     from cryptography.hazmat.primitives import cmac as _cmac
@@ -72,7 +77,7 @@ def _synthetic_init_update_resp() -> bytes:
 
 @unittest.skipUnless(PYSIM_AVAILABLE, "pySim not installed (saip extra)")
 class Scp03PrimitiveParityTests(unittest.TestCase):
-    """GPC §6.2.x cryptographic primitives."""
+    """GP Amd D v1.1.2 §6.2 cryptographic usage: the primitives."""
 
     def setUp(self) -> None:
         self.card_resp = _synthetic_init_update_resp()
@@ -86,15 +91,16 @@ class Scp03PrimitiveParityTests(unittest.TestCase):
         )
 
     def test_session_key_s_enc_matches(self) -> None:
-        # GPC §6.2.1 / Annex D 4.1.5 -- DERIV_CONST_S_ENC = 0x04.
+        # GP Amd D v1.1.2 §6.2.1 Table 6-2 / §4.1.5 Table 4-1 (data
+        # derivation constants) -- DERIV_CONST_S_ENC = 0x04.
         self.assertEqual(self.ours.s_enc, self.pysim_keys.s_enc)
 
     def test_session_key_s_mac_matches(self) -> None:
-        # GPC §6.2.1 -- DERIV_CONST_S_MAC = 0x06.
+        # GP Amd D v1.1.2 §6.2.1 AES session keys -- DERIV_CONST_S_MAC = 0x06.
         self.assertEqual(self.ours.s_mac, self.pysim_keys.s_mac)
 
     def test_session_key_s_rmac_matches(self) -> None:
-        # GPC §6.2.1 -- DERIV_CONST_S_RMAC = 0x07.
+        # GP Amd D v1.1.2 §6.2.1 AES session keys -- DERIV_CONST_S_RMAC = 0x07.
         self.assertEqual(self.ours.s_rmac, self.pysim_keys.s_rmac)
 
     def test_kdf_constant_function_matches(self) -> None:
@@ -108,7 +114,7 @@ class Scp03PrimitiveParityTests(unittest.TestCase):
                 self.assertEqual(ours, theirs)
 
     def test_host_cryptogram_matches(self) -> None:
-        # GPC §6.2.2.3 -- host cryptogram derived from S-MAC.
+        # GP Amd D v1.1.2 §6.2.2.3 -- host authentication cryptogram derived from S-MAC.
         pysim_host = scp03_key_derivation(
             PysimScp03Keys.DERIV_CONST_AUTH_CGRAM_HOST,
             HOST_CHAL + CARD_CHAL,
@@ -186,7 +192,7 @@ class Scp03WrappedApduParityTests(unittest.TestCase):
 
 @unittest.skipUnless(PYSIM_AVAILABLE, "pySim not installed (saip extra)")
 class Scp03ColdStartCounterSpecTests(unittest.TestCase):
-    """GPC §6.2.6 requires counter 1 for the first protected command."""
+    """GP Amd D v1.1.2 §6.2.6 starts the C-DECRYPTION encryption counter at 1."""
 
     def setUp(self) -> None:
         self.card_resp = _synthetic_init_update_resp()
@@ -210,7 +216,7 @@ class Scp03ColdStartCounterSpecTests(unittest.TestCase):
         self.assertEqual(
             ours_w[5:-8],
             pysim_w[5:-8],
-            "Both implementations must use counter 1 per GPC §6.2.6.",
+            "Both implementations must use counter 1 per GP Amd D v1.1.2 §6.2.6.",
         )
 
     def test_ext_auth_primer_aligns_counter(self) -> None:

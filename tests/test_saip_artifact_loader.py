@@ -22,12 +22,11 @@ class SharedSaipArtifactLoaderTests(unittest.TestCase):
         saip._ensure_pysim_importable()
 
     def _end_pe_der(self) -> bytes:
-        from pySim.esim.saip import ProfileElement
+        from pySim.esim.saip import asn1
 
-        pe = ProfileElement()
-        pe.type = "end"
-        pe.decoded = {"end-header": {"mandated": None, "identification": 0}}
-        return pe.to_der()
+        return asn1.encode(
+            "ProfileElement", ("end", {"end-header": {"mandated": None, "identification": 0}})
+        )
 
     def test_der_result_keeps_provenance_and_is_strictly_complete(self) -> None:
         raw = self._end_pe_der()

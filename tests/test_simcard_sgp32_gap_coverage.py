@@ -187,10 +187,11 @@ class Sgp32PsmoConstraintsTests(_Sgp32GapBase):
         _outer_tag, outer_value = _peel_outer(response)
         _choice_tag, choice_value, _raw, _next = read_tlv(outer_value, 0)
         _seq_tag, seq_value, _, _ = read_tlv(choice_value, 0)
-        # disableResult ok then listProfileInfoError profileChangeOngoing(11)
-        # under BF2D / 02 01 0B, then processingTerminated.
+        # disableResult ok then listProfileInfoError profileChangeOngoing(11):
+        # the second CHOICE alternative in an AUTOMATIC TAGS module, so
+        # BF2D / 81 01 0B; then processingTerminated.
         self.assertIn(b"\x84\x01\x00", seq_value)
-        self.assertIn(b"\xBF\x2D\x03\x02\x01\x0B", seq_value)
+        self.assertIn(b"\xBF\x2D\x03\x81\x01\x0B", seq_value)
         self.assertIn(b"\x02\x01\x02", seq_value)
 
 
@@ -198,6 +199,7 @@ class Sgp32FallbackAttributeTests(_Sgp32GapBase):
     def test_set_fallback_on_disabled_profile_marks_attribute(self) -> None:
         secondary = _add_secondary_profile(self.state)
         secondary.state = "disabled"
+        secondary.fallback_allowed = True
         primary = self.state.profiles[0]
         primary.state = "enabled"
         psmo_set_fallback = tlv(
@@ -239,6 +241,106 @@ class Sgp32FallbackAttributeTests(_Sgp32GapBase):
         _choice_tag, choice_value, _, _ = read_tlv(outer_value, 0)
         _seq_tag, seq_value, _, _ = read_tlv(choice_value, 0)
         self.assertIn(b"\x8E\x01\x02", seq_value)  # noFallbackAttribute(2)
+
+
+class Sgp32SetFallbackProcedureTests(_Sgp32GapBase):
+    """SGP.32 v1.3 §3.4.6, one test per step in the order the steps run.
+
+    Each fixture passes every earlier step, so a result code proves the step
+    that produced it. The target is a disabled Profile beside the enabled
+    one; the result is ``setFallbackAttributeResult`` [13] ('8D').
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.primary = self.state.profiles[0]
+        self.primary.state = "enabled"
+        self.target = _add_secondary_profile(self.state)
+        self.target.state = "disabled"
+        self.target.fallback_allowed = True
+
+    def _results(self, *psmos: bytes) -> bytes:
+        request = _sign_euicc_package(
+            self.eim_key,
+            eim_id=self.eim_id,
+            eid_hex=self.state.eid,
+            counter_value=1,
+            inner_choice_tag=b"\xA0",
+            inner_items=b"".join(psmos),
+        )
+        response, _sw1, _sw2 = self.logic.handle_store_data(request)
+        _outer_tag, outer_value = _peel_outer(response)
+        _choice_tag, choice_value, _, _ = read_tlv(outer_value, 0)
+        _seq_tag, seq_value, _, _ = read_tlv(choice_value, 0)
+        # The signed result data carries eimId, counterValue and seqNumber
+        # ahead of the euiccResultData SEQUENCE ('30') holding the results.
+        offset = 0
+        while offset < len(seq_value):
+            tag, value, _raw, offset = read_tlv(seq_value, offset)
+            if tag == b"\x30":
+                return value
+        self.fail("no euiccResultData in the package result")
+
+    def _set_fallback(self, iccid: str) -> bytes:
+        return tlv(b"\xA8", tlv(b"\x5A", encode_iccid_ef(iccid)))
+
+    def test_step1_without_the_mechanism_processing_terminates(self) -> None:
+        self.state.euicc_info.iot_specific_info.fallback_supported = False
+        results = self._results(self._set_fallback(self.target.iccid), tlv(b"\xA9", b""))
+        # processingTerminated unknownOrDamagedCommand, and the unset that
+        # followed is not executed (§5.9.1).
+        self.assertEqual(results, b"\x02\x01\x02")
+        self.assertFalse(self.target.fallback_attribute)
+
+    def test_step2_an_unknown_iccid_is_not_found(self) -> None:
+        results = self._results(self._set_fallback("8988000000000000999"))
+        self.assertEqual(results, b"\x8D\x01\x01")  # iccidOrAidNotFound(1)
+
+    def test_step3_the_fallback_profile_is_answered_ok_before_any_check(self) -> None:
+        # Enabled, flag absent: steps 4 and 6 would refuse it, step 3 answers first.
+        self.target.fallback_attribute = True
+        self.target.fallback_allowed = None
+        self.target.state = "enabled"
+        self.primary.state = "disabled"
+        results = self._results(self._set_fallback(self.target.iccid))
+        self.assertEqual(results, b"\x8D\x01\x00")  # ok(0)
+        self.assertTrue(self.target.fallback_attribute)
+
+    def test_step4_a_profile_without_fallback_allowed_is_refused(self) -> None:
+        for allowed in (None, False):
+            with self.subTest(fallback_allowed=allowed):
+                self.target.fallback_allowed = allowed
+                results = self._results(self._set_fallback(self.target.iccid))
+                self.assertEqual(results, b"\x8D\x01\x02")  # fallbackNotAllowed(2)
+                self.assertFalse(self.target.fallback_attribute)
+                self.state.eim_entries[0].counter_value = 0
+
+    def test_step5_the_emergency_profile_is_refused(self) -> None:
+        self.target.ecall_indication = True
+        results = self._results(self._set_fallback(self.target.iccid))
+        self.assertEqual(results, b"\x8D\x01\x7F")  # undefinedError(127)
+        self.assertFalse(self.target.fallback_attribute)
+
+    def test_step6_an_enabled_fallback_profile_blocks_the_move(self) -> None:
+        self.primary.fallback_attribute = True
+        results = self._results(self._set_fallback(self.target.iccid))
+        self.assertEqual(results, b"\x8D\x01\x03")  # fallbackProfileEnabled(3)
+        self.assertTrue(self.primary.fallback_attribute)
+        self.assertFalse(self.target.fallback_attribute)
+
+    def test_step6_a_disabled_fallback_profile_hands_the_attribute_over(self) -> None:
+        self.target.fallback_attribute = True
+        self.primary.fallback_allowed = True
+        results = self._results(self._set_fallback(self.primary.iccid))
+        self.assertEqual(results, b"\x8D\x01\x00")  # ok(0)
+        self.assertTrue(self.primary.fallback_attribute)
+        self.assertFalse(self.target.fallback_attribute)
+
+    def test_step7_an_allowed_profile_becomes_the_fallback_profile(self) -> None:
+        results = self._results(self._set_fallback(self.target.iccid))
+        self.assertEqual(results, b"\x8D\x01\x00")  # ok(0)
+        self.assertTrue(self.target.fallback_attribute)
+        self.assertFalse(self.primary.fallback_attribute)
 
 
 class Sgp32ImmediateEnableTests(_Sgp32GapBase):
@@ -320,29 +422,98 @@ class Sgp32StrictEnableTests(_Sgp32GapBase):
 
 
 class Sgp32ProfileRollbackTests(_Sgp32GapBase):
-    def test_bf58_with_boolean_payload_reverts_to_previous(self) -> None:
+    # ProfileRollbackRequest (SGP.32 v1.3 §5.9.16): refreshFlag BOOLEAN takes the automatic tag
+    # [0], so refreshFlag TRUE is BF58 03 80 01 FF; the response's cmdResult is a universal INTEGER.
+    def _arm_rollback(self):
         secondary = _add_secondary_profile(self.state)
         primary = self.state.profiles[0]
         primary.state = "disabled"
         secondary.state = "enabled"
         secondary.rollback_armed = True
         self.state.previous_enabled_aid = primary.aid
+        return primary, secondary
 
-        # ProfileRollbackRequest: BF58 03 01 01 FF (refreshFlag = TRUE).
-        request = bytes.fromhex("BF58030101FF")
-        response, sw1, sw2 = self.logic.handle_store_data(request)
+    def test_bf58_with_boolean_payload_reverts_to_previous(self) -> None:
+        primary, secondary = self._arm_rollback()
+
+        response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF58038001FF"))
 
         self.assertEqual((sw1, sw2), (0x90, 0x00))
-        self.assertEqual(response[:2], b"\xBF\x58")
-        self.assertIn(b"\x80\x01\x00", response)  # cmdResult ok(0)
+        outer_tag, outer_value = _peel_outer(response)
+        self.assertEqual(outer_tag, b"\xBF\x58")
+        self.assertEqual(outer_value[:3], bytes.fromhex("020100"))  # cmdResult ok(0)
         self.assertEqual(primary.state, "enabled")
         self.assertEqual(secondary.state, "disabled")
         self.assertFalse(secondary.rollback_armed)
 
     def test_bf58_when_no_rollback_armed_returns_rollback_not_allowed(self) -> None:
-        request = bytes.fromhex("BF58030101FF")
-        response, _sw1, _sw2 = self.logic.handle_store_data(request)
-        self.assertIn(b"\x80\x01\x01", response)
+        response, _sw1, _sw2 = self.logic.handle_store_data(bytes.fromhex("BF58038001FF"))
+        self.assertEqual(response, bytes.fromhex("BF5803020101"))
+
+    def test_rollback_returns_the_last_package_result_with_rollback_result(self) -> None:
+        secondary = _add_secondary_profile(self.state)
+        secondary.state = "disabled"
+        primary = self.state.profiles[0]
+        primary.state = "enabled"
+        psmo_enable = tlv(b"\xA3", tlv(b"\x5A", encode_iccid_ef(secondary.iccid)) + tlv(b"\x81", b""))
+        request = _sign_euicc_package(
+            self.eim_key,
+            eim_id=self.eim_id,
+            eid_hex=self.state.eid,
+            counter_value=1,
+            inner_choice_tag=b"\xA0",
+            inner_items=psmo_enable,
+        )
+        self.logic.handle_store_data(request)
+        previous = self.state.last_euicc_package_result
+        self.assertIsNotNone(previous)
+        self.assertEqual([entry.seq_number for entry in self.state.euicc_package_results], [previous.seq_number])
+
+        response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF5803800100"))
+
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        _outer_tag, outer_value = _peel_outer(response)
+        self.assertEqual(outer_value[:3], bytes.fromhex("020100"))
+        result_tag, result_value, result_raw, _next = read_tlv(outer_value, 3)
+        self.assertEqual(result_tag, b"\xBF\x51")  # eUICCPackageResult [81], one tag
+        _tag, signed_body, _raw, _next = read_tlv(result_value, 0)
+        _tag, data_value, _raw, _next = read_tlv(signed_body, 0)
+        fields = {}
+        offset = 0
+        while offset < len(data_value):
+            tag_bytes, value, _raw, offset = read_tlv(data_value, offset)
+            fields[tag_bytes] = value
+        self.assertEqual(fields[b"\x80"], self.eim_id.encode("utf-8"))
+        self.assertEqual(fields[b"\x81"], encode_der_integer(1))
+        # a new, higher seqNumber (the rollback's notifications draw from the same counter)
+        new_seq = int.from_bytes(fields[b"\x83"], "big")
+        self.assertGreater(new_seq, previous.seq_number)
+        self.assertTrue(fields[b"\x30"].endswith(bytes.fromhex("8C0100")))  # rollbackResult ok(0)
+        # the new result replaces the previous one
+        self.assertEqual([entry.seq_number for entry in self.state.euicc_package_results], [new_seq])
+        self.assertEqual(self.state.euicc_package_results[0].payload, result_value)
+        self.assertEqual(primary.state, "enabled")
+
+    def test_universal_boolean_only_without_conformance_strict(self) -> None:
+        self._arm_rollback()
+        self.state.conformance_strict = True
+        _response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF58030101FF"))
+        self.assertEqual((sw1, sw2), (0x6A, 0x80))
+        self.state.conformance_strict = False
+        response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF58030101FF"))
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(response[3:6], bytes.fromhex("020100"))
+
+    def test_malformed_requests(self) -> None:
+        for request in ("BF5800", "BF5804800200FF", "BF5806800100800100"):
+            with self.subTest(request=request):
+                _response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex(request))
+                self.assertEqual((sw1, sw2), (0x6A, 0x80))
+
+    def test_primitive_body_never_stores_an_eim(self) -> None:
+        before = [entry.eim_id for entry in self.state.eim_entries]
+        self.logic.handle_store_data(bytes.fromhex("BF5803800100"))
+        self.assertEqual([entry.eim_id for entry in self.state.eim_entries], before)
 
 
 class Sgp32FallbackEs10bTests(_Sgp32GapBase):

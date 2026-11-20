@@ -405,3 +405,66 @@ class CliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(rc, 4)
+
+
+def _tlv(tag_hex: str, value: bytes) -> bytes:
+    assert len(value) < 0x80
+    return bytes.fromhex(tag_hex) + bytes([len(value)]) + value
+
+
+class DecodeBppTests(unittest.TestCase):
+    """``decode-bpp`` summarises a BF36 with the readers the tree already has."""
+
+    @staticmethod
+    def _bound_profile_package() -> bytes:
+        body = _tlv("BF23", _tlv("80", b"\x10" * 16))
+        body += _tlv("A0", _tlv("87", b"\x21" * 8))
+        body += _tlv("A1", _tlv("88", b"\x22" * 8))
+        body += _tlv("A3", _tlv("86", b"\x23" * 8) + _tlv("86", b"\x24" * 8))
+        return _tlv("BF36", body)
+
+    def _run(self, payload: bytes) -> tuple[int, str, str]:
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bpp_path = Path(tmp) / "bpp.bin"
+            bpp_path.write_bytes(payload)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = run_cli(["--workspace-root", tmp, "decode-bpp", "--bpp", str(bpp_path)])
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_summary_gives_the_layout_and_the_segment_count(self) -> None:
+        from SCP11.local_access.session import LocalIsdrSession
+
+        package = self._bound_profile_package()
+        code, stdout, stderr = self._run(package)
+
+        self.assertEqual(code, 0, stderr)
+        summary = json.loads(stdout)
+        expected = LocalIsdrSession(apdu_channel=None)._segment_bound_profile_package(package)
+        self.assertEqual(summary["byte_length"], len(package))
+        self.assertEqual(summary["segment_count"], len(expected))
+        self.assertGreater(summary["segment_count"], 0)
+        self.assertTrue(summary["layout"][0].startswith("BF36 "))
+
+    def test_bytes_that_are_no_bound_profile_package_are_refused(self) -> None:
+        code, stdout, stderr = self._run(b"\x30\x03\x02\x01\x00")
+
+        self.assertEqual(code, 5)
+        self.assertEqual(stdout, "")
+        self.assertIn("BPP decode failed", stderr)
+
+    def test_a_missing_file_is_reported(self) -> None:
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = run_cli(["--workspace-root", tmp, "decode-bpp", "--bpp", str(Path(tmp) / "absent.bin")])
+
+        self.assertEqual(code, 3)
+        self.assertIn("BPP file not found", stderr.getvalue())

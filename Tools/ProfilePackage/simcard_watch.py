@@ -229,26 +229,44 @@ class ProfileStoreWatcher:
 
 
 def default_profile_store_root(workspace_root: Path) -> Path:
-    """Resolve the simulator default profile-store root.
+    """Resolve the profile-store root the simulator writes to.
 
-    Mirrors ``SIMCARD.config.get_sim_profile_store_path``'s default,
-    but resolved relative to the caller-supplied workspace. We do the
-    import lazily so ``simcard_watch`` stays importable in contexts
+    Follows ``SimulatedSimCardEngine``: the configured profile store when
+    one is set, otherwise the ``profiles`` directory of the eUICC store.
+    The engine picks that store by EID. This watcher knows no EID, so it
+    takes the store only when the root holds exactly one, and falls back
+    to the workspace default otherwise; ``--store-root`` names another.
+
+    The imports are lazy so ``simcard_watch`` stays importable in contexts
     where the simulator-side packages are unavailable.
     """
+    workspace_default = Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
     try:
-        from SIMCARD.config import get_sim_profile_store_path
-        from SIMCARD.euicc_store import default_profile_store_path
-        from SIMCARD.config import get_sim_euicc_store_root
+        from SIMCARD.euicc_store import EUICC_MANIFEST_FILENAME, default_profile_store_path
+        from yggdrasim_common.card_backend import (
+            get_sim_euicc_store_root,
+            get_sim_profile_store_path,
+        )
     except ImportError:
-        return Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
+        return workspace_default
     explicit = str(get_sim_profile_store_path() or "").strip()
     if len(explicit) > 0:
         return Path(explicit).expanduser().resolve()
     euicc_root = str(get_sim_euicc_store_root() or "").strip()
     if len(euicc_root) == 0:
-        return Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
-    return Path(default_profile_store_path(euicc_root)).expanduser().resolve()
+        return workspace_default
+    try:
+        entries = sorted(Path(euicc_root).iterdir(), key=lambda entry: entry.name)
+    except OSError:
+        return workspace_default
+    stores = [
+        entry
+        for entry in entries
+        if entry.name.upper().startswith("EID_") and (entry / EUICC_MANIFEST_FILENAME).is_file()
+    ]
+    if len(stores) != 1:
+        return workspace_default
+    return Path(default_profile_store_path(str(stores[0]))).expanduser().resolve()
 
 
 def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:

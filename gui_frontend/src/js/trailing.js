@@ -67,6 +67,7 @@
         apduInputHex: tab.apduInputHex || "",
         apduFollow61: tab.apduFollow61 !== false,
         apduRetry6C: tab.apduRetry6C !== false,
+        apduStopOnError: tab.apduStopOnError !== false,
         apduHistory: Array.isArray(tab.apduHistory)
           ? tab.apduHistory.slice(-20)
           : [],
@@ -112,6 +113,7 @@
     tab.apduInputHex = persisted.apduInputHex || "";
     tab.apduFollow61 = persisted.apduFollow61 !== false;
     tab.apduRetry6C = persisted.apduRetry6C !== false;
+    tab.apduStopOnError = persisted.apduStopOnError !== false;
     tab.apduHistory = Array.isArray(persisted.apduHistory)
       ? persisted.apduHistory.slice()
       : [];
@@ -1097,21 +1099,31 @@
 
     var group = document.createElement("div");
     group.className = "cc-fs-actions-group";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "File");
     group.appendChild(createBtn);
-    group.appendChild(deleteBtn);
-    group.appendChild(resizeBtn);
     group.appendChild(lifecycleBtn);
     group.appendChild(searchBtn);
     bar.appendChild(group);
 
-    // SUSPEND UICC sits in its own micro-group -- visually separated
-    // so operators don't fat-finger it while clicking file-scoped
-    // actions. It's a card-wide power command (ETSI TS 102 221 §11.1.22),
-    // not file-scoped, so its gating is session-only, not kind-aware.
-    var cardGroup = document.createElement("div");
-    cardGroup.className = "cc-fs-actions-group cc-fs-actions-group--card";
-    cardGroup.appendChild(suspendBtn);
-    bar.appendChild(cardGroup);
+    // The keys that destroy data or take the card away sit apart, at the
+    // end of the strip, under their own legend, so a click meant for a
+    // file action cannot land on them. SUSPEND UICC is card-wide (ETSI
+    // TS 102 221 §11.1.22), not file-scoped, so its gating is
+    // session-only, not kind-aware; it closes the group.
+    var dangerGroup = document.createElement("div");
+    dangerGroup.className = "cc-fs-actions-group cc-fs-actions-group--danger";
+    dangerGroup.setAttribute("role", "group");
+    dangerGroup.setAttribute("aria-label", "Danger");
+    var dangerLegend = document.createElement("span");
+    dangerLegend.className = "cc-fs-actions-legend";
+    dangerLegend.textContent = "Danger";
+    dangerGroup.appendChild(dangerLegend);
+    dangerGroup.appendChild(deleteBtn);
+    dangerGroup.appendChild(resizeBtn);
+    suspendBtn.classList.add("cc-fs-action-btn--card");
+    dangerGroup.appendChild(suspendBtn);
+    bar.appendChild(dangerGroup);
 
     return bar;
   }
@@ -1156,37 +1168,8 @@
     }
 
     var fcp = data.fcp || {};
-    var fcpKeys = Object.keys(fcp);
-    if (fcpKeys.length > 0) {
-      var fcpBlock = document.createElement("div");
-      fcpBlock.className = "cc-fcp-block";
-      var h4 = document.createElement("h4");
-      h4.textContent = "FCP";
-      fcpBlock.appendChild(h4);
-      // Pretty view -- type-aware, hex grouping, nested objects open
-      // into their own dl. The toolbar gives operators a one-click
-      // toggle to the raw JSON if they need byte-perfect output.
-      var fcpPretty = document.createElement("dl");
-      fcpPretty.className = "cc-fcp-fields cc-pv-object cc-pv-object--depth-0";
-      fcpKeys.forEach(function (key) {
-        var row = document.createElement("div");
-        row.className = "cc-pv-field";
-        var dt = document.createElement("dt");
-        dt.className = "cc-pv-key";
-        dt.textContent = key;
-        var dd = document.createElement("dd");
-        dd.className = "cc-pv-val";
-        dd.appendChild(renderPrettyValue(fcp[key], 0));
-        row.appendChild(dt);
-        row.appendChild(dd);
-        fcpPretty.appendChild(row);
-      });
-      var fcpJson = renderJsonBlock(fcp);
-      fcpJson.hidden = true;
-      fcpBlock.appendChild(buildDecodedToolbar(fcp, fcpPretty, fcpJson));
-      fcpBlock.appendChild(fcpPretty);
-      fcpBlock.appendChild(fcpJson);
-      wrap.appendChild(fcpBlock);
+    if (Object.keys(fcp).length > 0) {
+      wrap.appendChild(scp03BuildFcpCard(fcp, tab));
     }
 
     var payload = data.data || {};
@@ -1213,9 +1196,249 @@
       }));
     } else {
       // Unknown kind -- render the raw payload for transparency.
-      wrap.appendChild(renderDecodedBlock(payload, null, { omitHead: true }));
+      wrap.appendChild(renderDecodedBlock(payload, null, { omitHead: true, copyKeys: true }));
     }
     container.appendChild(wrap);
+  }
+
+  // The FCP of a file picked in the File system tree is a card that starts
+  // folded, so the body is the first thing under the file actions; its
+  // summary line carries what a glance needs. The session tab remembers an
+  // opened card, so browsing from file to file keeps it open until it is
+  // folded again. Without a tab (the kind="fcp" result of a SELECT or READ
+  // action) the FCP is the answer asked for, and the card starts open.
+  function scp03BuildFcpCard(fcp, tab) {
+    var card = document.createElement("details");
+    card.className = "cc-fcp-card";
+    card.open = tab ? !!tab.fcpCardOpen : true;
+    card.addEventListener("toggle", function () {
+      if (tab) tab.fcpCardOpen = card.open;
+    });
+    var head = document.createElement("summary");
+    head.className = "cc-fcp-card-head";
+    var title = document.createElement("span");
+    title.className = "cc-fcp-card-title";
+    title.textContent = String(fcp.template || "").toUpperCase() === "FCI" ? "FCI" : "FCP";
+    head.appendChild(title);
+    var facts = scp03FcpCardFacts(fcp);
+    if (facts.length > 0) {
+      var factsEl = document.createElement("span");
+      factsEl.className = "cc-fcp-card-facts";
+      factsEl.textContent = facts.join(" · ");
+      factsEl.title = facts.join("\n");
+      head.appendChild(factsEl);
+    }
+    card.appendChild(head);
+
+    var fcpBlock = document.createElement("div");
+    fcpBlock.className = "cc-fcp-block";
+    // Pretty view -- type-aware, hex grouping, nested objects open
+    // into their own dl, a Copy key per parameter. The short parameters
+    // fill a grid of cells and the ones that need a line of their own
+    // follow at full width. The parameters without a value are named
+    // once on the toolbar line, whose JSON view lists them as null.
+    var groups = scp03FcpFieldGroups(fcp);
+    var fcpPretty = document.createElement("dl");
+    fcpPretty.className = "cc-fcp-fields cc-pv-object cc-pv-object--depth-0";
+    groups.cells.forEach(function (key) {
+      fcpPretty.appendChild(scp03BuildFcpFieldRow(key, fcp[key], false));
+    });
+    groups.wide.forEach(function (key) {
+      fcpPretty.appendChild(scp03BuildFcpFieldRow(key, fcp[key], true));
+    });
+    var fcpJson = renderJsonBlock(fcp);
+    fcpJson.hidden = true;
+    var meta = document.createElement("div");
+    meta.className = "cc-fcp-meta";
+    if (groups.empty.length > 0) {
+      var noValue = document.createElement("p");
+      noValue.className = "cc-fcp-novalue";
+      noValue.title = "Listed as null under Show JSON.";
+      var noValueLabel = document.createElement("span");
+      noValueLabel.className = "cc-fcp-novalue-label";
+      noValueLabel.textContent = "No value";
+      var noValueKeys = document.createElement("span");
+      noValueKeys.className = "cc-fcp-novalue-keys";
+      noValueKeys.textContent = groups.empty.join(" · ");
+      noValue.appendChild(noValueLabel);
+      noValue.appendChild(noValueKeys);
+      meta.appendChild(noValue);
+    }
+    meta.appendChild(buildDecodedToolbar(fcp, fcpPretty, fcpJson));
+    fcpBlock.appendChild(meta);
+    fcpBlock.appendChild(fcpPretty);
+    fcpBlock.appendChild(fcpJson);
+    card.appendChild(fcpBlock);
+    return card;
+  }
+
+  // The parameters of the open card in the order the server sent them,
+  // split into grid cells, full-width rows and the ones without a value.
+  function scp03FcpFieldGroups(fcp) {
+    var groups = { cells: [], wide: [], empty: [] };
+    Object.keys(fcp).forEach(function (key) {
+      var value = fcp[key];
+      if (value === null || value === undefined) {
+        groups.empty.push(key);
+      } else if (scp03FcpFieldIsWide(value)) {
+        groups.wide.push(key);
+      } else {
+        groups.cells.push(key);
+      }
+    });
+    return groups;
+  }
+
+  // A row of its own for a list or a nested object with entries, and for
+  // a string drawn wider than a cell holds (hex draws byte-grouped with a
+  // byte count, half again its length): the raw FCP, a 16-byte AID, the
+  // note left for undecoded security attributes.
+  function scp03FcpFieldIsWide(value) {
+    if (value === null || value === undefined) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    if (typeof value !== "string") return false;
+    var drawn = looksLikeHex(value) ? value.length * 1.5 + 5 : value.length;
+    return drawn > 32;
+  }
+
+  // One parameter of the open card: key, value and its Copy key.
+  function scp03BuildFcpFieldRow(key, value, wide) {
+    var row = document.createElement("div");
+    row.className = wide ? "cc-pv-field cc-fcp-field--wide" : "cc-pv-field";
+    var dt = document.createElement("dt");
+    dt.className = "cc-pv-key";
+    dt.textContent = key;
+    var dd = document.createElement("dd");
+    dd.className = "cc-pv-val";
+    dd.appendChild(renderPrettyValue(value, 0));
+    row.appendChild(dt);
+    row.appendChild(dd);
+    scp03AppendFieldCopyKey(row, key, value);
+    return row;
+  }
+
+  // Summary line of the folded card: what the kind chip above it does not
+  // say. ETSI TS 102 221 v18.4 §11.1.1.4.1 file size, §11.1.1.4.2 total
+  // file size (the figure a DF carries), §11.1.1.4.3 record length and
+  // number of records, §11.1.1.4.8 SFI, §11.1.1.4.9 life cycle status
+  // (named per table 11.7b by the server), §11.1.1.4.7.3 EF ARR file ID
+  // and record number.
+  function scp03FcpCardFacts(fcp) {
+    var facts = [];
+    var template = String(fcp.template || "").toUpperCase();
+    if (template === "FCI") {
+      if (fcp.aid && fcp.aid !== "Unknown") facts.push("AID " + fcp.aid);
+      return facts;
+    }
+    if (template !== "FCP") {
+      facts.push(fcp.parse_error ? "not decoded: " + fcp.parse_error : "not decoded");
+      return facts;
+    }
+    var recLen = Number(fcp.rec_len || 0);
+    var recCount = Number(fcp.rec_count || 0);
+    if (recLen > 0) {
+      facts.push(recCount + (recCount === 1 ? " record × " : " records × ") + recLen + " B");
+    } else if (String(fcp.type || "") === "EF") {
+      facts.push("file size " + Number(fcp.size || 0) + " B");
+    } else if (fcp.total_size !== null && fcp.total_size !== undefined) {
+      facts.push("total file size " + Number(fcp.total_size) + " B");
+    }
+    if (fcp.sfi) facts.push("SFI " + fcp.sfi);
+    if (fcp.lcs_name) {
+      facts.push(String(fcp.lcs_name));
+    } else if (fcp.lcs && fcp.lcs !== "Unknown") {
+      facts.push("LCS " + fcp.lcs);
+    }
+    if (fcp.arr_record !== null && fcp.arr_record !== undefined) {
+      facts.push("ARR " + (fcp.arr_fid ? fcp.arr_fid + " " : "") + "record " + fcp.arr_record);
+    } else if (fcp.security_format === "compact" || fcp.security_format === "expanded") {
+      facts.push(fcp.security_format + " security attributes");
+    }
+    return facts;
+  }
+
+  // What a parameter's Copy key puts on the clipboard: the value as the
+  // server sent it (contiguous hex, not the grouped display with its byte
+  // count), a list of strings one per line, anything structured as
+  // indented JSON. An absent or empty value gets no key.
+  function scp03CopyText(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value !== "object") return String(value);
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "";
+      var flat = value.every(function (item) {
+        return item === null || typeof item !== "object";
+      });
+      if (flat) {
+        return value.map(function (item) { return String(item); }).join("\n");
+      }
+    } else if (Object.keys(value).length === 0) {
+      return "";
+    }
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  // A key that puts ``text`` on the clipboard and reads "Copied" for a
+  // moment; a write the webview refuses is reported in the event log.
+  function scp03BuildCopyButton(text, label, title, className) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener("click", function () {
+      copyTextToClipboard(text).then(function (copied) {
+        if (!copied) {
+          logBus.emit({
+            level: "warn",
+            source: "scp03.copy",
+            message: "clipboard write rejected (" + title + ").",
+          });
+          return;
+        }
+        button.textContent = "Copied";
+        button.classList.add("is-copied");
+        setTimeout(function () {
+          button.textContent = label;
+          button.classList.remove("is-copied");
+        }, 900);
+      });
+    });
+    return button;
+  }
+
+  // One Copy key per top-level parameter of an FCP or a decoded File
+  // system body. The modifier gives the row a third grid column whether or
+  // not the value has a key, so every value in the list keeps one width.
+  function scp03AppendFieldCopyKey(row, key, value) {
+    row.classList.add("cc-pv-field--copy");
+    var text = scp03CopyText(value);
+    if (!text) return;
+    var button = scp03BuildCopyButton(text, "Copy", "Copy the " + key + " value", "cc-pv-copy");
+    button.setAttribute("aria-label", "Copy " + key);
+    row.appendChild(button);
+  }
+
+  // A file body or a record as one contiguous hex string: the dump under
+  // it carries offsets and an ASCII column that a paste cannot use.
+  function scp03BuildBodyCopyButton(hex, label) {
+    var clean = scp03StageHexNormalise(hex || "");
+    var button = scp03BuildCopyButton(
+      clean,
+      label,
+      "Copy the " + clean.length / 2 + " bytes as hex",
+      "cc-payload-copy-btn"
+    );
+    if (!clean) {
+      button.disabled = true;
+      button.title = "No bytes to copy.";
+    }
+    return button;
   }
 
   function scp03BuildPayloadUpdateButton(options) {
@@ -1268,12 +1491,16 @@
     sw.innerHTML = "SW: <code>" + escapeHtml(payload.sw || "") + "</code> · length "
       + String(payload.length || 0);
     head.appendChild(sw);
-    head.appendChild(scp03BuildPayloadUpdateButton({
+    var headActions = document.createElement("div");
+    headActions.className = "cc-payload-actions";
+    headActions.appendChild(scp03BuildBodyCopyButton(payload.hex || "", "Copy body"));
+    headActions.appendChild(scp03BuildPayloadUpdateButton({
       mode: "binary",
       tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
       path: sourceMeta && sourceMeta.path ? String(sourceMeta.path) : "",
       hex: payload.hex || "",
     }));
+    head.appendChild(headActions);
     box.appendChild(head);
     if (payload.decoded) {
       // Thread the raw EF body through to the decoded toolbar so the
@@ -1285,7 +1512,7 @@
         rawHex: payload.hex || "",
         path: sourceMeta && sourceMeta.path ? String(sourceMeta.path) : "",
         fid: sourceMeta && sourceMeta.fid ? String(sourceMeta.fid).toUpperCase() : "",
-      }));
+      }, { copyKeys: true }));
     }
     if (payload.hex) {
       box.appendChild(renderHexBlock(payload.hex));
@@ -1411,11 +1638,12 @@
           (payload && payload.fid ? String(payload.fid).toUpperCase() : "")
           || (sourceMeta && sourceMeta.fid ? String(sourceMeta.fid).toUpperCase() : ""),
         record: Number(rec.record_number || 0),
-      }));
+      }, { copyKeys: true }));
     }
     if (rec.hex) {
       var actions = document.createElement("div");
       actions.className = "cc-record-actions";
+      actions.appendChild(scp03BuildBodyCopyButton(rec.hex, "Copy record"));
       actions.appendChild(scp03BuildPayloadUpdateButton({
         mode: "record",
         tab: sourceMeta && sourceMeta.tab ? sourceMeta.tab : null,
@@ -1474,6 +1702,11 @@
         dd.appendChild(renderPrettyValue(pair[1], 0));
         row.appendChild(dt);
         row.appendChild(dd);
+        // The File system bodies opt in (``copyKeys``); every other view
+        // that renders a decoded block keeps its two columns.
+        if (opts.copyKeys) {
+          scp03AppendFieldCopyKey(row, String(pair[0]), pair[1]);
+        }
         pretty.appendChild(row);
       });
     }
@@ -3446,7 +3679,29 @@
     return s.slice(0, keep) + "... [+" + (s.length - keep) + " chars truncated]";
   }
 
+  // The collapsed dock's one line: the latest row of any bucket but
+  // Validation, which keeps its own panel.
+  function updateLogDockLastLine(bucket, row) {
+    var host = $("log-dock-last");
+    if (!host || bucket === "validation" || !row) return;
+    host.textContent = "";
+    host.setAttribute("data-level", String(row.level || "info").toLowerCase());
+    var ts = document.createElement("span");
+    ts.className = "log-dock-last-ts";
+    ts.textContent = formatTime(row.ts);
+    var src = document.createElement("span");
+    src.className = "log-dock-last-src";
+    src.textContent = row.source || bucket;
+    var msg = document.createElement("span");
+    msg.className = "log-dock-last-msg";
+    msg.textContent = String(row.message == null ? "" : row.message).slice(0, 400);
+    host.appendChild(ts);
+    host.appendChild(src);
+    host.appendChild(msg);
+  }
+
   function appendLogDockRow(bucket, row) {
+    updateLogDockLastLine(bucket, row);
     // Lazy DOM render: when the dock is collapsed or the bucket isn't
     // the visible tab, we skip the DOM append entirely. The row is
     // still in ``logBus`` (which is bounded), so the count badge stays
@@ -4076,6 +4331,200 @@
 
   window.addEventListener("pagehide", closeApduEventStream);
   window.addEventListener("beforeunload", closeApduEventStream);
+
+  // -- Live operation trace -------------------------------------------------
+  //
+  // /api/events/trace carries the lines a running action prints. A runner
+  // that wants them under its action calls ccBeginLiveTrace(action, host),
+  // sends the returned id as ``trace_id`` with the run, and calls end()
+  // when the answer is in. Every line also lands in the dock's APDU bucket,
+  // where the finished ``data.trace`` used to be replayed.
+
+  var liveTraceState = {
+    socket: null,
+    backoffMs: 1000,
+    reconnectTimerId: null,
+    closedByApp: false,
+    runs: {},
+    // Action id -> when a run of it last ended with lines shown live; one
+    // entry per action, taken by the replay check below.
+    delivered: {},
+    sequence: 0,
+  };
+
+  function ccBeginLiveTrace(action, host) {
+    liveTraceState.sequence += 1;
+    var id = "t" + Date.now().toString(36) + "-" + liveTraceState.sequence;
+    liveTraceState.runs[id] = { host: host || null, log: null, lines: 0 };
+    openLiveTraceStream();
+    return {
+      id: id,
+      // The answer replaces the live lines; the dock keeps them.
+      end: function () {
+        var run = liveTraceState.runs[id];
+        delete liveTraceState.runs[id];
+        if (run && run.lines > 0 && action && action.id) {
+          liveTraceState.delivered[action.id] = Date.now();
+        }
+        if (run && run.log && run.log.parentNode) run.log.parentNode.removeChild(run.log);
+      },
+    };
+  }
+
+  function liveTraceShowLine(frame) {
+    var line = String(frame.line || "");
+    if (line.length === 0) return;
+    var level = String(frame.level || "info");
+    var run = liveTraceState.runs[String(frame.trace_id || "")];
+    if (run) run.lines += 1;
+    if (run && run.host && run.host.isConnected) {
+      if (!run.log) {
+        run.log = document.createElement("div");
+        run.log.className = "flow-log cc-log cc-live-trace";
+        run.log.setAttribute("role", "log");
+        run.log.setAttribute("aria-label", "Live trace");
+        run.host.appendChild(run.log);
+      }
+      appendLogRow(run.log, level, line);
+      // Some panes lift the log's height cap and scroll as a whole: keep
+      // the newest line in view there too.
+      if (run.log.lastChild && run.log.lastChild.scrollIntoView) {
+        run.log.lastChild.scrollIntoView({ block: "nearest" });
+      }
+    }
+    logBus.emit({
+      level: "apdu",
+      source: String(frame.action || "action"),
+      message: line,
+    });
+  }
+
+  // True once per run whose lines the socket delivered: the result's
+  // ``trace`` text is then not replayed into the dock a second time.
+  function ccLiveTraceTakeDelivered(actionId) {
+    var at = liveTraceState.delivered[actionId];
+    if (!at) return false;
+    delete liveTraceState.delivered[actionId];
+    return Date.now() - at < 5000;
+  }
+
+  function openLiveTraceStream() {
+    if (liveTraceState.reconnectTimerId !== null) {
+      clearTimeout(liveTraceState.reconnectTimerId);
+      liveTraceState.reconnectTimerId = null;
+    }
+    if (liveTraceState.socket) {
+      var state = liveTraceState.socket.readyState;
+      if (state === WebSocket.CONNECTING || state === WebSocket.OPEN) return;
+      liveTraceState.socket = null;
+    }
+    var token = (typeof getStoredToken === "function") ? getStoredToken() : "";
+    if (!token) return;
+    var scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    var sock;
+    try {
+      sock = new WebSocket(
+        scheme + "://" + window.location.host + "/api/events/trace",
+        ["yggdrasim", "bearer." + token]
+      );
+    } catch (_err) {
+      return;
+    }
+    liveTraceState.socket = sock;
+    liveTraceState.closedByApp = false;
+    sock.onopen = function () {
+      liveTraceState.backoffMs = 1000;
+    };
+    sock.onmessage = function (event) {
+      if (liveTraceState.socket !== sock) return;
+      var frame;
+      try { frame = JSON.parse(event.data); } catch (_err) { return; }
+      if (!frame || frame.event !== "trace") return;
+      liveTraceShowLine(frame);
+    };
+    sock.onclose = function () {
+      if (liveTraceState.socket === sock) liveTraceState.socket = null;
+      sock.onmessage = null;
+      sock.onopen = null;
+      sock.onclose = null;
+      if (liveTraceState.closedByApp) return;
+      var delay = liveTraceState.backoffMs;
+      liveTraceState.backoffMs = Math.min(delay * 2, 30000);
+      liveTraceState.reconnectTimerId = setTimeout(function () {
+        liveTraceState.reconnectTimerId = null;
+        openLiveTraceStream();
+      }, delay);
+    };
+  }
+
+  function closeLiveTraceStream() {
+    liveTraceState.closedByApp = true;
+    if (liveTraceState.reconnectTimerId !== null) {
+      clearTimeout(liveTraceState.reconnectTimerId);
+      liveTraceState.reconnectTimerId = null;
+    }
+    var sock = liveTraceState.socket;
+    liveTraceState.socket = null;
+    if (!sock) return;
+    sock.onmessage = null;
+    sock.onopen = null;
+    sock.onclose = null;
+    try { sock.close(); } catch (_err) {}
+  }
+
+  window.addEventListener("pagehide", closeLiveTraceStream);
+  window.addEventListener("beforeunload", closeLiveTraceStream);
+
+  // A file dropped anywhere on *host* reaches onPaths(paths, fileCount, event):
+  // the paths a transport carried, or the ones the desktop process placed
+  // (empty in a browser tab, which has no location to give). A path row
+  // inside the host keeps its own drop: its handler stops the event first.
+  function enablePanelFileDrop(host, onPaths) {
+    if (!host || host.dataset.panelDropWired === "1") return;
+    host.dataset.panelDropWired = "1";
+    host.classList.add("cc-path-drop-target");
+    var depth = 0;
+    function carriesFile(event) {
+      var types = event && event.dataTransfer && event.dataTransfer.types;
+      if (!types) return false;
+      for (var i = 0; i < types.length; i += 1) {
+        if (types[i] === "Files" || types[i] === "text/uri-list") return true;
+      }
+      return false;
+    }
+    host.addEventListener("dragenter", function (event) {
+      if (!carriesFile(event)) return;
+      event.preventDefault();
+      depth += 1;
+      host.classList.add("cc-panel-drop-hover");
+    });
+    host.addEventListener("dragover", function (event) {
+      if (!carriesFile(event)) return;
+      event.preventDefault();
+      try { event.dataTransfer.dropEffect = "copy"; } catch (_e) { /* no-op */ }
+    });
+    host.addEventListener("dragleave", function () {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) host.classList.remove("cc-panel-drop-hover");
+    });
+    host.addEventListener("drop", function (event) {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      depth = 0;
+      host.classList.remove("cc-panel-drop-hover");
+      announceNativeDrop(event);
+      var files = event.dataTransfer.files;
+      var fileCount = files ? files.length : 0;
+      var paths = extractPathsFromDrop(event);
+      if (paths.length > 0 || fileCount === 0) {
+        onPaths(paths, Math.max(fileCount, paths.length), event);
+        return;
+      }
+      resolveDroppedFilePaths(Array.prototype.slice.call(files)).then(function (resolved) {
+        onPaths(resolved.filter(function (path) { return !!path; }), fileCount, event);
+      });
+    });
+  }
 
   // -- About panel: guides catalogue + viewer ------------------------------
   //
@@ -5240,6 +5689,7 @@
       scp03PopoutEscapeBootstrap();
     }
     openApduEventStream();
+    openLiveTraceStream();
     showView("overview");
     setApiBadge("unknown", "probing...");
     setStatusAction("initialising...");
@@ -5255,6 +5705,7 @@
     remoteLabRefreshSessionState();
     remoteLabStartSessionPoll();
     scheduleHealthPoll();
+    scheduleEngineCollection();
     refreshReaderPane();
     // Top-bar reader strip -- installs its own refresh button handler,
     // does the initial /api/live/readers fetch, and starts the 5 s
@@ -5264,6 +5715,7 @@
     // existing log-dock collapse pattern -- persists across reloads
     // via localStorage["yggdrasim:cc-sidebar-collapsed"].
     sidebarCollapseBootstrap();
+    paneKeysBootstrap();
     // Top-bar collapse handle. Same pattern as the sidebar; lets the
     // operator hide brand / reader strip / breadcrumbs / theme picker
     // to recover the full vertical extent for a workbench.
@@ -5274,6 +5726,11 @@
       source: "system",
       message: "GUI initialised -- Command Center ready.",
     });
+    // The status line said "initialising..." until the first navigation.
+    var statusAction = document.getElementById("status-action");
+    if (statusAction && /^initialising/.test(statusAction.textContent)) {
+      setStatusAction("ready");
+    }
 
     document.getElementById("app").setAttribute("data-ready", "true");
   }
@@ -5291,8 +5748,12 @@
   // the context menu (right-click / Shift+F10) exposes all three.
 
   var PANEL_MODES = ["shown", "auto", "hidden"];
+  // The sidebar has a fourth mode: a rail of short-legend keys, so the
+  // collapsed sidebar keeps an entry point for every module.
+  var SIDEBAR_PANEL_MODES = ["shown", "rail", "auto", "hidden"];
   var PANEL_MODE_LABELS = {
     shown: "Always show",
+    rail: "Rail (keys only)",
     auto: "Auto-hide (reveal on hover)",
     hidden: "Hidden",
   };
@@ -5304,6 +5765,7 @@
   var PANEL_LEAVE_FALLBACK_MS = 400;
 
   function panelModeFromStored(value) {
+    if (value === "rail") return "rail";
     if (value === "true") return "hidden";
     if (value === "false") return "shown";
     if (value === "auto") return "auto";
@@ -5311,6 +5773,7 @@
   }
 
   function panelModeToStored(mode) {
+    if (mode === "rail") return "rail";
     if (mode === "hidden") return "true";
     if (mode === "auto") return "auto";
     return "false";
@@ -5549,7 +6012,7 @@
   }
 
   function showPanelModeMenu(opts) {
-    var items = PANEL_MODES.map(function (mode) {
+    var items = (opts.modes || PANEL_MODES).map(function (mode) {
       return {
         label: PANEL_MODE_LABELS[mode],
         checked: mode === opts.current,
@@ -5607,12 +6070,16 @@
     });
     var LABELS = {
       shown: "Collapse Command Center sidebar",
+      rail: "Expand Command Center sidebar",
       hidden: "Show Command Center sidebar",
       auto: "Pin Command Center sidebar open (auto-hide is on)",
     };
     var TITLES = {
-      shown: "Hide the Command Center sidebar. Click again to bring it "
-        + "back; Shift+click or right-click for auto-hide.",
+      shown: "Collapse the Command Center sidebar to a rail of keys. Click "
+        + "again to expand it; Shift+click for auto-hide, right-click for "
+        + "every mode.",
+      rail: "Expand the Command Center sidebar. Right-click to hide it "
+        + "or auto-hide it instead.",
       hidden: "Show the Command Center sidebar. Shift+click or right-click "
         + "to auto-hide it instead.",
       auto: "Auto-hide is on: rest the pointer on the left edge to reveal "
@@ -5650,13 +6117,14 @@
         _apply(mode === "auto" ? "shown" : "auto", true);
         return;
       }
-      _apply(mode === "shown" ? "hidden" : "shown", true);
+      _apply(mode === "shown" ? "rail" : "shown", true);
     });
     btn.addEventListener("contextmenu", function (event) {
       event.preventDefault();
       showPanelModeMenu({
         anchor: btn,
         label: "Command Center sidebar visibility",
+        modes: SIDEBAR_PANEL_MODES,
         current: _currentMode(),
         onSelect: function (mode) {
           _apply(mode, true);
@@ -5674,13 +6142,18 @@
     window.YggdraSimSidebar = {
       closeOverlayAfterNavigation: function () {
         // Only the narrow-viewport overlay closes itself after a pick;
-        // a wide auto-hidden sidebar stays until the pointer leaves it.
-        if (!_isNarrow()) return;
+        // a wide auto-hidden sidebar stays until the pointer leaves it,
+        // and the rail is not an overlay at any width.
+        if (!_isNarrow() || _currentMode() === "rail") return;
         if (_currentMode() === "auto") {
           autoHide.conceal(true);
         } else {
           _apply("hidden", false);
         }
+      },
+      getMode: _currentMode,
+      setMode: function (mode) {
+        _apply(mode, true);
       },
     };
   }
@@ -5758,6 +6231,146 @@
         onSelect: _apply,
       });
     });
+  }
+
+  // Pane keys in the status line, lit while their pane is open, Alt+1..4
+  // from the keyboard: the sidebar, a module's action list and inspector,
+  // and the event log. A collapsed pane keeps its entry points (the rail,
+  // a labelled strip, the log's one line), so a key never makes a
+  // function unreachable. The module panes' state lives on the shell as
+  // `data-actions` / `data-inspector` and is remembered.
+  var MODULE_PANE_KEYS = {
+    actions: "yggdrasim:module-actions",
+    inspector: "yggdrasim:module-inspector",
+  };
+
+  function paneKeysBootstrap() {
+    var shell = document.getElementById("app");
+    if (!shell) return;
+    var keys = {
+      sidebar: document.getElementById("panekey-sidebar"),
+      actions: document.getElementById("panekey-actions"),
+      inspector: document.getElementById("panekey-inspector"),
+      log: document.getElementById("panekey-log"),
+    };
+    Object.keys(MODULE_PANE_KEYS).forEach(function (pane) {
+      var stored = null;
+      try {
+        stored = window.localStorage.getItem(MODULE_PANE_KEYS[pane]);
+      } catch (_err) {
+        stored = null;
+      }
+      shell.setAttribute("data-" + pane, stored === "strip" ? "strip" : "open");
+    });
+    // A module marks its side panes with data-module-pane="index" (the
+    // action list, the file tree, the package drawer) or "inspector" and
+    // names them with data-module-pane-label; keys 2 and 3 take that name
+    // and are disabled in a view without the pane. A pane that manages its
+    // own collapse (the SAIP drawer) carries data-module-pane-state and a
+    // [data-module-pane-toggle] control, which the key clicks.
+    var MODULE_PANE_ROLE = { actions: "index", inspector: "inspector" };
+    var MODULE_PANE_DEFAULT_LABEL = { actions: "Actions", inspector: "Inspector" };
+    var MODULE_PANE_KEY_NUMBER = { actions: "2", inspector: "3" };
+    function _modulePane(pane) {
+      var view = document.querySelector("section.view.view-active");
+      if (!view || !MODULE_PANE_ROLE[pane]) return null;
+      // One module is mounted at a time; a collapsed pane has no box but
+      // is still the pane the key restores.
+      return view.querySelector('[data-module-pane="' + MODULE_PANE_ROLE[pane] + '"]');
+    }
+    function _isOpen(pane) {
+      if (pane === "sidebar") return (shell.getAttribute("data-sidebar-mode") || "shown") === "shown";
+      if (MODULE_PANE_KEYS[pane]) {
+        var own = _modulePane(pane);
+        if (own && own.hasAttribute("data-module-pane-state")) {
+          return own.getAttribute("data-module-pane-state") !== "strip";
+        }
+        return shell.getAttribute("data-" + pane) !== "strip";
+      }
+      return shell.getAttribute("data-log-collapsed") !== "true";
+    }
+    function _toggle(pane) {
+      var open = _isOpen(pane);
+      if (pane === "sidebar" && window.YggdraSimSidebar && window.YggdraSimSidebar.setMode) {
+        window.YggdraSimSidebar.setMode(open ? "rail" : "shown");
+      } else if (MODULE_PANE_KEYS[pane]) {
+        var paneEl = _modulePane(pane);
+        if (!paneEl) return;
+        var ownToggle = paneEl.querySelector("[data-module-pane-toggle]");
+        if (ownToggle) {
+          ownToggle.click();
+          _sync();
+          return;
+        }
+        var next = open ? "strip" : "open";
+        shell.setAttribute("data-" + pane, next);
+        try {
+          window.localStorage.setItem(MODULE_PANE_KEYS[pane], next);
+        } catch (_err) {}
+      } else if (pane === "log") {
+        setLogDockCollapsed(open);
+      }
+      _sync();
+    }
+    function _sync() {
+      Object.keys(keys).forEach(function (pane) {
+        var key = keys[pane];
+        if (!key) return;
+        if (MODULE_PANE_KEYS[pane]) {
+          var paneEl = _modulePane(pane);
+          var label = (paneEl && paneEl.getAttribute("data-module-pane-label"))
+            || MODULE_PANE_DEFAULT_LABEL[pane];
+          var labelEl = key.querySelector(".status-panekey-label");
+          if (labelEl && labelEl.textContent !== label) labelEl.textContent = label;
+          key.disabled = !paneEl;
+          key.title = paneEl
+            ? label + ": open, or a labelled strip (Alt+" + MODULE_PANE_KEY_NUMBER[pane] + ")"
+            : "This view has no " + MODULE_PANE_DEFAULT_LABEL[pane].toLowerCase() + " pane";
+          key.setAttribute("aria-pressed", paneEl && _isOpen(pane) ? "true" : "false");
+          return;
+        }
+        key.setAttribute("aria-pressed", _isOpen(pane) ? "true" : "false");
+      });
+    }
+    var _syncQueued = false;
+    function _queueSync() {
+      if (_syncQueued) return;
+      _syncQueued = true;
+      window.requestAnimationFrame(function () {
+        _syncQueued = false;
+        _sync();
+      });
+    }
+    window.YggdraSimPanes = { toggle: _toggle, isOpen: _isOpen, sync: _queueSync };
+    Object.keys(keys).forEach(function (pane) {
+      if (!keys[pane]) return;
+      keys[pane].addEventListener("click", function () {
+        _toggle(pane);
+      });
+    });
+    document.addEventListener("keydown", function (event) {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.defaultPrevented) return;
+      var target = event.target;
+      if (target && target.closest && target.closest(".xterm")) return;
+      var pane = { "1": "sidebar", "2": "actions", "3": "inspector", "4": "log" }[event.key];
+      if (!pane) return;
+      event.preventDefault();
+      _toggle(pane);
+    });
+    if (window.MutationObserver) {
+      new MutationObserver(_sync).observe(shell, {
+        attributes: true,
+        attributeFilter: ["data-sidebar-mode", "data-actions", "data-inspector", "data-log-collapsed"],
+      });
+      // Module panes come and go with the module view; one coalesced sync
+      // per frame keeps the keys' names and states current.
+      var ccHost = document.getElementById("cc-actions");
+      if (ccHost) {
+        new MutationObserver(_queueSync).observe(ccHost, { childList: true, subtree: true });
+      }
+    }
+    _sync();
   }
 
   function appCloseBootstrap() {

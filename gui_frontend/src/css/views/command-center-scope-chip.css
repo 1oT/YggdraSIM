@@ -11,7 +11,9 @@
   border: 1px solid var(--border);
   color: var(--fg-dim);
   letter-spacing: 0.02em;
-  text-transform: lowercase;
+  /* Classic set the scope chip in lowercase; Bench keeps the words as
+     written ("Scope: File system"). */
+  text-transform: var(--chip-case);
 }
 
 .cc-apps-hint {

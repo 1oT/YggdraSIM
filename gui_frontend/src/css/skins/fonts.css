@@ -1,0 +1,56 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Typefaces the skins name ------------------------------------------------
+ *
+ * Vendored under vendor/plex-sans-condensed/ and vendor/plex-mono/ (SIL OFL
+ * 1.1, Latin-1 subsets; see each NOTICE.md). A locally installed Plex wins
+ * through local(); a face is only fetched when a skin's stack uses it. The
+ * URLs resolve against /static/app.css. */
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed"), local("IBMPlexSansCondensed"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed Medium"), local("IBMPlexSansCondensed-Medium"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-Medium-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: local("IBM Plex Sans Condensed SemiBold"), local("IBMPlexSansCondensed-SemiBold"),
+    url("vendor/plex-sans-condensed/IBMPlexSansCondensed-SemiBold-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: local("IBM Plex Mono"), local("IBMPlexMono"),
+    url("vendor/plex-mono/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: local("IBM Plex Mono SemiBold"), local("IBMPlexMono-SemiBold"),
+    url("vendor/plex-mono/IBMPlexMono-SemiBold-Latin1.woff2") format("woff2");
+}

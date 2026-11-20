@@ -15,7 +15,7 @@ from cryptography.x509.oid import NameOID
 from SCP11.asn1_registry import ASN1Registry
 from SCP11.crypto_engine import CryptoEngine
 from SCP11.payload_builder import PayloadBuilder
-from SCP11.pysim_support import encode_smdp_signed2
+from SCP11.pysim_support import decode_rsp_type, encode_smdp_signed2
 
 try:
     from pySim.esim import compile_asn1_subdir
@@ -120,14 +120,12 @@ class PayloadBuilderTests(unittest.TestCase):
         )
 
         self.assertTrue(payload.startswith(bytes.fromhex("BF38")))
-        if compile_asn1_subdir is not None:
-            asn1 = compile_asn1_subdir("rsp")
-            decoded = asn1.decode("AuthenticateServerRequest", payload)
-            _, ctx_choice_value = decoded["ctxParams1"]
-            self.assertEqual(
-                ctx_choice_value["deviceInfo"]["deviceCapabilities"]["eutranSupportedRelease"],
-                b"\x98\x00\x00",
-            )
+        decoded = decode_rsp_type("AuthenticateServerRequest", payload, v3=True)
+        _, ctx_choice_value = decoded["ctxParams1"]
+        self.assertEqual(
+            ctx_choice_value["deviceInfo"]["deviceCapabilities"]["eutranEpcSupportedRelease"],
+            b"\x98\x00\x00",
+        )
 
     def test_normalize_ctx_params_keeps_legacy_eutran_epc_field(self):
         normalized = PayloadBuilder._normalize_ctx_params(
@@ -146,16 +144,17 @@ class PayloadBuilderTests(unittest.TestCase):
         self.assertEqual(capabilities["eutranEpcSupportedRelease"], b"\x98\x00\x00")
         self.assertNotIn("eutranSupportedRelease", capabilities)
 
-    def test_normalize_pysim_capabilities_accepts_legacy_eutran_epc_field(self):
+    def test_normalize_pysim_capabilities_reads_the_v2_eutran_name_as_v3(self):
+        # SGP.22 v3.1 page 442 names the sixth member eutranEpcSupportedRelease.
         normalized = PayloadBuilder._normalize_pysim_capabilities(
             {
                 "gsmSupportedRelease": b"\x99\x00\x00",
-                "eutranEpcSupportedRelease": b"\x98\x00\x00",
+                "eutranSupportedRelease": b"\x98\x00\x00",
             }
         )
 
-        self.assertEqual(normalized["eutranSupportedRelease"], b"\x98\x00\x00")
-        self.assertNotIn("eutranEpcSupportedRelease", normalized)
+        self.assertEqual(normalized["eutranEpcSupportedRelease"], b"\x98\x00\x00")
+        self.assertNotIn("eutranSupportedRelease", normalized)
 
     def test_authenticate_server_legacy_path_accepts_eutran_epc_capability(self):
         cert, private_key = build_self_signed_cert()
@@ -180,6 +179,102 @@ class PayloadBuilderTests(unittest.TestCase):
             )
 
         self.assertTrue(payload.startswith(bytes.fromhex("BF38")))
+
+    # Every SGP.22 v3.1 DeviceInfo member (page 441) and DeviceCapabilities member (page 442), the
+    # same values libipad's tests/test_core.c sets; FULL_DEVICE_INFO is the DER both encoders give.
+    FULL_DEVICE_INFO_VALUES = {
+        "tac": b"\x01\x02\x03\x04",
+        "deviceCapabilities": {
+            **{
+                name: bytes([index + 1, 0, index])
+                for index, name in enumerate(
+                    [
+                        "gsmSupportedRelease",
+                        "utranSupportedRelease",
+                        "cdma2000onexSupportedRelease",
+                        "cdma2000hrpdSupportedRelease",
+                        "cdma2000ehrpdSupportedRelease",
+                        "eutranEpcSupportedRelease",
+                        "contactlessSupportedRelease",
+                        "rspCrlSupportedVersion",
+                        "nrEpcSupportedRelease",
+                        "nr5gcSupportedRelease",
+                        "eutran5gcSupportedRelease",
+                        "lpaSvn",
+                    ]
+                )
+            },
+            "catSupportedClasses": [0, 2, 38],
+            "euiccFormFactorType": 1,
+            "deviceAdditionalFeatureSupport": {"naiSupport": b"\x01\x00\x00"},
+        },
+        "imei": bytes.fromhex("0011223344556677"),
+        "preferredLanguages": ["en", "sv"],
+        "deviceTestMode": True,
+        "lpaRspCapability": [0, 3, 9],
+    }
+    FULL_DEVICE_INFO = (
+        "3071"
+        "800401020304"
+        "A14E"
+        "8003010000" "8103020001" "8203030002" "8303040003" "8403050004" "8503060005"
+        "8603070006" "8703080007" "8803090008" "89030A0009" "8A030B000A" "8B030C000B"
+        "8C0601A000000002" "8D0101" "AE058003010000"
+        "82080011223344556677"
+        "A3080C02656E0C027376"
+        "8400"
+        "8503069040"
+    )
+
+    def test_encode_device_info_covers_every_v3_1_member(self):
+        self.assertEqual(len(self.FULL_DEVICE_INFO_VALUES), 6)
+        self.assertEqual(len(self.FULL_DEVICE_INFO_VALUES["deviceCapabilities"]), 15)
+        der = PayloadBuilder.encode_device_info(self.FULL_DEVICE_INFO_VALUES)
+        self.assertEqual(der.hex().upper(), self.FULL_DEVICE_INFO)
+
+    def test_legacy_ctx_params1_gives_the_pysim_bytes(self):
+        # SGP.22 v3.1 page 437 / 449: AUTOMATIC TAGS, matchingId [0] '80', deviceInfo [1] 'A1'.
+        for device_info in (
+            {"tac": b"\x01\x02\x03\x04", "deviceCapabilities": {"gsmSupportedRelease": b"\x02\x00\x00"}},
+            self.FULL_DEVICE_INFO_VALUES,
+        ):
+            with self.subTest(members=sorted(device_info)):
+                safe = PayloadBuilder._normalize_ctx_params({"matchingId": "MATCHING-ID-1", "deviceInfo": device_info})
+                legacy = ASN1Registry.CtxParams1(
+                    name="ctxParamsForCommonAuthentication",
+                    value=ASN1Registry.CtxParamsForCommonAuthentication(
+                        PayloadBuilder._asn1crypto_ctx_params(PayloadBuilder._normalize_pysim_ctx_params(safe))
+                    ),
+                ).dump()
+                pysim = PayloadBuilder._build_ctx_params1_with_pysim(safe)
+                self.assertTrue(pysim.startswith(bytes.fromhex("A0")))
+                self.assertEqual(legacy.hex().upper(), pysim.hex().upper())
+        self.assertIn(bytes.fromhex(self.FULL_DEVICE_INFO[4:]), pysim)
+
+    def test_encode_device_info_uses_automatic_tags(self):
+        der = PayloadBuilder.encode_device_info(
+            {
+                "tac": b"\x01\x02\x03\x04",
+                "deviceCapabilities": {"gsmSupportedRelease": b"\x02\x00\x00", "eutranEpcSupportedRelease": b"\x0f\x00\x00"},
+                "imei": bytes.fromhex("0011223344556677"),
+            }
+        )
+        self.assertEqual(
+            der.hex().upper(),
+            "301C" "800401020304" "A10A" "8003020000" "85030F0000" "82080011223344556677",
+        )
+
+    def test_encode_device_info_refuses_what_v3_1_does_not_define(self):
+        tac = b"\x01\x02\x03\x04"
+        for device_info in (
+            {"tac": tac, "deviceCapabilities": {"rspRpmSupportedVersion": b"\x01\x00\x00"}},
+            {"tac": tac, "deviceCapabilities": {}, "operatorName": "x"},
+            {"tac": tac + tac, "deviceCapabilities": {}},
+            {"tac": tac, "deviceCapabilities": {}, "imei": b"\x00" * 7},
+            {"tac": tac, "deviceCapabilities": {"deviceAdditionalFeatureSupport": {"other": b"\x01\x00\x00"}}},
+        ):
+            with self.subTest(device_info=device_info), self.assertRaises(ValueError):
+                PayloadBuilder.encode_device_info(device_info)
 
     def test_authenticate_server_unwraps_prewrapped_signature(self):
         cert, private_key = build_self_signed_cert()

@@ -199,6 +199,52 @@ def derive_topc(top: bytes, key: bytes, *, number_of_keccak: int = 1) -> bytes:
     return state[:32][::-1]
 
 
+# YggdraSIM's cap on the Keccak iterations a TOPc request may ask for. TS 35.231
+# v19 §7.2 leaves the count to the operator; the reference code of its annex
+# holds it in a uint8 that is at least 1.
+MAX_KECCAK_ITERATIONS = 16
+
+
+def _hex_field(name: str, raw: object, lengths: tuple[int, ...]) -> bytes:
+    cleaned = str(raw or "").replace(" ", "").replace(":", "").strip().upper()
+    if len(cleaned) == 0:
+        raise ValueError(f"{name}: hex string is empty")
+    if len(cleaned) % 2 != 0:
+        raise ValueError(f"{name}: hex string has odd length")
+    try:
+        value = bytes.fromhex(cleaned)
+    except ValueError as error:
+        raise ValueError(f"{name}: invalid hex -- {error}") from error
+    if len(value) not in lengths:
+        allowed = ", ".join(str(n) for n in lengths)
+        raise ValueError(f"{name}: length must be one of [{allowed}] bytes, got {len(value)}")
+    return value
+
+
+def derive_topc_from_text(top: object, key: object, number_of_keccak: object = None) -> dict[str, object]:
+    """TOPc (TS 35.231 v19 §6.1) from TOP and K given as hex.
+
+    The GUI action ``simcard.tuak_derive_topc`` and the SCP03 shell's
+    DERIVE-TOPC both call this, so the two take and refuse the same input.
+    """
+    top_bytes = _hex_field("top", top, (32,))
+    key_bytes = _hex_field("key", key, (16, 32))
+    rounds = 1
+    if number_of_keccak is not None and len(str(number_of_keccak).strip()) > 0:
+        try:
+            rounds = int(str(number_of_keccak).strip())
+        except ValueError as error:
+            raise ValueError(f"number_of_keccak: not an integer: {number_of_keccak!r}") from error
+    if rounds < 1 or rounds > MAX_KECCAK_ITERATIONS:
+        raise ValueError(f"number_of_keccak must be in [1, {MAX_KECCAK_ITERATIONS}].")
+    topc = derive_topc(top_bytes, key_bytes, number_of_keccak=rounds)
+    return {
+        "key_length_bits": len(key_bytes) * 8,
+        "number_of_keccak": rounds,
+        "topc_hex": topc.hex().upper(),
+    }
+
+
 def _f1_instance(*, key_len: int, mac_len_bytes: int, star: bool) -> int:
     if mac_len_bytes == 8:
         instance = 0x08

@@ -65,10 +65,14 @@ class OtaPacketBuilder:
     SMS_TPDU_PREFIX = bytes.fromhex("4005811250F37FF622222222222222")
     TPDU_PID_OFFSET = 6
     TPDU_DCS_OFFSET = 7
-    # ENVELOPE (SMS-PP DOWNLOAD), 3GPP TS 31.111 §7.1.1.2: device
-    # identities tag '02', source Network '83', destination UICC '81'
-    # (TS 102 223 §8.7), then the Service Centre address object.
-    ENVELOPE_PREFIX = bytes.fromhex("0202838106028001")
+    # ENVELOPE (SMS-PP DOWNLOAD): device identities tag '02', the source
+    # from the ``sender`` setting and destination UICC '81' (TS 102 223
+    # v18.3 §8.7: '82' terminal, '83' network), then the Service Centre
+    # address object. TS 31.111 v19.4 §7.1.1.2 has a modem name the
+    # network; the setting defaults to '82', and 'set sender 83' gives the
+    # modem's value.
+    UICC_DEVICE_IDENTITY = 0x81
+    SC_ADDRESS = bytes.fromhex("06028001")
     # TS 23.048 table 7: the concatenated UDH carries both the concatenation
     # control element and the Command Packet Identifier, so UDHL is '07' --
     # IEIa '00' with its three octets, then IEIb CPI '70' with a null IED.
@@ -239,9 +243,15 @@ class OtaPacketBuilder:
         sms_tpdu = self._tpdu_prefix(self.SMS_TPDU_PREFIX) + bytes([len(tp_ud)]) + tp_ud
         return sms_tpdu, len(tp_ud)
 
+    def _envelope_prefix(self) -> bytes:
+        # A config object written before the builder read ``sender`` has none.
+        sender = str(self.cfg.get("sender") or "") or ConfigManager.DEFAULTS["sender"]
+        source = int(sender, 16) & 0xFF
+        return bytes([0x02, 0x02, source, self.UICC_DEVICE_IDENTITY]) + self.SC_ADDRESS
+
     def _wrap_sms_tpdu(self, sms_tpdu: bytes, allow_extended_apdu: bool = False) -> str:
         d1_content = (
-            self.ENVELOPE_PREFIX
+            self._envelope_prefix()
             + bytes([0x8B])
             + self._encode_ber_length(len(sms_tpdu))
             + sms_tpdu

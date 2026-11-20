@@ -269,6 +269,11 @@ class ArrSplicerRoundtripTests(unittest.TestCase):
         with self.assertRaises(RoundtripEncoderError):
             encode_ef_arr_rules(payload)
 
+    def test_scratch_key_reference_rule_carries_the_usage_qualifier(self) -> None:
+        # TS 102 221 v18.4 §9.5.1, Table 9.3: A4 06 83 01 <key reference> 95 01 08.
+        payload = {"rules": [{"accessModes": ["UPDATE"], "condition": "ADM1"}]}
+        self.assertEqual(encode_ef_arr_rules(payload), bytes.fromhex("800102A40683010A950108"))
+
     def test_scratch_rebuild_pads_to_target_length(self) -> None:
         payload = {
             "rules": [{"accessModes": ["READ"], "condition": "Always"}],

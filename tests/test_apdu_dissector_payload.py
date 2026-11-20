@@ -74,13 +74,20 @@ class BerTlvDecoding(PayloadTestBase):
     def test_constructed_and_primitive_are_distinguished(self) -> None:
         """X.690 clause 8.1.2 puts the flag in bit 6 of the tag.
 
-        It is rendered as a bit field of the identifier octet, the way
-        Wireshark's own BER dissector renders it, so the assertion is on
-        the masked form rather than on a value standing beside the tag.
+        The flag is a filter field read from the identifier octet. It
+        takes no row in the tree: a constructed node shows its members.
         """
-        text = decode_text(self.capture, display_filter="frame.number==1")
-        self.assertIn("..1. .... = Constructed: True", text)
-        self.assertIn("..0. .... = Constructed: False", text)
+        constructed = decode_text(
+            self.capture,
+            display_filter="frame.number==1 && yapdu.tlv.constructed == 1",
+        )
+        primitive = decode_text(
+            self.capture,
+            display_filter="frame.number==1 && yapdu.tlv.constructed == 0",
+        )
+        self.assertIn("YggdraSIM APDU", constructed)
+        self.assertIn("YggdraSIM APDU", primitive)
+        self.assertNotIn("Constructed:", constructed)
 
     def test_two_byte_tags_are_read_whole(self) -> None:
         rows = decode_fields(self.capture, ["frame.number", "yapdu.tlv.tag"])

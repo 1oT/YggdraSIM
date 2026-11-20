@@ -574,9 +574,29 @@ class SCP11ConsoleStatusDecodeTests(unittest.TestCase):
             tlv(bytes.fromhex("80"), b"smdpplus2.smdpp.example.test"),
         )
 
-        self.console._set_smdp_address("smdpplus2.esim.tst.1ot")
+        self.console._set_smdp_address("smdpplus2.example.test")
 
         self.assertEqual(self.console.current_smdp_address, "smdpplus2.smdpp.example.test")
+
+    def test_set_smdp_address_goes_to_the_es10b_logical_channel(self):
+        # A STORE DATA with CLA '80' reaches the application selected on the basic channel;
+        # a live eUICC answered SET-SMDP with '6D00' that way.
+        sent = []
+
+        def es10b_store_data(payload: bytes, log_name: str, allow_stk_retry: bool = False) -> bytes:
+            sent.append((log_name, payload))
+            if payload.startswith(bytes.fromhex("BF3C")):
+                return tlv(bytes.fromhex("BF3C"), tlv(bytes.fromhex("80"), b"smdpp.example.test"))
+            return bytes.fromhex("BF3F03800100")
+
+        self.console.orchestrator._send_es10b_store_data = es10b_store_data
+
+        self.console._set_smdp_address("smdpp.example.test")
+
+        self.assertEqual(sent[0], ("SET: Default SM-DP+ Address",
+                                   tlv(bytes.fromhex("BF3F"), tlv(bytes.fromhex("80"), b"smdpp.example.test"))))
+        self.assertEqual(self.console.apdu_channel.send_calls, [])
+        self.assertEqual(self.console.current_smdp_address, "smdpp.example.test")
 
     def test_eim_download_routes_into_orchestrator_flow(self):
         self.console._cmd_eim_download("MATCH-55")

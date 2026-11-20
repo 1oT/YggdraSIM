@@ -27,7 +27,7 @@
   align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   cursor: pointer;
   background: var(--surface);
   transition: border-color 0.12s ease, background-color 0.12s ease;
@@ -216,4 +216,51 @@
   background: var(--accent);
   color: var(--accent-fg);
   border-color: var(--accent);
+}
+
+/* Compact density: one line per element -- glyph, name, label, chips,
+   index -- so a whole package fits the pane. Same DOM as the cards, so
+   selection, keyboard and drag-and-drop work unchanged. */
+.saip-pe-cards--compact {
+  gap: 1px;
+}
+
+.saip-pe-cards--compact .saip-pe-card {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  padding: 2px 8px;
+}
+
+.saip-pe-cards--compact .saip-pe-card.is-dirty {
+  padding-left: 5px;
+}
+
+.saip-pe-cards--compact .saip-pe-icon {
+  width: 28px;
+  height: 20px;
+  font-size: 10px;
+}
+
+.saip-pe-cards--compact .saip-pe-card-body {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.saip-pe-cards--compact .saip-pe-card-name {
+  flex: 0 1 auto;
+}
+
+.saip-pe-cards--compact .saip-pe-card-sub {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.saip-pe-cards--compact .saip-pe-card-chips {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+.saip-pe-cards--compact .saip-pe-card-id {
+  padding: 0 6px;
 }

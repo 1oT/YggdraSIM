@@ -62,6 +62,16 @@ path navigable and the wizard maintainable as the spec evolves.
   a web request would be written on the server host.
 - Swap `sys.stdout` / `sys.stderr` around one command, never across a
   prompt, so every swap stays nested and readline keeps the terminal.
+- Mark each line by what it reports: `[+]` a result, `[*]` a note, `[-]` a
+  failed step, `[!]` a refusal or an error, and `[!] Warning:` a caveat the
+  command carries on past. A batch loop runs each command under
+  `yggdrasim_common.batch_outcome.BatchOutcome.command`, which counts a
+  `[-]` line or a `[!]` line that is not a warning as a failure, and the
+  entry point exits 1 when `outcome.ok` is false. An empty answer, a state
+  that needs no action (no session to close) or a step the command recovers
+  from is `[*]` or a warning, never a bare `[!]`, or a batch that did its job
+  exits 1. A command that runs until it is stopped passes
+  `rule=RULE_STREAM`; one with a verdict of its own passes `verdict=`.
 
 ## APDU and crypto handling
 
@@ -88,6 +98,37 @@ path navigable and the wizard maintainable as the spec evolves.
   its evidence under `upstream_patches/<name>/` (see the
   `upstream_patches/osmocom-*` folders), and a compensation in this tree
   that verifies its own effect.
+- A patch for a reused project is tested twice before it is sent: in the
+  upstream tree on its own (its test suite as its CI runs it, and the
+  patch's repro, at every commit of a series; a CI job that needs
+  hardware is read for what the patch changes in it) and joined with this tree
+  (the patch's tip installed, the compensations it replaces removed, and
+  every test here that reaches the project). A failure in either run sends
+  the patch back for rework, and both runs are repeated until both pass.
+
+## Specification tables
+
+- When a specification defines an enumeration or a structure, read the
+  whole table or clause and implement from that list, not from the rows
+  the change needs. Examples: a code table, a tag list, a result or cause
+  list, an EF list, service-table bits, the fields and conditions of a
+  command. A row that is not implemented is named in an explicit
+  not-supported set beside the table, never left to fall through to
+  "unknown".
+- A test enumerates the rows, with the clause and version they came from.
+  Every row is either implemented or in the not-supported set.
+- A code-to-name table that more than one surface reads lives in one
+  shared module: `yggdrasim_common/stk_tables.py`, `apdu_tables.py`,
+  `tls_tables.py`, `x509_tables.py`, `secured_packet.py` or `service_table_names.py`. The dissector's
+  `tables.lua` is generated from them. A surface that shows a subset
+  filters the shared table rather than copying it.
+- TLV, BER length and BCD coding come from `osmocom.tlv`,
+  `osmocom.utils` and `pySim.utils`. For CAT data objects, check
+  `pySim.cat` first (*Reuse before building*).
+- A wrong or missing row found in one copy of a table is looked for in
+  every copy.
+- The change states its coverage, such as `TS 102 223 v18.3 Table 9.4:
+  45/45 command types`, or names the rows it leaves out and why.
 
 ## Python conventions
 
@@ -155,7 +196,7 @@ than a clean rejection is a defect.
   is build output. Rebuild with `./scripts/build_gui_frontend.sh` after
   every source change; `tests/test_gui_source_manifests.py` requires the
   served bundle to be byte-identical to a fresh build.
-- One design system, 20 themes. Colour reaches a rule through a theme
+- One design system, 22 themes. Colour reaches a rule through a theme
   token or not at all; the per-file literal budget in
   `tests/test_gui_design_system_consistency.py` only shrinks. New floating
   surfaces (`position: fixed`) are app chrome or transient overlays;

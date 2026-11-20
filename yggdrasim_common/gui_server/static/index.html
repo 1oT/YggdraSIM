@@ -93,6 +93,17 @@
             <span class="topbar-card-bridge-label">Remote</span>
             <span class="topbar-card-bridge-value" id="topbar-card-bridge-value">stopped</span>
           </button>
+          <button
+            type="button"
+            class="topbar-card-bridge"
+            id="topbar-local-eim"
+            data-state="idle"
+            title="Local eIM service status"
+            aria-label="Local eIM service status">
+            <span class="topbar-card-bridge-dot" aria-hidden="true"></span>
+            <span class="topbar-card-bridge-label"><span class="topbar-local-eim-qualifier">Local </span><span class="topbar-card-bridge-name">eIM</span></span>
+            <span class="topbar-card-bridge-value" id="topbar-local-eim-value">unknown</span>
+          </button>
           <!-- Pills of plugin consoles that report something (plugin-console-pills.js). -->
           <span class="topbar-plugin-pills" id="topbar-plugin-pills" hidden></span>
           <span class="topbar-backend-switch" role="group" aria-label="Card backend">
@@ -128,6 +139,11 @@
             <span id="badge-api-text">probing...</span>
           </span>
           <span class="theme-picker">
+            <label for="skin-select">Skin</label>
+            <select id="skin-select" class="skin-select" aria-label="Interface skin">
+              <option value="bench">Bench</option>
+              <option value="classic">Classic</option>
+            </select>
             <label for="theme-select">Theme</label>
             <select id="theme-select" aria-label="Colour theme">
               <optgroup label="Dark">
@@ -143,6 +159,7 @@
                 <option value="dracula">Dracula</option>
                 <option value="github-dark">GitHub · dark</option>
                 <option value="matrix">Matrix</option>
+                <option value="bench-dark">Bench · dark</option>
               </optgroup>
               <optgroup label="Light">
                 <option value="nord-light">Nord · light</option>
@@ -153,6 +170,7 @@
                 <option value="github-light">GitHub · light</option>
                 <option value="islands-light">Islands · light</option>
                 <option value="graphite-light">Graphite · light</option>
+                <option value="bench-light">Bench · light</option>
               </optgroup>
             </select>
           </span>
@@ -201,13 +219,15 @@
             <button
               type="button"
               data-view="overview"
-              class="subsystem-entry active">Overview</button>
+              class="subsystem-entry active"
+              data-cc-rail="OVW"><span class="cc-nav-name">Overview</span></button>
           </li>
           <li>
             <button
               type="button"
               data-view="about"
-              class="subsystem-entry">About</button>
+              class="subsystem-entry"
+              data-cc-rail="ABOUT"><span class="cc-nav-name">About</span></button>
           </li>
         </ul>
       </aside>
@@ -618,19 +638,22 @@
               </p>
             </header>
 
+            <div class="cb-tabs" role="tablist" aria-label="Remote Bridge sections">
+              <button type="button" class="cb-tab" role="tab" id="cb-tab-host" aria-controls="cb-tabpanel-host" aria-selected="true" data-cb-tab="host">Host</button>
+              <button type="button" class="cb-tab" role="tab" id="cb-tab-rig" aria-controls="cb-tabpanel-rig" aria-selected="false" tabindex="-1" data-cb-tab="rig">Rig</button>
+              <button type="button" class="cb-tab" role="tab" id="cb-tab-status" aria-controls="cb-tabpanel-status" aria-selected="false" tabindex="-1" data-cb-tab="status">Status</button>
+            </div>
+
+            <div class="cb-tabpanel" role="tabpanel" id="cb-tabpanel-host" aria-labelledby="cb-tab-host" data-cb-tabpanel="host">
             <div class="cb-panel cb-rig-panel">
               <header class="cb-panel-header">
                 <h2>Remote host onboarding</h2>
-                <div class="cb-panel-controls">
-                  <button class="btn btn-small" id="cb-rig-refresh">Refresh host status</button>
-                  <button class="btn btn-small" id="cb-rig-open-gui">Open remote GUI</button>
-                </div>
               </header>
 
               <ol class="cb-steps">
                 <li>Pick a stored host, or fill the fields below for one you have not stored yet.</li>
                 <li>Select the PC/SC reader that holds the card in the top bar.</li>
-                <li>Start the full rig: the PC bridge, the SSH tunnel, the token sync and the remote HIL service come up in sequence.</li>
+                <li>Start the full rig on the Rig tab: the PC bridge, the SSH tunnel, the token sync and the remote HIL service come up in sequence.</li>
               </ol>
 
               <div class="remote-lab-devices" id="cb-rig-hosts"></div>
@@ -708,6 +731,18 @@
                   </div>
                 </div>
               </details>
+            </div>
+            </div>
+
+            <div class="cb-tabpanel" role="tabpanel" id="cb-tabpanel-rig" aria-labelledby="cb-tab-rig" data-cb-tabpanel="rig" hidden>
+            <div class="cb-panel cb-rig-panel">
+              <header class="cb-panel-header">
+                <h2>Rig</h2>
+                <div class="cb-panel-controls">
+                  <button class="btn btn-small" id="cb-rig-refresh">Refresh host status</button>
+                  <button class="btn btn-small" id="cb-rig-open-gui">Open remote GUI</button>
+                </div>
+              </header>
 
               <div class="cb-rig-primary-actions">
                 <button class="btn btn-primary" id="cb-rig-start-all">Start full rig</button>
@@ -768,16 +803,18 @@
                   <div class="cb-probe-label">Modem link</div>
                   <div class="cb-probe-value" id="cb-rig-modem-link-status">-</div>
                 </div>
-                <div class="cb-probe-card">
+                <div class="cb-probe-card cb-probe-card--wide">
                   <div class="cb-probe-label">Remote GUI</div>
-                  <div class="cb-probe-value cb-mono" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
+                  <div class="cb-probe-value cb-mono cb-url" id="cb-rig-gui-url">http://127.0.0.1:27854</div>
                 </div>
               </div>
               <div class="cb-status-summary" id="cb-rig-note" role="status" aria-live="polite" aria-atomic="true">
                 Host status has not been read yet.
               </div>
             </div>
+            </div>
 
+            <div class="cb-tabpanel" role="tabpanel" id="cb-tabpanel-status" aria-labelledby="cb-tab-status" data-cb-tabpanel="status" hidden>
             <div class="cb-panel">
               <header class="cb-panel-header">
                 <h2>Bridge connection</h2>
@@ -801,7 +838,7 @@
                 </div>
                 <div class="cb-status-row">
                   <span class="cb-status-label">URL</span>
-                  <span class="cb-status-value cb-mono" id="cb-status-url">-</span>
+                  <span class="cb-status-value cb-mono cb-url" id="cb-status-url">-</span>
                   <button class="btn btn-small" id="cb-copy-url" title="Copy URL to clipboard" disabled>Copy</button>
                 </div>
                 <div class="cb-status-row">
@@ -925,6 +962,7 @@
               <svg class="cb-history-chart" id="cb-history-chart"
                    viewBox="0 0 600 120" preserveAspectRatio="none"
                    aria-label="Probe latency history"></svg>
+            </div>
             </div>
           </div>
         </section>
@@ -1069,6 +1107,8 @@
             <span class="log-dock-tab-label">Validation</span>
             <span class="log-dock-tab-count" id="log-count-validation">0</span>
           </button>
+          <!-- The latest row, shown while the dock is collapsed (trailing.js). -->
+          <div class="log-dock-last" id="log-dock-last" aria-hidden="true"></div>
           <div class="log-dock-spacer"></div>
           <button
             type="button"
@@ -1166,6 +1206,19 @@
         </span>
         <span class="sep">·</span>
         <span id="status-error" class="status-error"></span>
+        <!-- What the last overview of the active reader read (command-center.js). -->
+        <span class="status-card" id="status-card" hidden></span>
+        <!-- Pane keys (trailing.js paneKeysBootstrap): lit while the pane is open. -->
+        <span class="status-panekeys" role="group" aria-label="Panes">
+          <button type="button" class="status-panekey" id="panekey-sidebar" aria-pressed="true"
+                  title="Command Center sidebar: open, or a rail of keys (Alt+1)"><span class="status-panekey-n" aria-hidden="true">1</span>Sidebar</button>
+          <button type="button" class="status-panekey" id="panekey-actions" aria-pressed="true"
+                  title="A module's action list: open, or a labelled strip (Alt+2)"><span class="status-panekey-n" aria-hidden="true">2</span><span class="status-panekey-label">Actions</span></button>
+          <button type="button" class="status-panekey" id="panekey-inspector" aria-pressed="true"
+                  title="A module's inspector (card and overview data): open, or a labelled strip (Alt+3)"><span class="status-panekey-n" aria-hidden="true">3</span><span class="status-panekey-label">Inspector</span></button>
+          <button type="button" class="status-panekey" id="panekey-log" aria-pressed="false"
+                  title="Event log: open, or one line with the latest row (Alt+4)"><span class="status-panekey-n" aria-hidden="true">4</span>Log</button>
+        </span>
       </footer>
     </div>
     <script src="/static/app.js"></script>

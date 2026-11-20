@@ -18,6 +18,7 @@
 # -----------------------------------------------------------------------------
 
 from typing import Tuple, Optional, Dict, Any, List
+from yggdrasim_common import secured_packet
 from yggdrasim_common.stk_terminal import terminal_profile_apdu
 from yggdrasim_common.card_backend import (
     create_card_connection,
@@ -46,21 +47,9 @@ except ImportError:
         RAW_protocol = 2
 
 
-_POR_STATUS_MEANINGS = {
-    0x00: "PoR OK",
-    0x01: "RC/CC/DS failed",
-    0x02: "CNTR low",
-    0x03: "CNTR high",
-    0x04: "CNTR blocked",
-    0x05: "Ciphering error",
-    0x06: "Unidentified security error",
-    0x07: "Insufficient memory to process incoming message",
-    0x08: "More time required",
-    0x09: "TAR unknown",
-    0x0A: "Insufficient security level",
-    0x0B: "Reserved for 3GPP",
-    0x0C: "Reserved for 3GPP",
-}
+# Bounds the SET UP EVENT LIST commands answered behind one PoR, so a card that
+# kept raising them could not hold the shell.
+_EVENT_LIST_ANSWER_LIMIT = 8
 
 
 class Transport:
@@ -223,13 +212,19 @@ class Transport:
         silent: bool = False,
         log_tx: bool = True,
         log_rx: bool = True,
+        label: str = "",
     ) -> Tuple[bytes, int]:
-        """Send one APDU hex string and return (response_bytes, status_word) as an int."""
+        """Send one APDU hex string and return (response_bytes, status_word) as an int.
+
+        *label* names the command on the logged line, as the replayed
+        bootstrap trace does.
+        """
         if not self.conn:
             return b"", 0x6F00
         raw = Utils.to_bytes(apdu_hex)
         if not silent and log_tx:
-            print(f"  {Colors.WARNING}[ -> ]{Colors.ENDC} {apdu_hex}")
+            suffix = f" ({label})" if label else ""
+            print(f"  {Colors.WARNING}[ -> ]{Colors.ENDC} {apdu_hex}{suffix}")
         data, sw1, sw2 = self.conn.transmit(list(raw))
         sw = (sw1 << 8) | sw2
         if not silent and log_rx:
@@ -245,7 +240,11 @@ class Transport:
         if verbose:
             print(f"{Colors.CYAN}[STK]{Colors.ENDC} Bootstrap")
         _, sw = self.transmit(
-            tp_apdu, silent=not verbose, log_tx=verbose, log_rx=verbose
+            tp_apdu,
+            silent=not verbose,
+            log_tx=verbose,
+            log_rx=verbose,
+            label="TERMINAL PROFILE",
         )
         self._record_stk_bootstrap_exchange("TERMINAL PROFILE", tp_apdu, b"", sw)
         while (sw >> 8) == 0x91:
@@ -256,6 +255,7 @@ class Transport:
                 silent=not verbose,
                 log_tx=verbose,
                 log_rx=verbose,
+                label="FETCH",
             )
             self._record_stk_bootstrap_exchange("FETCH", fetch_apdu, data, sw)
             terminal_response = self._terminal_response_for_proactive(data)
@@ -266,6 +266,7 @@ class Transport:
                 silent=not verbose,
                 log_tx=verbose,
                 log_rx=verbose,
+                label="TERMINAL RESPONSE",
             )
             self._record_stk_bootstrap_exchange(
                 "TERMINAL RESPONSE", terminal_response, b"", sw
@@ -307,14 +308,20 @@ class Transport:
             "sw": None,
             "por": None,
             "por_decoded": None,
+            "pending_proactive": None,
+            "answered_event_lists": [],
             "delivered": False,
             "error": None,
         }
-        data, sw = self.transmit(apdu_hex, log_tx=verbose, log_rx=verbose)
+        data, sw = self.transmit(
+            apdu_hex, log_tx=verbose, log_rx=verbose, label="ENVELOPE"
+        )
         result["sw"] = f"{sw:04X}"
 
         if (sw >> 8) == 0x91 or (sw >> 8) == 0x61:
-            por_data = self._recv_por(sw, verbose)
+            # Under T=1 the response data and a '91 xx' arrive together.
+            por_data, pending = self._collect_por(sw, verbose, initial_data=data)
+            self._settle_pending_proactive(result, pending, verbose)
             if por_data:
                 result["por"] = por_data.hex().upper()
                 result["por_decoded"] = self.decode_por(por_data, sw)
@@ -324,6 +331,27 @@ class Transport:
                 result["error"] = "No POR body received after proactive fetch."
                 return result
             result["delivered"] = True
+            return result
+
+        if (sw >> 8) in (0x62, 0x63):
+            # TS 102 221 v18.4 §7.4.2.2: response data beside '62 XX' or
+            # '63 XX' is a negative acknowledgement, and the PoR is that data.
+            # Under T=0 the status comes alone and §7.3.1.1.4 step 4b fetches
+            # the data with GET RESPONSE, Le = '00'.
+            after_sw = 0x9000
+            if len(data) == 0:
+                data, after_sw = self._read_warning_response_data(verbose)
+            por_data, pending = self._collect_por(after_sw, verbose, initial_data=data)
+            self._settle_pending_proactive(result, pending, verbose)
+            result["delivered"] = True
+            if por_data:
+                result["por"] = por_data.hex().upper()
+                result["por_decoded"] = self.decode_por(por_data, sw)
+            elif require_por:
+                result["error"] = (
+                    f"No POR returned by card (ENVELOPE answered {sw:04X}, "
+                    f"GET RESPONSE {after_sw:04X})."
+                )
             return result
 
         if sw == 0x9000:
@@ -350,6 +378,8 @@ class Transport:
             "sw": None,
             "por": None,
             "por_decoded": None,
+            "pending_proactive": None,
+            "answered_event_lists": [],
             "delivered": False,
             "error": None,
             "segment_count": len(apdu_hex_list),
@@ -383,6 +413,9 @@ class Transport:
 
         if verbose:
             self.print_stk_bootstrap_trace()
+            # Heads the exchanges below so they do not read as part of the
+            # bootstrap block replayed above.
+            print(f"{Colors.CYAN}[OTA]{Colors.ENDC} SMS-PP data download")
 
         last_index = len(apdu_hex_list) - 1
         spi_expects_por = self._spi_expects_por()
@@ -397,6 +430,10 @@ class Transport:
             result["sw"] = segment_result.get("sw")
             result["por"] = segment_result.get("por")
             result["por_decoded"] = segment_result.get("por_decoded")
+            result["pending_proactive"] = segment_result.get("pending_proactive")
+            result["answered_event_lists"].extend(
+                segment_result.get("answered_event_lists") or []
+            )
             if segment_result.get("error"):
                 result["error"] = segment_result.get("error")
             if not segment_result.get("delivered"):
@@ -411,39 +448,134 @@ class Transport:
     def send_ota(self, apdu_hex: str, verbose: bool = False) -> Dict[str, Any]:
         return self.send_ota_sequence([apdu_hex], verbose=verbose)
 
-    def _recv_por(self, initial_sw: int, verbose: bool = False) -> bytes:
-        por_acc, current_sw = b"", initial_sw
-        fetched_proactive = False
-        while True:
-            sw1, sw2 = (current_sw >> 8) & 0xFF, current_sw & 0xFF
-            if sw1 == 0x91:
-                data, current_sw = self.transmit(
-                    f"80120000{sw2:02X}", log_tx=verbose, log_rx=verbose
-                )
-                por_acc += data
-                fetched_proactive = True
-                continue
-            if sw1 == 0x61:
-                data, current_sw = self.transmit(
-                    f"00C00000{sw2:02X}", log_tx=verbose, log_rx=verbose
-                )
-                por_acc += data
-                continue
-            break
-        if fetched_proactive:
-            self._acknowledge_sms_por(por_acc, verbose)
-        return por_acc
+    def _collect_por(
+        self, initial_sw: int, verbose: bool = False, initial_data: bytes = b""
+    ) -> Tuple[bytes, bytes]:
+        """Return ``(por, pending)`` for the card's answer to an SMS-PP ENVELOPE.
 
-    def _acknowledge_sms_por(self, fetch_body: bytes, verbose: bool = False) -> None:
+        SPI2 b6 picks the carrier (TS 31.115 v19 §4.2). A PoR sent by
+        SMS-DELIVER-REPORT is the ENVELOPE's own response data, the UICC
+        Acknowledgement of TS 31.111 v19.4 §7.1.1.2; one sent by SMS-SUBMIT
+        is the TPDU of the SEND SHORT MESSAGE the card raises next. A
+        proactive command behind the response data carries the PoR only when
+        that data is empty or answers '0B' (TS 31.115 v19 clause 7); any other
+        comes back unanswered as *pending* (``_settle_pending_proactive``).
+
+        A PoR concatenated over several SMS-SUBMIT messages (TS 31.115 v19
+        §4.5) arrives as one SEND SHORT MESSAGE per segment, each raised after
+        the TERMINAL RESPONSE to the one before, so the segments are fetched
+        until the message is whole. Left behind, a segment would answer the
+        next ENVELOPE as if it were that command's PoR.
+        """
+        response_data, sw = self._read_response_chain(
+            bytes(initial_data or b""), initial_sw, verbose
+        )
+        if (sw >> 8) != 0x91:
+            return response_data, b""
+        fetch_body, _ = self._fetch_proactive(sw, verbose)
+        carries_por = len(response_data) == 0
+        if not carries_por:
+            hands_over = self._acknowledgement_status(response_data) == 0x0B
+            carries_por = hands_over and self._proactive_has_sms_tpdu(fetch_body)
+        if not carries_por:
+            return response_data, fetch_body
+        collected = fetch_body
+        sw = self._acknowledge_sms_por(fetch_body, verbose)
+        while sw is not None and (sw >> 8) == 0x91:
+            following, _ = self._fetch_proactive(sw, verbose)
+            segment = self._proactive_has_sms_tpdu(following)
+            if not segment or not self._por_segments_missing(collected):
+                return collected, following
+            collected += following
+            sw = self._acknowledge_sms_por(following, verbose)
+        return collected, b""
+
+    def _settle_pending_proactive(
+        self, result: Dict[str, Any], pending: bytes, verbose: bool = False
+    ) -> None:
+        """Answer the SET UP EVENT LIST commands behind a PoR; record the rest.
+
+        TS 102 241 V18.1 §6.7.1.2 has the CAT Runtime send SET UP EVENT LIST
+        whenever the registered event list changes, so an OTA command that
+        switches a toolkit applet on or off draws one right behind its PoR.
+        The bootstrap accepts the list, and TS 102 223 V18.3 §6.4.16 answers
+        an accepted list with TERMINAL RESPONSE (OK); left unanswered it holds
+        the proactive session open on the connection the next send reuses.
+        The first other command stays unanswered in ``pending_proactive``,
+        since the shell cannot honour it.
+        """
+        answered: List[str] = []
+        while len(pending) > 0 and len(answered) < _EVENT_LIST_ANSWER_LIMIT:
+            events = self._set_up_event_list_events(pending)
+            if events is None:
+                break
+            _, sw = self.transmit(
+                self._terminal_response_for_proactive(pending),
+                silent=not verbose,
+                log_tx=verbose,
+                log_rx=verbose,
+                label="TERMINAL RESPONSE",
+            )
+            answered.append(events.hex().upper())
+            pending = b""
+            if (sw >> 8) == 0x91:
+                pending, _ = self._fetch_proactive(sw, verbose)
+        result["answered_event_lists"] = answered
+        if len(pending) > 0:
+            result["pending_proactive"] = pending.hex().upper()
+
+    def _fetch_proactive(self, sw: int, verbose: bool = False) -> Tuple[bytes, int]:
+        body, fetch_sw = self.transmit(
+            f"80120000{sw & 0xFF:02X}", log_tx=verbose, log_rx=verbose, label="FETCH"
+        )
+        return self._read_response_chain(body, fetch_sw, verbose)
+
+    def _read_warning_response_data(self, verbose: bool = False) -> Tuple[bytes, int]:
+        """GET RESPONSE after a T=0 warning, as TS 102 221 v18.4 annex C.1.7 runs it.
+
+        Le '00' draws '6C Luicc', and the header is sent again with P3 = Luicc.
+        """
+        data, sw = self.transmit(
+            "00C0000000", log_tx=verbose, log_rx=verbose, label="GET RESPONSE"
+        )
+        if (sw >> 8) == 0x6C:
+            data, sw = self.transmit(
+                f"00C00000{sw & 0xFF:02X}",
+                log_tx=verbose,
+                log_rx=verbose,
+                label="GET RESPONSE",
+            )
+        return self._read_response_chain(data, sw, verbose)
+
+    def _read_response_chain(
+        self, data: bytes, sw: int, verbose: bool = False
+    ) -> Tuple[bytes, int]:
+        """Append the data of every '61 xx' GET RESPONSE that follows *sw*."""
+        while (sw >> 8) == 0x61:
+            more, sw = self.transmit(
+                f"00C00000{sw & 0xFF:02X}",
+                log_tx=verbose,
+                log_rx=verbose,
+                label="GET RESPONSE",
+            )
+            data += more
+        return data, sw
+
+    def _acknowledge_sms_por(
+        self, fetch_body: bytes, verbose: bool = False
+    ) -> Optional[int]:
+        """Answer a SEND SHORT MESSAGE; return the card's status, None if not one."""
         terminal_response = self._terminal_response_for_sms_por(fetch_body)
         if terminal_response is None:
-            return
-        self.transmit(
+            return None
+        _, sw = self.transmit(
             terminal_response,
             silent=not verbose,
             log_tx=verbose,
             log_rx=verbose,
+            label="TERMINAL RESPONSE",
         )
+        return sw
 
     @classmethod
     def decode_por(cls, fetch_body: bytes, fetch_sw=None) -> Dict[str, Any]:
@@ -458,19 +590,31 @@ class Transport:
             "command_count": None,
             "command_response": None,
             "command_sw": None,
+            "por_carrier": None,
             "error": None,
         }
-        sms_tpdu = cls._proactive_sms_tpdu(fetch_body)
-        if sms_tpdu is None:
-            decoded["error"] = "PoR proactive command does not contain an SMS TPDU."
-            return decoded
-        decoded["sms_tpdu"] = Utils.to_hex(sms_tpdu)
-        response_packet = cls._sms_tpdu_response_packet(sms_tpdu)
-        if response_packet is None:
-            decoded["error"] = (
-                "SMS TPDU does not contain a parseable 03.48 response packet."
-            )
-            return decoded
+        raw = bytes(fetch_body or b"")
+        response_packet = None
+        if raw[:1] != b"\xd0":
+            response_packet = cls._acknowledgement_response_packet(raw)
+        if response_packet is not None:
+            decoded["por_carrier"] = "ENVELOPE response"
+        else:
+            tpdus = cls._proactive_sms_tpdus(raw)
+            if len(tpdus) == 0:
+                decoded["error"] = (
+                    "PoR is neither a SEND SHORT MESSAGE with an SMS TPDU nor "
+                    "an ENVELOPE response opening with the RPI '71'."
+                )
+                return decoded
+            decoded["por_carrier"] = "SEND SHORT MESSAGE"
+            decoded["sms_tpdu"] = Utils.to_hex(tpdus[0])
+            if len(tpdus) > 1:
+                decoded["sms_segments"] = len(tpdus)
+            response_packet, problem = cls._submit_response_packet(tpdus)
+            if response_packet is None:
+                decoded["error"] = problem
+                return decoded
         decoded["response_packet"] = Utils.to_hex(response_packet)
         if len(response_packet) < 13:
             decoded["error"] = (
@@ -534,14 +678,8 @@ class Transport:
 
     @staticmethod
     def _por_status_meaning(status_code: int) -> str:
-        value = int(status_code) & 0xFF
-        if value in _POR_STATUS_MEANINGS:
-            return _POR_STATUS_MEANINGS[value]
-        if 0x0D <= value <= 0xBF:
-            return "Reserved for future use"
-        if 0xC0 <= value <= 0xFE:
-            return "Reserved for proprietary use"
-        return "Reserved for future use"
+        """The name of a response status code, from the table every surface reads (TS 102 225 V19.0.0 Table 5)."""
+        return secured_packet.response_status_name(status_code)
 
     @classmethod
     def _proactive_sms_tpdu(cls, fetch_body: bytes) -> bytes:
@@ -549,6 +687,168 @@ class Transport:
             if len(tag) == 1 and (tag[0] & 0x7F) == 0x0B:
                 return value
         return None
+
+    @classmethod
+    def _proactive_commands(cls, data: bytes) -> List[bytes]:
+        """Split the proactive commands ('D0') fetched one after another for a PoR."""
+        raw = bytes(data or b"")
+        commands: List[bytes] = []
+        offset = 0
+        while offset < len(raw):
+            parsed = cls._read_ber_tlv(raw, offset)
+            if parsed is None or parsed[0] != b"\xd0":
+                return [raw]
+            commands.append(parsed[2])
+            offset = parsed[3]
+        if len(commands) == 0:
+            return [raw]
+        return commands
+
+    @classmethod
+    def _proactive_sms_tpdus(cls, data: bytes) -> List[bytes]:
+        tpdus: List[bytes] = []
+        for command in cls._proactive_commands(data):
+            tpdu = cls._proactive_sms_tpdu(command)
+            if tpdu is not None:
+                tpdus.append(tpdu)
+        return tpdus
+
+    @staticmethod
+    def _user_data_header(ud: bytes) -> Optional[Tuple[List[Tuple[int, bytes]], bytes]]:
+        """Split TP-UD into its information elements and the data behind them.
+
+        TS 23.040 v19 §9.2.3.24: UDHL, then IEI, IEDL and IED per element.
+        """
+        raw = bytes(ud or b"")
+        if len(raw) == 0:
+            return None
+        udh_end = 1 + raw[0]
+        if udh_end > len(raw):
+            return None
+        elements: List[Tuple[int, bytes]] = []
+        offset = 1
+        while offset < udh_end:
+            if offset + 2 > udh_end:
+                return None
+            iei = raw[offset]
+            start = offset + 2
+            end = start + raw[offset + 1]
+            if end > udh_end:
+                return None
+            elements.append((iei, raw[start:end]))
+            offset = end
+        return elements, raw[udh_end:]
+
+    @classmethod
+    def _sms_udh_elements(cls, sms_tpdu: bytes) -> List[Tuple[int, bytes]]:
+        raw = bytes(sms_tpdu or b"")
+        if len(raw) == 0 or not raw[0] & 0x40:
+            return []
+        ud = cls._sms_tpdu_user_data(raw)
+        parsed = cls._user_data_header(ud) if ud else None
+        if parsed is None:
+            return []
+        return parsed[0]
+
+    @classmethod
+    def _concatenation_element(cls, sms_tpdu: bytes) -> Optional[Tuple[int, int, int]]:
+        """Return ``(reference, total, sequence)`` of a concatenated SM segment.
+
+        TS 23.040 v19 §9.2.3.24.1 ('00', 8-bit reference) and §9.2.3.24.8
+        ('08', 16-bit reference); an element with a zero total, or a sequence
+        of zero or above the total, is ignored, as the receiver must.
+        """
+        for iei, data in cls._sms_udh_elements(sms_tpdu):
+            if iei == 0x00 and len(data) == 3:
+                reference, total, sequence = data[0], data[1], data[2]
+            elif iei == 0x08 and len(data) == 4:
+                reference, total, sequence = (data[0] << 8) | data[1], data[2], data[3]
+            else:
+                continue
+            if total == 0 or sequence == 0 or sequence > total:
+                return None
+            return reference, total, sequence
+        return None
+
+    @classmethod
+    def _por_segments_missing(cls, commands: bytes) -> bool:
+        tpdus = cls._proactive_sms_tpdus(commands)
+        if len(tpdus) == 0:
+            return False
+        first = cls._concatenation_element(tpdus[0])
+        if first is None:
+            return False
+        reference, total, _ = first
+        received = set()
+        for tpdu in tpdus:
+            element = cls._concatenation_element(tpdu)
+            if element is not None and element[:2] == (reference, total):
+                received.add(element[2])
+        return len(received) < total
+
+    @classmethod
+    def _submit_response_packet(cls, tpdus: List[bytes]) -> Tuple[Optional[bytes], str]:
+        """Return the Response Packet SEND SHORT MESSAGE TPDUs carry, or why not.
+
+        TS 31.115 v19 §4.5: the first segment of a concatenated PoR holds the
+        concatenation element and the RPI, every later one the concatenation
+        element alone.
+        """
+        unreadable = "SMS TPDU does not contain a parseable 03.48 response packet."
+        first = cls._concatenation_element(tpdus[0])
+        if first is None:
+            packet = cls._sms_tpdu_response_packet(tpdus[0])
+            if packet is None:
+                return None, unreadable
+            return packet, ""
+        reference, total, _ = first
+        parts: Dict[int, bytes] = {}
+        segment_one = b""
+        for tpdu in tpdus:
+            element = cls._concatenation_element(tpdu)
+            if element is None or element[:2] != (reference, total):
+                return None, "PoR segments belong to different concatenated messages."
+            part = cls._sms_tpdu_response_packet(tpdu)
+            if part is None:
+                return None, unreadable
+            parts[element[2]] = part
+            if element[2] == 1:
+                segment_one = tpdu
+        missing = [str(number) for number in range(1, total + 1) if number not in parts]
+        if missing:
+            return None, (
+                f"Concatenated PoR {reference:02X} lacks segment(s) "
+                f"{', '.join(missing)} of {total}; segments without the first one "
+                "are left over from an earlier command, and 'reset' drains them."
+            )
+        if not any(iei == 0x71 for iei, _ in cls._sms_udh_elements(segment_one)):
+            return None, "Segment 1 of the concatenated PoR carries no RPI '71'."
+        return b"".join(parts[number] for number in range(1, total + 1)), ""
+
+    @classmethod
+    def _acknowledgement_response_packet(cls, data: bytes) -> Optional[bytes]:
+        """Return the Response Packet an SMS-PP ENVELOPE answered with.
+
+        TS 31.111 v19.4 §7.1.1.2 returns a UICC Acknowledgement that the ME
+        relays in its SMS-DELIVER-REPORT. TS 31.115 v19 §4.4 opens it with a
+        UDH holding the RPI '71', and §4.1 has the Sending Entity read it as
+        if UDHI were set, because the UICC cannot set that bit.
+        """
+        parsed = cls._user_data_header(data)
+        if parsed is None:
+            return None
+        elements, remainder = parsed
+        if not any(iei == 0x71 for iei, _ in elements):
+            return None
+        return remainder
+
+    @classmethod
+    def _acknowledgement_status(cls, data: bytes) -> Optional[int]:
+        packet = cls._acknowledgement_response_packet(data)
+        # RPL (2), RHL (1), TAR (3), CNTR (5) and PCNTR (1) precede the status.
+        if packet is None or len(packet) < 13:
+            return None
+        return packet[12]
 
     @classmethod
     def _sms_tpdu_response_packet(cls, sms_tpdu: bytes) -> bytes:
@@ -639,6 +939,25 @@ class Transport:
         return None
 
     @classmethod
+    def _set_up_event_list_events(cls, fetch_body: bytes) -> Optional[bytes]:
+        """The Event list of a SET UP EVENT LIST command; None for any other.
+
+        TS 102 223 V18.3 §9.4 codes the command type '05'; the Event list
+        object is tag '19' (TS 101 220 V19.0.0 table 7.23). An empty list
+        removes every event and is still an Event list.
+        """
+        command_details = cls._proactive_command_details_tlv(fetch_body)
+        if command_details is None:
+            return None
+        _details_raw, details_value = command_details
+        if len(details_value) != 3 or details_value[1] != 0x05:
+            return None
+        for tag, value, _raw in cls._iter_proactive_tlvs(fetch_body):
+            if len(tag) == 1 and (tag[0] & 0x7F) == 0x19:
+                return bytes(value)
+        return None
+
+    @classmethod
     def _proactive_has_sms_tpdu(cls, fetch_body: bytes) -> bool:
         for tag, _value, _raw in cls._iter_proactive_tlvs(fetch_body):
             if len(tag) == 1 and (tag[0] & 0x7F) == 0x0B:
@@ -697,7 +1016,7 @@ class Transport:
     def _spi_expects_por(self) -> bool:
         """Return True when the active SPI requests a PoR from the card.
 
-        ETSI TS 102 225 §5.2.1 -- SPI byte 2, bits 2-1 (b2-b1):
+        ETSI TS 102 225 v19 §5.1.1 coding of the SPI -- second octet, b2-b1:
           00 = No PoR reply
           01 = PoR always required
           10 = PoR required on error (treat as required so errors surface)

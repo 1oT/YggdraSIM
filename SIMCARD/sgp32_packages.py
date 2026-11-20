@@ -286,13 +286,37 @@ def verify_eim_signature(
     return True
 
 
+def _single_sequence(value: bytes) -> bytes | None:
+    """*value* when it is exactly one SEQUENCE TLV, else None."""
+    try:
+        tag, _inner, raw_tlv, end = read_tlv(value, 0)
+    except ValueError:
+        return None
+    if tag != b"\x30" or end != len(value):
+        return None
+    return raw_tlv
+
+
+def _child_count(value: bytes) -> int | None:
+    count = 0
+    offset = 0
+    while offset < len(value):
+        try:
+            _tag, _inner, _raw, offset = read_tlv(value, offset)
+        except ValueError:
+            return None
+        count += 1
+    return count
+
+
 def unwrap_eim_key_material(payload: bytes) -> bytes:
     """Return the DER of the key material behind eimPublicKeyData / trustedPublicKeyDataTls.
 
     SGP.32 v1.3 EimConfigurationData carries the SubjectPublicKeyInfo as ``A0``
     and the Certificate as ``A1``, each replacing the DER SEQUENCE tag, so the
     SEQUENCE is rebuilt here. A bare SEQUENCE, the shape earlier packages used,
-    and a stray outer ``A5`` / ``A6`` CHOICE wrapper are accepted as well.
+    an alternative wrapped around a whole SEQUENCE (the simulator's earlier
+    legacy entries) and a stray outer ``A5`` / ``A6`` wrapper are accepted as well.
     """
 
     raw = bytes(payload or b"")
@@ -307,7 +331,45 @@ def unwrap_eim_key_material(payload: bytes) -> bytes:
     if tag in (b"\xA5", b"\xA6"):
         return unwrap_eim_key_material(value)
     if tag in (b"\xA0", b"\xA1"):
+        # The implicit form holds two (SubjectPublicKeyInfo) or three (Certificate)
+        # members, never a single SEQUENCE, so a lone SEQUENCE is the wrapped form.
+        wrapped = _single_sequence(value)
+        if wrapped is not None:
+            return wrapped
         return tlv(b"\x30", value)
+    return raw
+
+
+def encode_eim_key_choice(material: bytes) -> bytes:
+    """eimPublicKeyData / trustedPublicKeyDataTls as sent: ``A0`` SubjectPublicKeyInfo or ``A1`` Certificate.
+
+    SGP.32 v1.3 §2.11.1.1.2 (p.33) declares both as a CHOICE of the two in an
+    AUTOMATIC TAGS module, so the alternative's context tag replaces the
+    SEQUENCE tag (``A1`` + the Certificate's length and contents). Whatever the
+    simulator holds -- a bare DER SEQUENCE, the implicit form, the alternative
+    wrapped around a whole SEQUENCE, an outer ``A5`` / ``A6`` -- comes out in that
+    form; anything it cannot read comes out unchanged.
+    """
+    der = unwrap_eim_key_material(material)
+    sequence = _single_sequence(der)
+    if sequence is None:
+        return bytes(material or b"")
+    _tag, contents, _raw, _end = read_tlv(sequence, 0)
+    # Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue };
+    # SubjectPublicKeyInfo ::= SEQUENCE { algorithm, subjectPublicKey } (RFC 5280 §4.1).
+    members = _child_count(contents)
+    if members == 3:
+        return b"\xA1" + sequence[1:]
+    if members == 2:
+        return b"\xA0" + sequence[1:]
+    return bytes(material or b"")
+
+
+def as_euicc_package_result(payload: bytes) -> bytes:
+    """One EuiccPackageResult 'BF51' (SGP.32 v1.3 p.40) for a stored result or its bare alternative."""
+    raw = bytes(payload or b"")
+    if raw[:1] in (b"\xA0", b"\xA1", b"\xA2"):
+        return tlv(TAG_EUICC_PACKAGE, raw)
     return raw
 
 

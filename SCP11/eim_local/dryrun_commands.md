@@ -31,8 +31,8 @@ Q
 HELP
 EIM-PACKAGE Workspace/LocalEIM/eim_packages/default_eim_package.json
 EIM-PACKAGE-LINT
-ADD-INITIAL-EIM isdr "/path/to/local_eim_signing_cert.pem"
-ADD-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json
+ADD-INITIAL-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json
+GET-EIM-CONFIG
 EIM-ACKNOWLEDGE
 NOTIF-HYGIENE 0
 Q

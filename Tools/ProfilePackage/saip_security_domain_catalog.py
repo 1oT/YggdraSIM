@@ -13,7 +13,7 @@ blocks that the GUI / TUI editor surfaces as labelled drop-downs:
 * Key Usage Qualifier ..... GP CS v2.3 Table 11-17
 * Key Access .............. GP CS v2.3 Table 11-19
 * Key Component Type ...... GP CS v2.3 §11.1.8 (DGI 00B9 / 8010)
-* OPEN Restrict ........... GP CS v2.3 §11.5.4 (RestrictParameter)
+* OPEN Restrict ........... GP CS v2.3.1 §11.5.2.3.7 Table 11-53 (RestrictParameter)
 
 Every entry pairs the symbolic name with the raw byte value so a
 round-trip ``decode_*`` / ``encode_*`` call is byte-identical to the
@@ -385,11 +385,12 @@ def encode_key_component_type(name_or_hex: Any) -> str:
 
 
 # ----------------------------------------------------------------------
-# OPEN Personalization Restrict (GP CS v2.3 §11.5.4)
+# OPEN Personalization Restrict (GP CS v2.3.1 §11.5.2.3.7 Table 11-53,
+# referenced by TCA SAIP v3.4.1 §8.6.6)
 #
 # RestrictParameter is a one-byte bitmask gating which OPEN-managed
 # operations the SD may perform on its own data. Names follow the
-# GP CS §11.5.4 enumeration verbatim (spec-defined constants, not
+# GP CS v2.3.1 §11.5.2.3.7 enumeration verbatim (spec-defined constants, not
 # YggdraSIM coinage).
 # ----------------------------------------------------------------------
 

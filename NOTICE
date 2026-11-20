@@ -30,7 +30,7 @@ runtime from their upstream sources:
   respective upstream projects and are not redistributed here.
 
 Vendored material notice:
-Three third-party items are redistributed inside this tree, each because the
+Four third-party items are redistributed inside this tree, each because the
 runtime needs it locally and a separate installation step is not workable:
 - the RSPRO ASN.1 schema at `docs/RSPRO.asn` (mirrored into
   `Tools/HilBridge/RSPRO.asn` for wheel packaging), required at runtime by
@@ -39,10 +39,13 @@ runtime needs it locally and a separate installation step is not workable:
   `gui_frontend/src/vendor/xterm/`, which back the GUI terminal panel
 - `mermaid` (MIT) under `gui_frontend/src/vendor/mermaid/`, which renders
   the diagrams in the GUI guide viewer
+- IBM Plex Sans Condensed and IBM Plex Mono (SIL Open Font License 1.1),
+  Latin-1 subsets under `gui_frontend/src/vendor/plex-sans-condensed/` and
+  `gui_frontend/src/vendor/plex-mono/`, the typefaces of the GUI's Bench skin
 
-The two browser libraries are vendored rather than loaded from a CDN because
-the GUI ships a `script-src 'self'` Content-Security-Policy and has to run
-fully offline. Each vendor directory carries a `NOTICE.md` with the upstream
+The two browser libraries and the typefaces are vendored rather than loaded
+from a CDN because the GUI ships a `'self'`-only Content-Security-Policy and
+has to run fully offline. Each vendor directory carries a `NOTICE.md` with the upstream
 project, the pinned version, the license, and the update procedure.
 
 Acknowledgements:

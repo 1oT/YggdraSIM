@@ -43,6 +43,21 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "yggdrasim-tests-no-universal-list.csv"),
 )
 
+# The AddInitialEim builder store (``~/.yggdrasim/eim_builder``) holds the
+# operator's certificates and typed values. A test run gets an empty store
+# of its own, removed at exit, so no test reads or writes the real one.
+if "YGGDRASIM_EIM_BUILDER_STORE" not in os.environ:
+    _EIM_BUILDER_STORE = tempfile.mkdtemp(prefix="yggdrasim-tests-eim-builder-")
+    os.environ["YGGDRASIM_EIM_BUILDER_STORE"] = _EIM_BUILDER_STORE
+    atexit.register(shutil.rmtree, _EIM_BUILDER_STORE, True)
+
+# The Local eIM engine store (``~/.yggdrasim/local_eim``) holds the operator's
+# eIM identity, private keys and operation queue; a test run gets its own.
+if "YGGDRASIM_LOCAL_EIM_STORE" not in os.environ:
+    _LOCAL_EIM_STORE = tempfile.mkdtemp(prefix="yggdrasim-tests-local-eim-")
+    os.environ["YGGDRASIM_LOCAL_EIM_STORE"] = _LOCAL_EIM_STORE
+    atexit.register(shutil.rmtree, _LOCAL_EIM_STORE, True)
+
 
 # The repo ``plugins/`` directory is a runtime-loaded namespace package
 # (no __init__.py by design -- see ``yggdrasim_common/plugin_runtime.py``),
@@ -58,10 +73,11 @@ if str(_REPO_ROOT) not in sys.path:
 # finished: the first import binds ``sys.modules["pySim"]`` for the
 # session, and a later path insertion cannot displace it. Deciding the
 # tree here is what makes a single-file run and a full-suite run compile
-# the same ASN.1 -- ``StoreMetadataRequest`` carries nine members from
-# the installed package and nineteen from a checkout patched per
-# ``upstream_patches/osmocom-pysim-rsp-v3-metadata/``, so the losing
-# order silently drops every SGP.22 v3.1 metadata field.
+# the same ASN.1 -- a checkout and the installed pin need not carry the
+# same fixes (an older checkout compiled ``StoreMetadataRequest`` with
+# nine members where the pin has nineteen, per
+# ``upstream_patches/osmocom-pysim-rsp-v3-metadata/``), so the losing
+# order silently changes the schema.
 _PYSIM_CHECKOUT = _REPO_ROOT / "pysim"
 if _PYSIM_CHECKOUT.is_dir() and str(_PYSIM_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(_PYSIM_CHECKOUT))
@@ -105,6 +121,23 @@ def _restore_regression_env_defaults():
     """Restore process-wide defaults after tests that deliberately clear env vars."""
     _default_env("YGGDRASIM_ALLOW_QUIRKS", "1")
     yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _reader_locks_in_a_scratch_directory(tmp_path_factory):
+    """Keep every test's reader locks out of the real lock directory.
+
+    Every YggdraSIM process of the user honours the files under
+    ``~/.yggdrasim/run/reader-locks`` (``yggdrasim_common/reader_locks.py``),
+    a live card or HIL rig running beside the suite included, so a test must not
+    take one there even when HOME is the ambient one.
+    """
+    from yggdrasim_common import reader_locks
+
+    previous = reader_locks._DIRECTORY
+    reader_locks._DIRECTORY = tmp_path_factory.mktemp("reader-locks")
+    yield
+    reader_locks._DIRECTORY = previous
 
 
 @pytest.fixture
@@ -223,21 +256,21 @@ def _pysim_available() -> tuple[bool, str]:
     ``pySim`` is an **upstream** dependency. We accept any of the three
     legitimate provisioning paths without favouring one:
 
-    1. Installed from git via the ``[saip]`` extra
-       (``pip install 'yggdrasim[saip]'``), which is the recommended
-       path for operators and CI.
+    1. Installed with the project (``pip install -e .``): pySim is a
+       base dependency pinned to the hampushellsberg-dev/pysim fork,
+       which is the recommended path for operators and CI.
     2. Installed by hand
-       (``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
+       (``pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'``).
     3. A developer checkout at ``<repo>/pysim`` (or ``<repo>/pySim``),
-       opted into by cloning the tree. This path is still supported
-       so maintainers working against an unreleased upstream branch
-       don't have to reinstall after every change.
+       opted into by cloning that fork. This path is still supported
+       so maintainers working on pySim itself don't have to reinstall
+       after every change.
 
     We **do not** require the on-disk clone. If option 1 or 2 resolved
     ``pySim.esim.saip`` we succeed; only when **all three** fail do we
     surface the import error and downgrade pySim-dependent tests to
-    ``skipped``. The message points the operator at the ``[saip]``
-    extra because that is the path that turns this from "soft
+    ``skipped``. The message points the operator at the project
+    install because that is the path that turns this from "soft
     dependency" into "just works on a fresh checkout".
     """
     try:
@@ -260,10 +293,10 @@ def pytest_collection_modifyitems(config, items):
         skip_no_pysim = pytest.mark.skip(
             reason=(
                 "pySim is not importable in this environment. "
-                "Preferred install: `pip install 'yggdrasim[saip]'`. "
+                "Preferred install: `pip install -e .` (pySim is a base dependency). "
                 "Manual install: `pip install "
-                "'pySim @ git+https://github.com/osmocom/pysim.git'`. "
-                "Developer-checkout fallback: clone the upstream tree "
+                "'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`. "
+                "Developer-checkout fallback: clone that fork "
                 f"into {_REPO_ROOT / 'pysim'}. "
                 f"Underlying import error: {pysim_error}."
             )

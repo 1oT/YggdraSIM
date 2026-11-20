@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install\install-windows.ps1
 | `yggdrasim_common/remote_lab/` | Shared rigs: inventory, exclusive sessions with heartbeat expiry, and card offers to modem rigs, all over the Card Bridge data plane | `yggdrasim-lab-agent` (publish), `yggdrasim-lab` (use) |
 | `yggdrasim_common/gui_server/` | Optional Universal GUI Command Center: FastAPI API + pywebview desktop window or headless lab server, live APDU dock, remote-rig controls | `--gui` / `--web-server` |
 | `plugins/` | Runtime-loaded optional private extensions discovered only after explicit opt-in | drop-in `register_plugins()` modules |
-| `pysim/` | **Optional** developer checkout of upstream pySim (gitignored). Only needed when working against an unreleased upstream branch; the released SAIP surface ships via the `[saip]` extra (`pip install 'yggdrasim[saip]'`). | optional external tree |
+| `pysim/` | **Optional** developer checkout of the pinned pySim fork (gitignored). Only needed when working on pySim itself; the installed pySim is a base dependency pinned to that fork. | optional external tree |
 
 ## Core capabilities
 
@@ -143,8 +143,12 @@ python -m pip install -r requirements.txt
 python -m pip install -e '.[saip]'
 ```
 
-The base install resolves the commit-pinned upstream `pySim` dependency used
-by SAIP, SCP03/SCP80, and SCP11-local flows. The `[saip]` extra adds
+The base install resolves the commit-pinned `pySim` dependency used by SAIP,
+SCP03/SCP80, and SCP11-local flows: `hampushellsberg-dev/pysim`, which is
+osmocom pySim master with the fixes in `upstream_patches/osmocom-pysim-*` on
+top, one commit each, until osmocom merges them. YggdraSIM relies on those
+fixes: the SAIP tools refuse a pySim without them, and the simulated card
+then runs without pySim's view of a profile. The `[saip]` extra adds
 `openpyxl` and `defusedxml` for spreadsheet import/export extensions to
 build on. No shipped module imports them: the Excel-to-SAIP generator itself
 is a plugin supplied separately, and without one this extra adds no operator
@@ -152,21 +156,20 @@ surface. Batch profile generation from `.csv`, `.json`, `.jsonl`, `.yaml`
 files needs no extra at all -- see
 [guides/TEMPLATE_AND_TOKENS.md](guides/TEMPLATE_AND_TOKENS.md).
 
-If you are working against an unreleased upstream pySim branch you can
-still drop a developer checkout at `<repo>/pysim` (`git clone
-https://github.com/osmocom/pysim.git pysim`); that tree takes priority
-over the installed wheel, so whichever tree is present decides which
-ASN.1 the process compiles. The `pysim/` path stays gitignored so it
-never ships in the distribution.
+If you are working on pySim itself you can still drop a developer checkout
+at `<repo>/pysim` (`git clone https://github.com/hampushellsberg-dev/pysim.git
+pysim`); that tree takes priority over the installed wheel, so whichever
+tree is present decides which ASN.1 the process compiles. It has to carry
+the same fixes as the pin. The `pysim/` path stays gitignored so it never
+ships in the distribution.
 
-The pinned upstream defines `StoreMetadataRequest` at SGP.22 v2, so it
-declares none of the ten v3.1 §5.5.3 members -- `rpmConfiguration`,
+Upstream pySim defines `StoreMetadataRequest` at SGP.22 v2, so it declares
+none of the ten v3.1 §5.5.3 members -- `rpmConfiguration`,
 `hriServerAddress`, `lprConfiguration`, `enterpriseConfiguration`,
 `serviceProviderMessage`, `serviceDescription`,
 `deviceChangeConfiguration`, `estimatedProfileSize` and the two
-`serviceSpecificData` members. No forked dependency is needed for them:
-`SCP11/rsp_v3_schema.py` declares them when it compiles the schema, so a
-stock install authors v3 metadata as well as a patched checkout does.
+`serviceSpecificData` members. The pinned pySim declares them; a pySim that
+does not cannot author v3 metadata.
 `asn1tools` drops a key its schema does not define without raising, so the
 encoders read the compiled member set back and refuse rather than writing a
 profile with the field missing. The schema extension is logged for upstream
@@ -451,7 +454,7 @@ Use `SCP80` for:
 Use `SCP11/live` for:
 
 - `LPAd`: `DOWNLOAD-PROFILE <activation>`
-- `IPAd`: `DISCOVER`, `DOWNLOAD [matchingId]`
+- `IPAd`: `DISCOVER`, `DOWNLOAD [matchingId]`, `EIM-LISTEN`, `EIM-LISTEN-CERT`
 
 Example:
 
@@ -589,6 +592,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
   entire nav (offline reading or PDF export), run
   `python3 site-docs/_tools/build_combined.py` → root `YggdraSIM.md`
   (gitignored); see `site-docs/_tools/README.md`.
+- `guides/USER_MANUAL.md` - user manual, the place to start: modules, install and start, shared concepts, real-card work; its chapters `guides/USER_MANUAL_GUI.md` (the GUI, module by module) and `guides/USER_MANUAL_CLI.md` (the launcher and the shells, module by module)
 - `guides/README.md` - index of authored operator and developer guides
 - `guides/CAPABILITIES.md` - suite-level capability reference grouped by subsystem and workflow
 - `guides/ARCHITECTURE.md` - system structure, interdependency matrix, state model, and flow charts
@@ -644,7 +648,7 @@ its pane layout in the workspace, supports OS clipboard copy/paste, and writes
 - `plugins/` - runtime-loaded optional private extensions
 - `tests/` - first-party test suite
 - `state/` - shared SQLite inventory and crypto bootstrap config
-- `pysim/` - **optional** developer checkout of upstream pySim (gitignored). The released SAIP surface installs via the `[saip]` extra (`pip install 'yggdrasim[saip]'`); this tree is only needed when you want to pin against an unreleased upstream branch.
+- `pysim/` - **optional** developer checkout of the pinned pySim fork (gitignored). The installed pySim is a base dependency pinned to that fork; this tree is only needed when you work on pySim itself, and it has to carry the same fixes, since the SAIP tools refuse a pySim without them.
 
 ## Acknowledgements
 

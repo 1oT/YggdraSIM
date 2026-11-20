@@ -23,12 +23,15 @@
   flex: 1 1 280px;
   align-items: center;
   gap: 6px;
-  min-width: 180px;
+  /* The strip gives way before the cluster spills over the crumbs: the
+     right-aligned cluster overflows leftwards once its floors add up past
+     the bar (Classic with Matrix's monospace at 1600 px). */
+  min-width: 150px;
   max-width: min(36vw, 440px);
-  min-height: 38px;
-  padding: 2px 6px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  min-height: calc(var(--chrome-pill-h) + 4px);
+  padding: 1px 3px;
+  background: var(--chrome-pill-bg);
+  border: 1px solid var(--chrome-pill-border);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
@@ -52,7 +55,7 @@
 
 .topbar-readers-scroll::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .topbar-readers-hint {
@@ -66,14 +69,14 @@
 
 .topbar-readers-refresh {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: var(--chrome-pill-h);
+  height: var(--chrome-pill-h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: var(--radius-dot);
+  border: 1px solid var(--chrome-pill-border);
+  background: var(--chrome-pill-bg);
   color: var(--fg);
   cursor: pointer;
   font-size: 14px;

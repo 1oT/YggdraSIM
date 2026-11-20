@@ -74,7 +74,7 @@ Do not mass-run. Redirect noisy runs to a log file and inspect with `rg`.
 
 - [ ] each test file that exercises a changed area passes
 - [ ] plugin runtime behavior is exercised through
-      `tests/test_polling_plugin_*.py` where applicable
+      `tests/test_plugin_*.py` where applicable
 - [ ] HIL-related tests pass in their emulated form
 
 ## Docker

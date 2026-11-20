@@ -190,6 +190,67 @@ class TestLiveReadersRoute:
         assert raised.value.status_code == 404
 
 
+class TestSimulatedBackendReaders:
+    """With the SIM backend every connection goes to the simulated card, so
+    the reader list offers the simulator alone and every resolver binds its
+    name; with the reader backend the name is unknown like any other."""
+
+    def test_sim_backend_lists_the_simulator_alone(self, stub_pyscard, monkeypatch) -> None:
+        from SIMCARD.connection import SimulatedCardConnection
+        from yggdrasim_common.card_backend import SIMULATED_READER_NAME
+
+        monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "sim")
+        response = live_module.list_readers()
+        assert response.backend == "sim"
+        assert [row.name for row in response.readers] == [SIMULATED_READER_NAME]
+        row = response.readers[0]
+        assert row.kind == "sim"
+        assert row.status == "simulated card"
+        assert row.atr_hex == bytes(SimulatedCardConnection().getATR()).hex().upper()
+        assert len(row.atr_hex) > 0
+
+    def test_sim_backend_atr_probe_answers_for_the_simulator(self, stub_pyscard, monkeypatch) -> None:
+        from yggdrasim_common.card_backend import SIMULATED_READER_NAME
+
+        monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "sim")
+        response = live_module.probe_single_atr(
+            live_module.AtrProbeRequest(reader=SIMULATED_READER_NAME)
+        )
+        assert response.name == SIMULATED_READER_NAME
+        assert len(response.atr_hex) > 0
+
+    def test_reader_backend_neither_lists_nor_probes_the_simulator(self, stub_pyscard, monkeypatch) -> None:
+        from yggdrasim_common.card_backend import SIMULATED_READER_NAME
+
+        monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "reader")
+        response = live_module.list_readers()
+        assert SIMULATED_READER_NAME not in [row.name for row in response.readers]
+        with pytest.raises(live_module.HTTPException) as raised:
+            live_module.probe_single_atr(live_module.AtrProbeRequest(reader=SIMULATED_READER_NAME))
+        assert raised.value.status_code == 404
+
+    def test_resolvers_bind_the_simulator_only_under_the_sim_backend(self, stub_pyscard, monkeypatch) -> None:
+        from yggdrasim_common.card_backend import SIMULATED_READER_NAME
+        from yggdrasim_common.gui_server.actions import scp03, scp11_live, scp11_local, scp80
+
+        monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "sim")
+        assert scp03._resolve_reader_binding(SIMULATED_READER_NAME) == (0, SIMULATED_READER_NAME)
+        assert scp03._resolve_reader_binding("") == (0, SIMULATED_READER_NAME)
+        assert scp11_live._resolve_reader_index(SIMULATED_READER_NAME) == 0
+        assert scp11_local._resolve_reader_index(SIMULATED_READER_NAME) == 0
+        assert scp80._resolve_reader_index_from_name(SIMULATED_READER_NAME) == 0
+
+        monkeypatch.setenv("YGGDRASIM_CARD_BACKEND", "reader")
+        with pytest.raises(RuntimeError, match="reader not found"):
+            scp03._resolve_reader_binding(SIMULATED_READER_NAME)
+        assert scp03._resolve_reader_binding("") == (0, "YggdraSIM Virtual Reader 0")
+        with pytest.raises(RuntimeError, match="reader not found"):
+            scp11_live._resolve_reader_index(SIMULATED_READER_NAME)
+        with pytest.raises(RuntimeError, match="reader not found"):
+            scp11_local._resolve_reader_index(SIMULATED_READER_NAME)
+        assert scp80._resolve_reader_index_from_name(SIMULATED_READER_NAME) == -1
+
+
 # --- Regression: ATR probe must not power-cycle the card -----------------
 #
 # Background: the 5 s reader-bar poll used to call ``connection.connect()``

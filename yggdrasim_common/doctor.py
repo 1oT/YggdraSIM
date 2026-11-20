@@ -134,13 +134,15 @@ def _probe_module(
 def _probe_optional_pysim(report: DoctorReport, workspace_root: Path) -> None:
     """Probe for any of the three valid pySim provisioning paths.
 
-    pySim is an **upstream** dependency. Resolution order:
+    pySim is a base dependency pinned to the hampushellsberg-dev/pysim
+    fork, osmocom pySim with YggdraSIM's pending upstream fixes on top.
+    Resolution order:
 
-    1. A developer checkout at ``<workspace>/pysim`` (advanced
-       upstream-branch workflow).
-    2. A pip-installed ``pySim`` package (e.g. from the ``[saip]``
-       extra -- ``pip install 'yggdrasim[saip]'`` -- or a hand
-       ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
+    1. A developer checkout at ``<workspace>/pysim`` (a clone of that
+       fork, for work on pySim itself).
+    2. An installed ``pySim`` package (``pip install -e .`` in a
+       checkout pulls the pinned fork, or a hand
+       ``pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'``).
 
     Either path is valid. The probe reports ``ok`` when any one of
     them resolves and ``warn`` only when both fail; the warning spells
@@ -164,9 +166,10 @@ def _probe_optional_pysim(report: DoctorReport, workspace_root: Path) -> None:
             "pySim",
             "warn",
             "pySim.esim.saip not importable; SAIP and SCP11 local flows need it. "
-            "Recommended: `pip install 'yggdrasim[saip]'` (installs pySim from "
-            "https://github.com/osmocom/pysim.git). Developer-checkout "
-            "alternative: clone the upstream tree into `pysim/` under the "
+            "Recommended: `pip install -e .` in a YggdraSIM checkout (pySim is a base "
+            "dependency, pinned to https://github.com/hampushellsberg-dev/pysim.git), or "
+            "`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`. "
+            "Developer-checkout alternative: clone that fork into `pysim/` under the "
             f"workspace root. Underlying import error: {type(import_error).__name__}: {import_error}.",
         )
         return

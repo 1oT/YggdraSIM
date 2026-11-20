@@ -138,6 +138,7 @@ MANAGE-PROFILE
 RUN-AUTH
 RUN-AUTH-TEST
 DERIVE-OPC <kiHex> <opHex>
+DERIVE-TOPC <topHex> <kHex> [keccakIterations]
 MANAGE-PIN [args]
 CONFIG
 SHOW
@@ -279,6 +280,9 @@ DELETE-PROFILE <iccid-or-aid>
 METADATA <id|aid|alias>
 DISCOVER
 DOWNLOAD [matchingId] [--<n>[,<n>...]]
+EIM-LISTEN [port=<n>] [calls=<n>] [idle=<seconds>] [notifications=deliver|keep]
+EIM-LISTEN host=<address> cert=<pem> key=<pem> client-ca=<pem>
+EIM-LISTEN-CERT <host name or address>... [out=<directory>]
 EXIT
 QA
 ```
@@ -404,11 +408,40 @@ Direct eIM and ISD-R commands:
 
 ```text
 GET-EIM-CONFIG
-DELETE-EIM <eimId>
 EUICC-MEMORY-RESET [packagePath]
 ISDR-GET-EIM-CONFIG
-ISDR-DELETE-EIM <eimId>
 LOAD-EIM-PACKAGE [packagePath] [certPath]
+```
+
+Operation queue commands:
+
+```text
+IDENTITY [show] | IDENTITY NEW [eimId] [fqdn] | IDENTITY IMPORT eim_id=... fqdn=... key=... cert=...
+ASSOCIATE [--yes] [--public-key] [--no-reset]
+EUICC [list] | EUICC <eid> | EUICC ADD <eid> [label] | EUICC READ | EUICC SET <eid> key=value ... | EUICC REMOVE <eid>
+QUEUE <operation> [eid] [value] [key=value ...] [--plan] [--first] [--at <UTC>] [--retries <n>]
+OPS [pending|completed|all] [eid=<eid>] [type=<TYPE>] [limit=<n>] [--json]
+OP <id> [--decode] [--json]
+EDIT <id> key=value ...
+MOVE <id> first|last|up|down|before <id>|after <id>
+CANCEL <id>
+COPY <id> [key=value ...]
+EXPORT <id>
+RESULT <id> <hex>
+PACKAGE-IMPORT <file|folder> [eid] [--plan]
+ADD-EIM [eid] <eimId> key=value ...
+ADD-EIM [eid] config=<saved eIM configuration> [key=value ...]
+DELETE-EIM [eid] <eimId>
+EIM-SETTINGS [key=value ...]
+SERVE [status|start|stop|restart] [port=<n>] [host=<addr>] [tls_port=<n>|auto|off] [smdp_tls_port=<n>|auto|off] [smds_tls_port=<n>|auto|off] [--tls]
+TLS-SETUP [list] | NEW <name> [chain=..] [trust=..] [curve=..] [send=..] [san=..] [validity=..] [ski=on|off] [--replace] [--force] [--use|--apply] | SHOW <name> | USE <name|identity> [--associate] | REMOVE <name> [--force]
+TLS-SETUP LEAF <name> [LIST] | LEAF <name> NEW <leaf> [cn=..] [san=..] [registered_id=..] [layout=..] [validity=..] [ski=on|off] [server_auth=on|off] [curve=..] [send=..] [subject=<RFC 4514 name>|none] [ext.<extension>=[critical,]<value>|DER:<hex> ...] [extensions=none] [text=<file>] [--replace] [--use] | LEAF <name> TEXT <leaf> [out=<new file>] | TEXT <stored cert|file> [out=<new file>] | LEAF <name> SHOW <leaf> [--der] | LEAF <name> USE <leaf> [--associate|--serve-only] | LEAF <name> REMOVE <leaf>
+TLS-SETUP RESULTS [<name>] [n=<rows>] [--rows] [--json]
+DELIVER [--once]
+INJECT [<eid>] [target=http://127.0.0.1:<port>|none] [binding=asn1|json] [timeout=<seconds>] [--once]
+NOTIFICATIONS [<eid>] | NOTIFICATIONS SEND [<eid>] [<seqNumber> ...]
+SMDP-PROFILE [list] | SMDP-PROFILE <matchingId> <profilePath>
+SMDS [status] | SMDS LIST [<eid>] | SMDS REGISTER <eid> [<eventId>] [rsp=<address>] [type=download|rpm] | SMDS DELETE <eid> <eventId> | SMDS ADDRESS [<fqdn>]
 ```
 
 IPAd and handover commands:
@@ -430,10 +463,8 @@ EIM-PACKAGE-EXPLAIN [packagePath] [--strict-exec] [--json|--yaml]
 EIM-PACKAGE-ISSUE [packagePath]
 EIM-PACKAGE-ISSUE-ALL [directory]
 EIM-CERTS [--json|--yaml] [packagePath] [certPath]
-ADD-INITIAL-EIM [package|isdr] [certPath] [packagePath]
-ADD-EIM [package|isdr] [certPath] [packagePath]
+ADD-INITIAL-EIM [package] [certPath] [packagePath]
 ISDR-ADD-INITIAL-EIM [certPath] [packagePath]
-ISDR-ADD-EIM [certPath] [packagePath]
 ERROR-CODES [SGP.02|SGP.22|SGP.32|ALL]
 ERROR-CODE-SET <family> <code|name> [packagePath]
 ```

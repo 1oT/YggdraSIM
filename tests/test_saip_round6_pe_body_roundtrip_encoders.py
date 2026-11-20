@@ -15,9 +15,9 @@ Each test asserts two invariants for one field:
    fields (OID dotted string, bit flags, TLV items, etc.).
 
 References:
-  * SAIP §2.8.2 (applicationProviderIdentifier)
-  * SAIP §2.6.3 Table 2-6 (globalServiceParameters)
-  * GlobalPlatform Card Spec Amd A §A.3 (implicitSelectionParameter)
+  * TCA SAIP v3.4.1 §8.7.3 / GPC v2.3.1 §6.5.1.7 (applicationProviderIdentifier)
+  * TCA SAIP v3.4.1 §8.7.3 / GPC v2.3.1 §8.1.3 (globalServiceParameters)
+  * GPC v2.3.1 §11.1.7 Table 11-15 (implicitSelectionParameter)
   * GlobalPlatform Card Spec Amd C §5 (contactlessProtocolParameters)
   * GlobalPlatform Card Spec Amd C §6 (userInteractionContactlessParameters)
 """

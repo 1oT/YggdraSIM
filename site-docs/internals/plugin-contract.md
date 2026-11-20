@@ -69,6 +69,16 @@ of string literals, which makes the field a tuple), so a malformed action
 becomes that plugin's load error while `GET /api/actions` keeps serving
 every other action.
 
+An action whose form has a reader field is given that reader for the length
+of the call: the route claims it, and a call on a reader something else
+holds until stopped is refused as "reader busy". An action that does not
+always drive the card (an EID typed in makes the read unnecessary) sets
+`ActionSpec.uses_reader`, a function of the coerced inputs that returns
+False for a call that opens no reader; the route then claims none for it.
+The function has to say what the dispatcher does, and the dispatcher of
+such a call has to be unable to open a reader by another path: nothing else
+keeps it apart from whoever holds that reader.
+
 ## Reserved capability names
 
 Reserved names are private extension contracts. Public distributions should
@@ -225,6 +235,26 @@ The routes are `GET /api/plugin-consoles` (the consoles and the refusals),
 `GET .../{id}/stream?cursor=<stream>:<n>` (the status and every stream in
 one answer) and `GET .../{id}/help`. They sit behind the GUI's bearer token
 like every `/api/*` route.
+
+A console that drives a card claims its reader for as long as it does, the
+claim every GUI card action takes (`yggdrasim_common/reader_claims.py`): wrap
+the work in `held(reader_key(name), "<what runs>", long_running=True)`. An
+action on that reader is then refused with "reader busy: <what runs> has held
+'<reader>' since <time>" instead of interleaving its APDUs with the console's
+or powering the card down under it. The routes cannot take the claim for a
+console, because a session or a run ends inside the plugin.
+
+A claim on a local PC/SC reader also holds the reader's lock across
+processes (`yggdrasim_common/reader_locks.py`): a file under
+`~/.yggdrasim/run/reader-locks` held with `flock` (`msvcrt.locking` on
+Windows), which the kernel frees when the holding process ends. The eSIM
+Management console in a terminal (per card command), the HIL bridge and the
+MCP server's card tools take the same lock,
+so a console's card work is not reset by another YggdraSIM process, and a
+holder that runs until stopped (`long_running=True`) is refused to the others
+at once, as "reader busy: <what runs> (pid <n>) has held '<reader>' since
+<time>". Code that opens a reader outside a claim holds it with
+`reader_locks.held(name, "<what runs>")`; holds nest within a process.
 
 ### Layout
 
@@ -386,6 +416,41 @@ The routes are `POST .../{id}/runs` (`{variant, items, values}`),
 `POST` / `DELETE .../{id}/credentials/{credential_id}` (`{values}`; a named
 credential's entry is `{name, values}` and `?name=`, and a plain credential
 refuses a name). A run start may carry `credential_entries`.
+
+## Tab of a Command Center action
+
+A subsystem's actions are grouped into tabs by the last segment of the action
+id, from a list of core actions in the page. A plugin action whose id is not
+in that list names its tab with the tag `tab:<group id>` (for example
+`tab:esim-sgp32-iot`). A group id the page does not have becomes a tab of its
+own, after the page's tabs, when the action also carries
+`tab-label:<label>`; without a label, or without a tag, the action lands in
+"Other". eSIM Management groups its actions by specification instead:
+`tab:esim-sgp32-iot` places an action under SGP.32 IoT, and an action without
+it goes under SGP.22 Consumer.
+
+## Local eIM delivery route
+
+The Local eIM page delivers a queue with the eIM's own IPAd ("Deliver now
+(IPAd)"). A plugin that drives the card's own IPAe offers a second route by
+giving one of its actions the tag `ipae-deliver`: the page then shows
+"Deliver (IPAe)" beside the first button and opens that action's form, with
+the bound reader filled in. The page reads the tag from the action catalogue
+and names no plugin; without such an action the button is absent.
+
+## Terminal output of a stream action
+
+A stream action that runs a console command passes `terminal=True` to
+`scp11_live._stream_console` to show the command as the shell prints it. The
+capture then answers as a terminal, so the command colours its output; every
+printed line goes out, blank ones too, with the plain text in `message` and
+its colour roles in `spans` (`gui_server/cli_spans.py`), and never as an error
+level the page would hide. Card channels built during the run keep the
+shell's own logging mode (`live_trace.shell_output`). The page renders such
+frames as a terminal block without time or level columns, paints each role
+with the theme token the terminal palettes are transcribed from
+(`css/views/cli-output.css`), and keeps the newest line in view until the
+reader scrolls away from it.
 
 ## APDU trace renderer
 

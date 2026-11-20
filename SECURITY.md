@@ -17,10 +17,10 @@ Security fixes are accepted on the actively-maintained line:
 
 | Version line | Supported | Notes |
 | --- | --- | --- |
-| `2.2.x` (released `v2.2.0`) | Yes | Current release line, tracked on `release/2.2.x`. |
-| `2.1.x` (latest `v2.1.0`) | Yes | Security-maintenance line, tracked on `release/2.1.x`. |
+| `2.3.x` (released `v2.3.0`) | Yes | Current release line, tracked on `release/2.3.x`. |
+| `2.2.x` (latest `v2.2.0`) | Yes | Security-maintenance line, tracked on `release/2.2.x`. |
 | `main` | Yes | Active development; applicable fixes are back-ported to supported release lines. |
-| `2.0.x`, `1.0.x` and any earlier RC tag | No | Superseded. Re-base onto a supported line. |
+| `2.1.x`, `2.0.x`, `1.0.x` and any earlier RC tag | No | Superseded. Re-base onto a supported line. |
 
 ## How to report a vulnerability
 

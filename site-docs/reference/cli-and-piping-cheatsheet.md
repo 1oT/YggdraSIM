@@ -180,7 +180,7 @@ too; the file carries the same text without colour codes.
 - A relative path is taken from the working directory, and `~` and
   environment variables are expanded. A directory (an existing one, or a
   path ending in `/`) gets a file named after the command and the local
-  time, such as `logs/poll-20261014-102233.log`.
+  time, such as `logs/download-20261014-102233.log`.
 - The file is opened for append, and a new one is readable by its owner
   only: the debug trace carries key material in full. Each run opens with a
   `===` header naming the shell and the command, and closes with a trailer
@@ -192,20 +192,7 @@ too; the file carries the same text without colour codes.
   the millisecond; an indented line -- the decoded rows under an APDU, the
   full hex under a row, the fields under a TLS handshake -- continues the
   block above it without a time of its own, in the columns the terminal
-  showed it in. The whole run sits one level under its `===` header:
-
-```text
-=== 2026-10-14 10:22:33 +0200  eSIM Management > poll --debug ===
-  10:22:41.886  Card:      SEND DATA #1                             90 00
-                           81 03 01 43 01  Command details     SEND DATA #1, 01: send immediately
-                           82 02 81 21     Device identities   UICC -> channel 1
-                           36 76 16 03..03 Channel data        118 bytes
-                                           16 03 03 00 71 01 00 00 6D 03 03 ...
-  10:22:41.887  Network:   sent 118 bytes to 192.0.2.4:443
-                           TLS Handshake: ClientHello sni=eim.example.test (109 byte(s))
-=== 2026-10-14 10:27:05 +0200  ended after 272.4 s ===
-```
-
+  showed it in. The whole run sits one level under its `===` header.
 - Batch mode takes the flag too:
 
 ```bash
@@ -508,7 +495,7 @@ RECORD STOP
 python -m SCP11.eim_local
 RECORD START reports/eim_local_session.yaml
 DISCOVER
-ADD-EIM package
+OPS pending
 RECORD STOP
 ```
 

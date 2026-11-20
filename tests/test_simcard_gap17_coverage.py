@@ -6,18 +6,18 @@
 Round-17 wires up the following spec-anchored event downloads that
 were parsed but never reached the apply layer:
 
-* ETSI TS 102 223 §7.4.4 ``Location Status`` event (code ``0x03``).
+* ETSI TS 102 223 v18.3 §7.5.4 ``Location status`` event (code ``0x03``).
   TLV ``0x9B`` carries a 1-byte status (0=normal, 1=limited, 2=no
   service) -- the simulator latches the latest reading and a
   monotonic transition counter.
-* ETSI TS 102 223 §7.4.7 ``Card Reader Status`` event (code
+* ETSI TS 102 223 v18.3 §7.5.7 ``Card reader status`` event (code
   ``0x06``). TLV ``0xA0`` packs reader-present / powered flags +
   reader id; the simulator caches both halves and bumps a counter.
-* ETSI TS 102 223 §7.4.10 ``Data Available`` event reused under
+* ETSI TS 102 223 v18.3 §7.5.10 ``Data available`` event reused under
   the simulator's existing ``0x09`` slot. The TLV ``0x37`` Channel
   Data Length and TLV ``0x38`` Channel Status are latched without
   disturbing the existing browser-termination-cause path.
-* ETSI TS 102 223 §7.4.16 ``Frames Information Change`` event
+* ETSI TS 102 223 v18.3 §7.5.17 ``Frames Information changed`` event
   (code ``0x10``). TLV ``0x49`` carries the new frames layout; the
   simulator stashes the blob into ``last_frames_information`` and
   bumps a transition counter.
@@ -64,7 +64,7 @@ class _ToolkitHarness(unittest.TestCase):
 
 
 class LocationStatusEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.4 Location Status Event (0x03)."""
+    """ETSI TS 102 223 v18.3 §7.5.4 Location status event (0x03)."""
 
     def test_normal_service_latches_zero(self) -> None:
         envelope = _envelope(
@@ -98,7 +98,7 @@ class LocationStatusEventTests(_ToolkitHarness):
 
 
 class CardReaderStatusEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.7 Card Reader Status Event (0x06)."""
+    """ETSI TS 102 223 v18.3 §7.5.7 Card reader status event (0x06)."""
 
     def test_card_present_powered_reader_two(self) -> None:
         # Bit 7 = present, bit 6 = powered, bits 0..3 = reader id 2.
@@ -166,7 +166,7 @@ class DataAvailableEventTests(_ToolkitHarness):
 
 
 class FramesInformationChangeEventTests(_ToolkitHarness):
-    """ETSI TS 102 223 §7.4.16 Frames Information Change Event (0x10)."""
+    """ETSI TS 102 223 v18.3 §7.5.17 Frames Information changed event (0x10)."""
 
     def test_layout_blob_latches_and_counter_bumps(self) -> None:
         layout = b"\x02\x10\x08\x10\x18"

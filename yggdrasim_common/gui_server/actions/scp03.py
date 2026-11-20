@@ -29,6 +29,8 @@ import logging
 import os
 from typing import Any
 
+from yggdrasim_common.command_log import log_flag_present
+
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -80,14 +82,23 @@ def _resolve_reader_binding(reader_name: str) -> tuple[int, str]:
     A registered remote reader resolves before the PC/SC enumeration is
     consulted: it has no ordinal there, and every scan, open and rescan
     re-resolves the name, so the lookup has to answer the same way each
-    time for the session to stay bound.
+    time for the session to stay bound. While the SIM backend is selected,
+    the simulator's reader (or no name) binds to the simulated card under
+    the simulator's name, not the first PC/SC reader's.
     """
+    from yggdrasim_common.card_backend import (
+        SIMULATED_READER_NAME,
+        is_simulated_card_backend,
+        is_simulated_reader_name,
+    )
     from yggdrasim_common.remote_readers import (
         REMOTE_READER_INDEX,
         lookup_remote_reader,
     )
 
     cleaned = str(reader_name or "").strip()
+    if is_simulated_reader_name(cleaned) or (len(cleaned) == 0 and is_simulated_card_backend()):
+        return 0, SIMULATED_READER_NAME
     remote_binding = lookup_remote_reader(cleaned)
     if remote_binding is not None:
         return REMOTE_READER_INDEX, remote_binding.name
@@ -4191,7 +4202,7 @@ SET_STATUS_SPEC = ActionSpec(
     dispatcher=_dispatch_set_status,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "lcs"),
+    tags=("destructive", "mutation", "lcs"),
 )
 
 
@@ -4230,7 +4241,7 @@ UNLOCK_SPEC = ActionSpec(
     dispatcher=_dispatch_unlock,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "lcs"),
+    tags=("destructive", "mutation", "lcs"),
 )
 
 
@@ -5615,7 +5626,7 @@ ENABLE_PROFILE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_enable_profile,
     requires_card=True,
-    tags=("euicc", "profile", "lifecycle"),
+    tags=("destructive", "euicc", "profile", "lifecycle"),
 )
 
 
@@ -5638,7 +5649,7 @@ DISABLE_PROFILE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_disable_profile,
     requires_card=True,
-    tags=("euicc", "profile", "lifecycle"),
+    tags=("destructive", "euicc", "profile", "lifecycle"),
 )
 
 
@@ -8162,7 +8173,7 @@ INSTALL_APP_SPEC = ActionSpec(
     dispatcher=_dispatch_install_app,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "install"),
+    tags=("destructive", "mutation", "install"),
 )
 
 
@@ -8182,7 +8193,7 @@ INSTALL_MAKE_SELECTABLE_SPEC = ActionSpec(
     dispatcher=_dispatch_install_make_selectable,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "install"),
+    tags=("destructive", "mutation", "install"),
 )
 
 
@@ -8201,7 +8212,7 @@ INSTALL_EXTRADITION_SPEC = ActionSpec(
     dispatcher=_dispatch_install_extradition,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "install"),
+    tags=("destructive", "mutation", "install"),
 )
 
 
@@ -8221,7 +8232,7 @@ INSTALL_PERSONALIZATION_SPEC = ActionSpec(
     dispatcher=_dispatch_install_personalization,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "install", "perso"),
+    tags=("destructive", "mutation", "install", "perso"),
 )
 
 
@@ -8240,7 +8251,7 @@ INSTALL_REGISTRY_UPDATE_SPEC = ActionSpec(
     dispatcher=_dispatch_install_registry_update,
     requires_card=True,
     requires_auth=True,
-    tags=("mutation", "registry"),
+    tags=("destructive", "mutation", "registry"),
 )
 
 
@@ -8657,6 +8668,15 @@ def _dispatch_run_script(
         commands.append(stripped)
     if len(commands) == 0:
         raise ValueError("script contained no executable lines.")
+    # The SCP03 shell's line executor honours ``--log <file>`` and TRACE,
+    # both of which write a file on the server host. Like the SCP11
+    # console's GUI path, a web request refuses them before any line runs.
+    for command in commands:
+        words = command.split()
+        if log_flag_present(command) or words[0].upper() == "TRACE":
+            raise ValueError(
+                f"{words[0]}: --log and TRACE are read from a terminal command line only."
+            )
 
     yaml_path: str | None = None
     if yaml_out is not None:

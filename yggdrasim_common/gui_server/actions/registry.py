@@ -164,6 +164,14 @@ class ActionSpec:
     requires_auth: bool = False
     streams: bool = False
     tags: tuple[str, ...] = ()
+    # For an action whose form has a reader field it does not always use
+    # (an EID given by hand makes the card unnecessary): called with the
+    # coerced inputs, False means this call drives no card. The route then
+    # claims no reader for it, so it is not refused while something else,
+    # a listener for one, holds that reader. None means every call uses the
+    # reader its field names. It has to say what the dispatcher does: a call
+    # that reaches a card without the claim is not kept apart from the others.
+    uses_reader: Optional[Callable[[dict[str, Any]], bool]] = None
 
     def __post_init__(self) -> None:
         owner = f"ActionSpec {self.id!r}"
@@ -290,11 +298,13 @@ def ensure_builtin_actions_loaded() -> ActionRegistry:
     log = logging.getLogger("yggdrasim.gui.actions")
     modules = (
         "yggdrasim_common.gui_server.actions.tools",
+        "yggdrasim_common.gui_server.actions.eim_builder",
         "yggdrasim_common.gui_server.actions.scp03",
         "yggdrasim_common.gui_server.actions.scp11",
         "yggdrasim_common.gui_server.actions.scp11_live",
         "yggdrasim_common.gui_server.actions.scp11_local",
         "yggdrasim_common.gui_server.actions.eim_local",
+        "yggdrasim_common.gui_server.actions.eim_local_ops",
         "yggdrasim_common.gui_server.actions.hil",
         "yggdrasim_common.gui_server.actions.card_bridge",
         "yggdrasim_common.gui_server.actions.saip",

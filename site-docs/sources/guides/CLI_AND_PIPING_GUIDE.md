@@ -461,7 +461,7 @@ RECORD STOP
 python -m SCP11.eim_local
 RECORD START reports/eim_local_session.yaml
 DISCOVER
-ADD-EIM package
+OPS pending
 RECORD STOP
 ```
 

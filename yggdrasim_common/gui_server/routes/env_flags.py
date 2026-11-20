@@ -34,6 +34,8 @@ class EnvFlagView(BaseModel):
     default_hint: str
     applies: str
     sensitive: bool
+    notes: str
+    secret: bool
     persist_scope: str
     current_value: Optional[str]
     is_set: bool
@@ -96,6 +98,8 @@ def _view_for_flag(flag) -> EnvFlagView:
         default_hint=flag.default_hint,
         applies=flag.applies,
         sensitive=bool(flag.sensitive),
+        notes=str(flag.notes or ""),
+        secret=bool(flag.secret),
         persist_scope=flag.persist_scope,
         current_value=(None if raw is None else str(raw)),
         is_set=(raw is not None and len(str(raw)) > 0),

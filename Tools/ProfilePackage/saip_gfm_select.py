@@ -11,9 +11,11 @@ context).
 
 Wire-level layout: ``decoded["fileManagementCMD"]`` is a list of
 "transactions" where each transaction is a list of
-``(opcode, value)`` pairs. ETSI TS 102 226 §6.6.5 / pySim
+``(opcode, value)`` pairs. TCA SAIP v3.4.1 §8.3.5 / pySim
 ``ProfileElementGFM.pe2files`` permit any interleaving of ``filePath``
-selects and ``createFCP`` / ``updateFCP`` / ``deleteFile`` operations.
+selects and the file operations (``createFCP``, ``fillFileOffset``,
+``fillFileContent``); ``updateFCP`` / ``deleteFile`` are counted as
+file operations here but are not FileManagement members in that version.
 The canonical YggdraSIM shape is::
 
     fileManagementCMD = [
@@ -49,8 +51,9 @@ def _strip(value: Any) -> str:
 def normalise_df_path(value: Any) -> str:
     """Validate / canonicalise a DF path expressed as concatenated FIDs.
 
-    TS 102 221 §8.3.5: the path is an even-length string of 16-bit
-    file identifiers. The MF (3F00) prefix is stripped because pySim
+    TS 102 221 v18.4 §8.3: the path is a concatenation of 16-bit
+    file identifiers (even length; empty selects the MF, TCA SAIP
+    v3.4.1 §8.3.5). The MF (3F00) prefix is stripped because pySim
     re-prepends it on encode (``ProfileElementGFM.pe2files``); the
     empty string is the canonical "MF root" marker.
     """

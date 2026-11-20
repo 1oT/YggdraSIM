@@ -56,8 +56,10 @@ def run_standalone():
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
     shell = OtaShell()
+    # A batch in which a command failed ends with exit code 1.
     if args.cmd:
-        shell.run_commands(args.cmd)
+        if not shell.run_commands(args.cmd):
+            sys.exit(1)
         return
     if args.stdin:
         command_lines = []
@@ -68,7 +70,8 @@ def run_standalone():
             if command_text.startswith("#"):
                 continue
             command_lines.append(command_text)
-        shell.run_commands("; ".join(command_lines))
+        if not shell.run_commands("; ".join(command_lines)):
+            sys.exit(1)
         return
     shell.run()
 

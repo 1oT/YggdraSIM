@@ -1149,9 +1149,9 @@ class SaipAsn1DecodeTests(unittest.TestCase):
     @pytest.mark.skipif(
         _PYSIM_TEMPLATES_AVAILABLE is False,
         reason=(
-            "pySim SAIP templates unavailable; clone "
-            "https://gitlab.com/osmocom/pysim.git into the repo root "
-            "or `pip install pySim` to re-enable this case."
+            "pySim SAIP templates unavailable; install the pinned fork "
+            "(`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`) "
+            "or clone it into the repo root to re-enable this case."
         ),
     )
     def test_transcode_inspector_shows_template_defaults_without_explicit_json_fields(self) -> None:
@@ -1203,9 +1203,9 @@ class SaipAsn1DecodeTests(unittest.TestCase):
     @pytest.mark.skipif(
         _PYSIM_TEMPLATES_AVAILABLE is False,
         reason=(
-            "pySim SAIP templates unavailable; clone "
-            "https://gitlab.com/osmocom/pysim.git into the repo root "
-            "or `pip install pySim` to re-enable this case."
+            "pySim SAIP templates unavailable; install the pinned fork "
+            "(`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`) "
+            "or clone it into the repo root to re-enable this case."
         ),
     )
     def test_transcode_inspector_resolves_template_arr_rule_summary(self) -> None:

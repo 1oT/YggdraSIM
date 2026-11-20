@@ -12,7 +12,10 @@ lookup fell through to a vendor-extension row registered at 4F67 for another
 directory instead of the template's own name; and a DF template placed by
 ``base_path`` rather than ``parent`` anchored under the MF instead of the
 ADF. Stock pySim also names the 4F60..4F67 rows EF.ADN, which leaves
-``ef-pbc`` without a template and makes the whole PE fail to decode.
+``ef-pbc`` without a template and makes the whole PE fail to decode. The
+pinned pySim fixes the range start and the EF.PBC rows
+(``upstream_patches/osmocom-pysim-saip-template-range-fid/`` and
+``osmocom-pysim-saip-implicit-template-ppath/``).
 """
 
 from __future__ import annotations
@@ -77,11 +80,10 @@ def _split_top_level_tlvs(raw: bytes) -> list[bytes]:
 
 
 @unittest.skipUnless(_pysim_available(), "pySim not importable -- skipping")
-class TemplateCompensationTests(unittest.TestCase):
-    """The two template compensations state their result and retire cleanly."""
+class PinnedTemplateTests(unittest.TestCase):
+    """The pinned pySim indexes a ranged file at the range start and names EF.PBC."""
 
     def setUp(self) -> None:
-        self.compat = importlib.import_module("Tools.ProfilePackage.saip_pysim_compat")
         self.templates = importlib.import_module("pySim.esim.saip.templates")
 
     def test_phonebook_template_resolves_ranged_files_to_the_range_start(self) -> None:
@@ -94,74 +96,40 @@ class TemplateCompensationTests(unittest.TestCase):
         self.assertEqual(index["ef-ext1"].fid, 0x4F38)
         self.assertEqual(index["ef-ccp1"].fid, 0x4F98)
         self.assertEqual(index["ef-pbc"].rec_len, 2)
+        self.assertEqual(index["ef-pbc"].params, ["size", "sfi"])
 
     def test_every_registered_template_keeps_the_first_row_of_a_range(self) -> None:
-        for template in self.compat._registered_templates():
+        seen: list[object] = []
+        for template in self.templates.ProfileTemplateRegistry.by_oid.values():
+            if any(template is known for known in seen):
+                continue
+            seen.append(template)
             first_by_name: dict[str, object] = {}
             for row in template.files:
                 first_by_name.setdefault(row.pe_name, row)
             for pe_name, row in first_by_name.items():
                 self.assertIs(template.files_by_pename[pe_name], row, (template.__name__, pe_name))
 
-    def test_installers_are_idempotent(self) -> None:
-        self.assertFalse(self.compat.install_phonebook_pbc_template())
-        self.assertFalse(self.compat.install_template_range_start_fids())
-
-    def test_pbc_compensation_repairs_the_upstream_rows(self) -> None:
-        # Rebuild the upstream defect on a throwaway template: the PBC
-        # range spelled EF.ADN, the index last-row-wins.
-        source = self.templates.FilesUsimDfPhonebook
-        rows = [copy.copy(row) for row in source.files]
+    def test_a_new_template_indexes_the_first_row_of_a_range(self) -> None:
+        rows = [copy.copy(row) for row in self.templates.FilesUsimDfPhonebook.files]
         for row in rows:
             row.parent = None
             row.children = []
-            if row.fid in range(0x4F60, 0x4F68):
-                row.name = "EF.ADN"
-                row.pe_name = "ef-adn"
-                row.params = ["nb_rec", "sfi"]
         registry = self.templates.ProfileTemplateRegistry
         oid = "2.23.143.1.2.999"
         self.assertNotIn(oid, registry.by_oid)
 
-        class _UpstreamPhonebook(self.templates.ProfileTemplate):
-            # ``__init_subclass__`` registers the class by this OID and
-            # builds ``files_by_pename`` last-row-wins, as upstream does.
+        class _Phonebook(self.templates.ProfileTemplate):
+            # ``__init_subclass__`` registers the class by this OID and builds
+            # ``files_by_pename`` from the rows above.
             oid = "2.23.143.1.2.999"
             created_by_default = False
             files = rows
 
         self.addCleanup(lambda: registry.by_oid.pop(oid, None))
-        self.assertIs(registry.by_oid[oid], _UpstreamPhonebook)
-        self.assertNotIn("ef-pbc", _UpstreamPhonebook.files_by_pename)
-        self.assertEqual(_UpstreamPhonebook.files_by_pename["ef-adn"].fid, 0x4F67)
-
-        self.assertTrue(self.compat.install_phonebook_pbc_template())
-        self.assertEqual(_UpstreamPhonebook.files_by_pename["ef-pbc"].fid, 0x4F60)
-        self.assertEqual(_UpstreamPhonebook.files_by_pename["ef-pbc"].params, ["size", "sfi"])
-        self.assertEqual(_UpstreamPhonebook.files_by_pename["ef-adn"].fid, 0x4F58)
-        self.compat.install_template_range_start_fids()
-        self.assertEqual(_UpstreamPhonebook.files_by_pename["ef-uid"].fid, 0x4F88)
-
-    def test_range_compensation_fails_closed_on_a_reordered_range(self) -> None:
-        rows = [copy.copy(row) for row in self.templates.FilesUsimDfPhonebook.files]
-        for row in rows:
-            row.parent = None
-            row.children = []
-        uid_rows = [row for row in rows if row.pe_name == "ef-uid"]
-        uid_rows[0].fid, uid_rows[-1].fid = uid_rows[-1].fid, uid_rows[0].fid
-        registry = self.templates.ProfileTemplateRegistry
-        oid = "2.23.143.1.2.998"
-
-        class _Reordered(self.templates.ProfileTemplate):
-            oid = "2.23.143.1.2.998"
-            created_by_default = False
-            files = rows
-
-        self.addCleanup(lambda: registry.by_oid.pop(oid, None))
-        self.assertIs(registry.by_oid[oid], _Reordered)
-
-        with self.assertRaises(self.compat.SaipTemplateRangeFidMismatch):
-            self.compat.install_template_range_start_fids()
+        self.assertIs(registry.by_oid[oid], _Phonebook)
+        self.assertEqual(_Phonebook.files_by_pename["ef-uid"].fid, 0x4F88)
+        self.assertEqual(_Phonebook.files_by_pename["ef-pbc"].fid, 0x4F60)
 
 
 @unittest.skipUnless(_pysim_available(), "pySim not importable -- skipping")

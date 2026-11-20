@@ -56,6 +56,7 @@ This page mirrors the grouped `HELP` surface from the SCP03 admin shell.
 - `RUN-AUTH`: execute GSM, USIM, or ISIM authentication algorithms
 - `RUN-AUTH-TEST`: run offline 3GPP TS 35.207 Milenage vector validation
 - `DERIVE-OPC <Ki_hex> <OP_hex>`: derive `OPc` per 3GPP TS 35.206
+- `DERIVE-TOPC <TOP_hex> <K_hex> [Keccak iterations]`: derive the TUAK `TOPc` per 3GPP TS 35.231
 
 `MANAGE-PROFILE` retrieval reads retry through:
 

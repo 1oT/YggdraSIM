@@ -126,12 +126,11 @@ handles a filename, never a value, so nothing secret enters a tool
 argument or a transcript. Authenticated flows such as SCP03 follow the same
 rule: stage the keys as files first, then reference them by path.
 
-A handful of shell verbs take key material as a positional argument --
-`DERIVE-OPC` is the clearest -- and those are gated at the write tier
-rather than refused outright. Refusing would be theatre: if the caller
-supplied the key, it is already in the transcript. Prefer the by-path form
-where the shell offers one, and treat any batch that carries a secret
-inline as a batch whose transcript is now sensitive.
+Two shell verbs take key material as a positional argument,
+`DERIVE-OPC` (Ki and OP) and `DERIVE-TOPC` (TOP and K), and the shell tool
+refuses both in every shell: a tool argument reaches the model provider, so
+the key would sit in a transcript. Run them in a terminal instead, and
+prefer the by-path form where a shell offers one.
 
 ### Tool annotations
 

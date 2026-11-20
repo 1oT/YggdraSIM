@@ -294,7 +294,7 @@ def test_parse_hil_modem_command_rejects_non_serial_commands(command: str) -> No
     "/dev/ttyUSB12",
     "/dev/ttyACM0",
     "/dev/ttyS3",
-    "/dev/serial/by-id/usb-Telit_HE910-D_0123456789AB-if02",
+    "/dev/serial/by-id/usb-Example_LTE_Modem_0123456789AB-if02",
 ])
 def test_is_safe_device_path_accepts_real_shapes(path):
     from yggdrasim_common.gui_server import host_shell
@@ -367,7 +367,7 @@ HIL_MODEM_ACCEPTED_COMMANDS = (
     "sudo -n tio /dev/ttyUSB2",
     "tio -b 115200 /dev/ttyUSB2",
     "picocom -b 115200 /dev/ttyACM0",
-    "tio /dev/serial/by-id/usb-Quectel_EG25-G_0123-if02-port0",
+    "tio /dev/serial/by-id/usb-Example_LTE_Modem_0123-if02-port0",
 )
 
 HIL_MODEM_REFUSED_COMMANDS = (

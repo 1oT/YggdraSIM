@@ -70,6 +70,7 @@ class HelpMenu :
         print ("  RUN-AUTH       : Execute GSM, USIM, or ISIM authentication algorithms.")
         print ("  RUN-AUTH-TEST  : Run offline 3GPP TS 35.207 Milenage vector validation.")
         print ("  DERIVE-OPC     : <Ki_hex> <OP_hex> - Derive OPc per 3GPP TS 35.206.")
+        print ("  DERIVE-TOPC    : <TOP_hex> <K_hex> [n] - Derive TOPc per 3GPP TS 35.231 (n Keccak iterations, 1-16).")
 
         print (f"\n{Config.Colors.CYAN}[ SCP11 module map ]{Config.Colors.ENDC}")
         print ("  Main menu [3]  : SCP11 live relay shell (LPAd/IPAd).")

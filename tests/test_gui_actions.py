@@ -244,7 +244,9 @@ class TestActionRegistry:
         ids = {spec.id for spec in registry.all()}
         assert "scp03.scan" in ids
         assert "scp03.read_selected" in ids
-        assert "scp11.download_profile" in ids
+        # The WS-flow download form is retired; the console's download stays.
+        assert "scp11.download_profile" not in ids
+        assert "scp11_live.download_profile" in ids
         assert "eim_local.hotfolder_campaign" in ids
 
     def test_expanded_command_center_actions_register(self) -> None:
@@ -252,14 +254,13 @@ class TestActionRegistry:
         ids = {spec.id for spec in registry.all()}
         expected = {
             # Engine-panel wraps
-            "tool.tlv.decode",
+            "tool.decoder.context",
             "tool.asn1_tlv.decode",
-            "tool.sw.lookup",
-            "tool.euicc_info2.decode",
-            "tool.sima_response.decode",
             "tool.saip.lint",
             "tool.eim.lint",
             "tool.gsma.codes",
+            "tool.tp.decode",
+            "tool.tp.build",
             "suci.status",
             "suci.generate_key",
             "simcard.tuak_derive_topc",
@@ -281,17 +282,15 @@ class TestActionRegistry:
         registry = ensure_builtin_actions_loaded()
         offline_ids = {spec.id for spec in registry.by_subsystem().get("Offline Tools", [])}
         expected = {
-            "tool.tlv.decode",
+            "tool.decoder.context",
             "tool.asn1_tlv.decode",
-            "tool.sw.lookup",
-            "tool.euicc_info2.decode",
-            "tool.sima_response.decode",
             "tool.saip.lint",
             "tool.eim.lint",
             "tool.gsma.codes",
+            "tool.tp.decode",
+            "tool.tp.build",
             "suci.status",
             "suci.use_key_file",
-            "suci.set_tool_command",
             "suci.generate_key",
             "suci.dump_pub_key",
             "simcard.tuak_derive_topc",
@@ -634,10 +633,10 @@ class TestActionRegistry:
         field_names = {f.name for f in spec.inputs}
         assert {"interval_ms", "cycles"}.issubset(field_names)
 
-    def test_download_profile_is_streaming_without_dispatcher(self) -> None:
-        spec = get_registry().get("scp11.download_profile")
+    def test_download_profile_streams_the_console_command(self) -> None:
+        spec = get_registry().get("scp11_live.download_profile")
         assert spec.streams is True
-        assert spec.dispatcher is None  # delegates to /api/flows/download-profile
+        assert spec.dispatcher is not None
 
 
 # ----------------------------------------------------------------------
@@ -648,9 +647,9 @@ class TestActionRegistry:
 class TestEngineToolDispatchers:
     """Exercise the offline decoder/reference actions end to end.
 
-    These dispatchers are deliberately side-effect free -- they wrap the
-    same helpers that back ``/api/tools/*``. Running them here guards
-    against accidental drift between the two surfaces.
+    These dispatchers are deliberately side-effect free. The context
+    decoder stands in for the TLV, status-word, EUICCInfo2 and
+    EUICCResponse actions that were retired in its favour.
     """
 
     def _ctx(self):
@@ -658,26 +657,27 @@ class TestEngineToolDispatchers:
 
         return ActionContext()
 
-    def test_tlv_decode_returns_tree_shape(self) -> None:
-        ensure_builtin_actions_loaded()
-        spec = get_registry().get("tool.tlv.decode")
-        result = spec.dispatcher(
-            self._ctx(),
-            **coerce_inputs(spec, {"hex": "6F 05 84 03 AA BB CC"}),
-        )
-        assert result["complete"] is True
-        assert result["input_length"] == 7
-        assert result["nodes"][0]["tag_hex"] == "6F"
-        # Nested constructed tag 84
-        inner = result["nodes"][0]["children"][0]
-        assert inner["tag_hex"] == "84"
-        assert inner["value_hex"] == "AABBCC"
+    def test_the_decoder_reads_what_the_retired_actions_read(self) -> None:
+        """A bare TLV, a status word, an EUICCInfo2 and an EUICCResponse go through the context decoder."""
+        registry = ensure_builtin_actions_loaded()
+        ids = {spec.id for spec in registry.all()}
+        assert not ids & {
+            "tool.tlv.decode", "tool.sw.lookup", "tool.euicc_info2.decode", "tool.sima_response.decode",
+        }
+        spec = get_registry().get("tool.decoder.context")
 
-    def test_tlv_decode_rejects_bad_hex(self) -> None:
-        ensure_builtin_actions_loaded()
-        spec = get_registry().get("tool.tlv.decode")
+        def decode(text: str, context: str = "auto") -> dict:
+            return spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"input_text": text, "context": context}))
+
+        tree = decode("6F 05 84 03 AA BB CC", "tlv")["payload"]["nodes"]
+        assert tree[0]["tag"] == "6F" and tree[0]["children"][0]["valueHex"] == "AABBCC"
+        word = decode("6A82", "sw")["sw"]
+        assert word["sw"] == "6A82" and "not found" in word["meaning"]
         with pytest.raises(ValueError):
-            spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"hex": "not-hex"}))
+            decode("not-hex", "tlv")
+        # TCA eUICC Profile Package V3.4.1 section 8.11 EUICCResponse, the all-ok value.
+        response = decode("30 07 A0 05 30 03 80 01 00")["payload"]
+        assert response["title"] == "EUICCResponse" and response["result"] == {"ok": True, "text": "all PEs ok"}
 
     def test_asn1_tlv_decode_returns_tag_registry_result(self) -> None:
         ensure_builtin_actions_loaded()
@@ -691,36 +691,6 @@ class TestEngineToolDispatchers:
         assert result["items"][0]["tag"] == "BF22"
         assert result["items"][0]["name"] == "EUICC_INFO_2"
         assert "asn1Notation" in result
-
-    def test_sima_response_decode_returns_semantic_result(self) -> None:
-        ensure_builtin_actions_loaded()
-        spec = get_registry().get("tool.sima_response.decode")
-        result = spec.dispatcher(
-            self._ctx(),
-            **coerce_inputs(spec, {"hex": "30 07 A0 05 30 03 80 01 00"}),
-        )
-
-        # TCA eUICC Profile Package V3.4.1 section 8.11 EUICCResponse.
-        assert result["format"] == "EUICCResponse"
-        assert result["complete"] is True
-        assert result["semantic"]["ok"] is True
-        assert result["semantic"]["pe_status"][0]["status"] == 0
-        assert result["nodes"][0]["label"] == "EUICCResponse"
-        assert "peStatus[0].status=ok(0)" in result["formatted"]
-
-    def test_sw_lookup_happy_path(self) -> None:
-        ensure_builtin_actions_loaded()
-        spec = get_registry().get("tool.sw.lookup")
-        result = spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"sw": "9000"}))
-        assert result["sw_hex"] == "9000"
-        assert result["sw1"] == 0x90 and result["sw2"] == 0x00
-        assert isinstance(result["description"], str) and len(result["description"]) > 0
-
-    def test_sw_lookup_rejects_wrong_length(self) -> None:
-        ensure_builtin_actions_loaded()
-        spec = get_registry().get("tool.sw.lookup")
-        with pytest.raises(ValueError):
-            spec.dispatcher(self._ctx(), **coerce_inputs(spec, {"sw": "90"}))
 
     def test_gsma_codes_returns_expected_tables(self) -> None:
         ensure_builtin_actions_loaded()
@@ -2893,7 +2863,7 @@ class TestCatalogueRoute:
             for entry in group:
                 flat_ids.append(entry["id"])
         assert "scp03.scan" in flat_ids
-        assert "scp11.download_profile" in flat_ids
+        assert "scp11_live.download_profile" in flat_ids
 
 
 @_needs_gui_stack
@@ -2918,7 +2888,7 @@ class TestRunRoute:
         with pytest.raises(HTTPException) as raised:
             asyncio.run(
                 actions_routes.run_action(
-                    "scp11.download_profile",
+                    "scp11_live.download_profile",
                     actions_routes.RunRequest(inputs={}),
                 )
             )
@@ -2998,18 +2968,28 @@ class TestRunRoute:
 
 @_needs_gui_stack
 class TestStreamingGate:
-    def test_external_endpoint_closes_with_policy_violation(self) -> None:
-        # ``scp11.download_profile`` is streaming but has no dispatcher --
-        # it delegates to /api/flows/download-profile. Connecting to the
-        # generic streaming route should fail fast with an 'external-endpoint'
-        # reason. We just assert the connection is torn down.
+    def test_external_endpoint_closes_with_policy_violation(self, monkeypatch) -> None:
+        # A streaming action without a dispatcher is served elsewhere:
+        # the generic streaming route closes with 'external-endpoint'.
+        from yggdrasim_common.gui_server.actions.registry import ActionSpec
         from yggdrasim_common.gui_server.routes import actions as actions_routes
 
+        spec = ActionSpec(
+            id="demo.external_stream", subsystem="Demo", title="Demo",
+            description="Streams from another endpoint.", inputs=(),
+            output_kind="log_stream", dispatcher=None, streams=True,
+        )
+
+        class _Registry:
+            def get(self, action_id: str) -> ActionSpec:
+                return spec
+
+        monkeypatch.setattr(actions_routes, "ensure_builtin_actions_loaded", lambda: _Registry())
         websocket = _GateWebSocket(authenticated=True)
         asyncio.run(
             actions_routes.stream_action(
                 websocket,
-                "scp11.download_profile",
+                "demo.external_stream",
             )
         )
         assert websocket.close_code == 1008

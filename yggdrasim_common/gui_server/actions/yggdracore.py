@@ -723,7 +723,8 @@ OPEN5GS_REMOVE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_open5gs_remove,
     requires_card=False,
-    tags=("yggdracore", "open5gs", "byo"),
+    # Deletes from the Open5GS database the bridge points at.
+    tags=("yggdracore", "open5gs", "byo", "destructive"),
 )
 
 
@@ -740,7 +741,8 @@ OPEN5GS_PURGE_YGGDRASIM_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_open5gs_purge_yggdrasim,
     requires_card=False,
-    tags=("yggdracore", "open5gs", "byo"),
+    # Deletes from the Open5GS database the bridge points at.
+    tags=("yggdracore", "open5gs", "byo", "destructive"),
 )
 
 

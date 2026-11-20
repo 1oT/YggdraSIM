@@ -84,7 +84,9 @@ _QTWEBENGINE_DEFAULT_FLAGS = (
     "--disable-gpu",
     "--disable-gpu-compositing",
     "--disk-cache-size=67108864",
-    "--js-flags=--max-old-space-size=256",
+    # One word: the flag list is split on spaces, V8 takes commas. --expose-gc gives the page the
+    # collector it runs once a minute (upstream_patches/qt-qtwebengine-renderer-gc).
+    "--js-flags=--max-old-space-size=256,--expose-gc",
     "--media-cache-size=16777216",
     "--no-first-run",
     "--num-raster-threads=1",
@@ -235,10 +237,12 @@ def create_app(config: GuiServerConfig) -> Any:
     from .routes import live as live_routes
     from .routes import actions as actions_routes
     from .routes import apdu_events as apdu_event_routes
+    from .routes import trace_events as trace_event_routes
     from .routes import guides as guides_routes
     from .routes import fs_browse as fs_browse_routes
     from .routes import host_shell as host_shell_routes
     from .routes import remote_lab as remote_lab_routes
+    from .routes import local_eim as local_eim_routes
     from .routes import plugin_consoles as plugin_console_routes
     from .routes import plugin_console_runs as plugin_console_run_routes
 
@@ -253,6 +257,7 @@ def create_app(config: GuiServerConfig) -> Any:
     app.include_router(live_routes.router)
     app.include_router(actions_routes.router)
     app.include_router(apdu_event_routes.router)
+    app.include_router(trace_event_routes.router)
     app.include_router(guides_routes.router)
     # A desktop session is loopback-bound on the operator's own machine, so
     # the picker may see the whole filesystem. A web-server session is
@@ -266,6 +271,7 @@ def create_app(config: GuiServerConfig) -> Any:
     )
     app.include_router(fs_browse_routes.router)
     app.include_router(remote_lab_routes.router)
+    app.include_router(local_eim_routes.router)
     app.include_router(plugin_console_routes.router)
     app.include_router(plugin_console_run_routes.router)
     # Host shell is a free-form RCE-equivalent surface, registered

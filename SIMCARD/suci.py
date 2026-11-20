@@ -311,9 +311,10 @@ def _pack_mcc_mnc(mcc: str, mnc: str) -> bytes:
 def _pack_routing_indicator(routing_indicator: str) -> bytes:
     """Pack the routing indicator into the two-byte BCD form.
 
-    Per TS 23.003 §28.7.1.1 the routing indicator is up to four
-    decimal digits; missing trailing positions are padded with 0xF.
-    Within each byte the **first** digit is the low nibble.
+    Per TS 23.003 v19.7 §2.2B (SUCI) the routing indicator is up to
+    four decimal digits; TS 24.501 v19.7 §9.11.3.4 (5GS mobile
+    identity) pads missing trailing positions with 0xF. Within each
+    byte the **first** digit is the low nibble.
     """
     digits = str(routing_indicator or "").strip()
     if len(digits) == 0:

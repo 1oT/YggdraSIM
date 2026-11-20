@@ -188,14 +188,15 @@ class GetConnectivityParametersBf5FTests(_Gap3Base):
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         outer_tag, outer_value = _peel(response)
         self.assertEqual(outer_tag, b"\xBF\x5F")
-        self.assertIn(b"\x80\x01\x01", outer_value)  # parametersNotAvailable(1)
+        # connectivityParametersError, the automatic tag [1] (SGP.32 v1.3 §5.9.24): parametersNotAvailable(1)
+        self.assertEqual(outer_value, b"\x81\x01\x01")
 
     def test_returns_parameters_not_available_when_no_active_profile(self) -> None:
         self.state.active_profile_aid = ""
         response, _sw1, _sw2 = self.logic.handle_store_data(bytes.fromhex("BF5F00"))
 
         _outer_tag, outer_value = _peel(response)
-        self.assertIn(b"\x80\x01\x01", outer_value)
+        self.assertEqual(outer_value, b"\x81\x01\x01")
 
     def test_returns_http_params_when_active_profile_has_them(self) -> None:
         active = self.state.profiles[0]
@@ -208,8 +209,21 @@ class GetConnectivityParametersBf5FTests(_Gap3Base):
         self.assertEqual((sw1, sw2), (0x90, 0x00))
         outer_tag, outer_value = _peel(response)
         self.assertEqual(outer_tag, b"\xBF\x5F")
-        # CHOICE branch ConnectivityParameters → httpParams [1] OCTET STRING.
-        self.assertEqual(outer_value, bytes.fromhex("8106DEADBEEFCAFE"))
+        # connectivityParameters [0] ConnectivityParameters { httpParams [1] OCTET STRING }
+        self.assertEqual(outer_value, bytes.fromhex("A0088106DEADBEEFCAFE"))
+
+
+class RemoveNotificationFromListBf30Tests(_Gap3Base):
+    # NotificationSentResponse ::= [48] SEQUENCE { deleteNotificationStatus INTEGER {ok(0),
+    # nothingToDelete(1), undefinedError(127)} } (SGP.22 v3.1 §5.7.11, SGP.32 v1.3 §5.9.12)
+    def test_unknown_sequence_number_is_nothing_to_delete(self) -> None:
+        response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF300480020FFF"))
+        self.assertEqual((sw1, sw2), (0x90, 0x00))
+        self.assertEqual(response, bytes.fromhex("BF3003800101"))
+
+    def test_request_without_sequence_number_is_refused(self) -> None:
+        _response, sw1, sw2 = self.logic.handle_store_data(bytes.fromhex("BF3000"))
+        self.assertEqual((sw1, sw2), (0x6A, 0x80))
 
 
 class SetDefaultDpAddressBf65Tests(_Gap3Base):

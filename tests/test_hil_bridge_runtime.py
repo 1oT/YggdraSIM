@@ -106,6 +106,76 @@ class HilBridgeRuntimeTests(unittest.TestCase):
         self.assertNotIn("--simtrace-reset", unit_text)
         self.assertNotIn("--uhubctl", unit_text)
 
+    def test_render_user_service_unit_forwards_the_modem_diag_device(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+            modem_diag_device="auto",
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertIn("--modem-diag-device auto", unit_text)
+
+    def test_render_user_service_unit_without_a_modem_diag_device_is_unchanged(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+        )
+
+        unit_text = hil_bridge_runtime.render_user_service_unit(options)
+
+        self.assertNotIn("--modem-diag-device", unit_text)
+
+    def test_render_user_service_unit_forwards_an_operator_apdu_timeout(self) -> None:
+        options = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+            apdu_timeout_ms=45000,
+        )
+        self.assertIn("--apdu-timeout-ms 45000", hil_bridge_runtime.render_user_service_unit(options))
+        unset = hil_bridge_runtime.HilBridgeUserServiceOptions(
+            python_executable="/opt/ygg/bin/python3",
+            working_directory="/work/YggdraSIM",
+        )
+        self.assertNotIn("--apdu-timeout-ms", hil_bridge_runtime.render_user_service_unit(unset))
+
+    def test_apdu_timeout_service_setting(self) -> None:
+        resolve = hil_bridge_runtime.resolve_apdu_timeout_service_setting
+        self.assertEqual(resolve({}), 0)
+        self.assertEqual(resolve({"YGGDRASIM_HIL_APDU_TIMEOUT_MS": "not a number"}), 0)
+        self.assertEqual(resolve({"YGGDRASIM_HIL_APDU_TIMEOUT_MS": "0"}), 0)
+        self.assertEqual(resolve({"YGGDRASIM_HIL_APDU_TIMEOUT_MS": "50"}), 100)
+        self.assertEqual(resolve({"YGGDRASIM_HIL_APDU_TIMEOUT_MS": " 45000 "}), 45000)
+
+    def test_modem_diag_and_wireshark_profile_settings(self) -> None:
+        resolve_device = hil_bridge_runtime.resolve_modem_diag_device
+        resolve_profile = hil_bridge_runtime.resolve_wireshark_profile
+        self.assertEqual(resolve_device({}), "")
+        self.assertEqual(resolve_device({"YGGDRASIM_HIL_MODEM_DIAG": "off"}), "")
+        self.assertEqual(resolve_device({"YGGDRASIM_HIL_MODEM_DIAG": " auto "}), "auto")
+        self.assertEqual(
+            resolve_device({"YGGDRASIM_HIL_MODEM_DIAG": "/dev/serial/by-id/x-if00-port0"}),
+            "/dev/serial/by-id/x-if00-port0",
+        )
+        self.assertEqual(resolve_profile({}), "YggdraSIM-HIL")
+        self.assertEqual(resolve_profile({"YGGDRASIM_HIL_WIRESHARK_PROFILE": "OFF"}), "")
+        self.assertEqual(resolve_profile({"YGGDRASIM_HIL_WIRESHARK_PROFILE": "YggdraSIM-APDU"}), "YggdraSIM-APDU")
+
+    def test_wireshark_time_format_setting(self) -> None:
+        def resolve(value: str) -> str:
+            return hil_bridge_runtime.resolve_wireshark_time_format({"YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT": value})
+
+        self.assertEqual(hil_bridge_runtime.resolve_wireshark_time_format({}), "u")
+        for accepted in ("a", "ad", "adoy", "d", "dd", "e", "r", "u", "ud", "udoy", "a.6", "ud.3", "r.", ".9", "."):
+            self.assertEqual(resolve(accepted), accepted)
+        self.assertEqual(resolve(" AD "), "ad")
+        for off in ("off", "", "none", "0"):
+            self.assertEqual(resolve(off), "")
+        # Wireshark exits on these before it opens a window.
+        for refused in ("utc", "local", "a.10", "a6", "-t a", "a ad", ".66"):
+            self.assertEqual(resolve(refused), "")
+
     def test_normalize_simtrace_reset_mode_rejects_unknown_values(self) -> None:
         self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode("port-power"), "port-power")
         self.assertEqual(hil_bridge_runtime.normalize_simtrace_reset_mode("off"), "off")

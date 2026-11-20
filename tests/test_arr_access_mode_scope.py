@@ -32,7 +32,7 @@ from yggdrasim_common.gui_server.actions.saip import (
 
 
 # A container rule: every operation ADM1 may perform on MF / a DF / an ADF.
-_CONTAINER_RECORD = "80017FA40383010AFFFFFFFFFFFFFFFFFFFFFFFFFF"
+_CONTAINER_RECORD = "80017FA40683010A950108FFFFFFFFFFFFFFFFFFFF"
 
 
 class ArrAccessModeScopeTests(unittest.TestCase):
@@ -263,7 +263,7 @@ class ArrShowFileAnnotationTests(unittest.TestCase):
         ("fileDescriptor", {"fileDescriptor": _DESCRIPTOR}),
         (
             "fillFileContent",
-            bytes.fromhex("80017FA40383010A") + b"\xFF" * 13 + b"\xFF" * 21,
+            bytes.fromhex("80017FA40683010A950108") + b"\xFF" * 10 + b"\xFF" * 21,
         ),
     ]
     _ROWS = [

@@ -39,6 +39,7 @@ from SIMCARD.quirks import ApduResult, QuirkRegistry, load_quirk_registry
 from SIMCARD.scp03 import Scp03CardLogic
 from SIMCARD.scp80 import Scp80Logic
 from SIMCARD.sgp import SgpLogic
+from SIMCARD.state import SimProfileEntry
 from SIMCARD.toolkit import ToolkitLogic
 from SIMCARD.utils import ApduLengthError, parse_apdu
 from yggdrasim_common.card_backend import (
@@ -129,6 +130,26 @@ def _notify_sync_failure(category: str, store_path: str, error: BaseException) -
         sys.stderr.flush()
     except Exception:
         pass
+
+
+def _backfill_seed_fallback_allowed(loaded: list[SimProfileEntry], seeded: list[SimProfileEntry]) -> None:
+    """Give a saved built-in lab Profile the seed's fallbackAllowed when it holds none.
+
+    A store saved before fallbackAllowed (SGP.32 v1.3 §4.4) was seeded keeps
+    the built-in Profiles without it, and setFallbackAttribute refuses such a
+    Profile (§3.4.6 step 4). Only a Profile matching a seed by both AID and
+    ICCID, with no value of its own, takes the seed's; a TRUE or FALSE the
+    store holds is kept, and a downloaded Profile is never touched.
+    """
+    seeds = {
+        (str(entry.aid).upper(), str(entry.iccid)): entry
+        for entry in seeded
+        if entry.fallback_allowed is not None
+    }
+    for profile in loaded:
+        seed = seeds.get((str(profile.aid).upper(), str(profile.iccid)))
+        if seed is not None and profile.fallback_allowed is None:
+            profile.fallback_allowed = seed.fallback_allowed
 
 
 class SimulatedSimCardEngine:
@@ -235,6 +256,7 @@ class SimulatedSimCardEngine:
             if profile_store_has_entries(store_path):
                 loaded_profiles = load_profiles_from_store(store_path)
                 if len(loaded_profiles) > 0:
+                    _backfill_seed_fallback_allowed(loaded_profiles, self.state.profiles)
                     self.state.profiles = loaded_profiles
                     self.state.active_profile_aid = ""
                     for profile in loaded_profiles:
@@ -624,7 +646,7 @@ class SimulatedSimCardEngine:
             # bytes are returned here and consumed atomically.
             return self._handle_get_response(le_value)
         if ins == 0xF2:
-            # TS 102 221 §11.1.5 STATUS (CLA bit 8 cleared) returns the
+            # TS 102 221 v18.4 §11.1.2 STATUS (CLA bit 8 cleared) returns the
             # FCP / DF-name of the currently selected file. GP Card
             # Spec v2.3.1 §11.4 GET STATUS uses CLA bit 8 set with
             # P1 ∈ {0x10, 0x20, 0x40, 0x60, 0x80}. The TS 102 223
@@ -750,9 +772,9 @@ class SimulatedSimCardEngine:
         return b"", 0x6A, 0x86
 
     def _handle_iso_status(self, p1: int, p2: int) -> ApduResult:
-        """ETSI TS 102 221 §11.1.5 STATUS (CLA bit 8 cleared).
+        """ETSI TS 102 221 v18.4 §11.1.2 STATUS (CLA bit 8 cleared).
 
-        P1 sub-functions:
+        P1 sub-functions (§11.1.2.2 Table 11.8):
 
         - ``0x00`` no indication. Card just returns the requested
           response data (gated by P2).
@@ -760,9 +782,10 @@ class SimulatedSimCardEngine:
           terminal" -- informational marker. Same response shape as
           P1=0x00 because the card has no follow-up data to volunteer.
         - ``0x02`` "Terminal will initiate the termination of the
-          current application". Per §11.1.5.4 the card may close the
-          session: drop CHV-verified state, clear the SCP03 session,
-          and reset the toolkit pending-fetch queue. The response is
+          current application". TS 102 221 v18.4 §8.5.3 application
+          session termination; the simulator closes the session at
+          once: it drops CHV-verified state, clears the SCP03 session
+          and resets the toolkit pending-fetch queue. The response is
           empty regardless of P2 because the application context is
           being torn down.
 
@@ -803,7 +826,7 @@ class SimulatedSimCardEngine:
         return fcp, 0x90, 0x00
 
     def _terminate_iso_session(self) -> None:
-        """TS 102 221 §11.1.5.4 session-termination side-effects.
+        """TS 102 221 v18.4 §8.5.3 application session termination side-effects.
 
         Clears every per-session piece of volatile state so a follow-up
         SELECT picks up a clean context. The persistent file system
@@ -1040,6 +1063,7 @@ class SimulatedSimCardEngine:
                 str(profile.impi or "").strip(),
                 str(profile.notification_address or "").strip(),
                 bool(getattr(profile, "fallback_attribute", False)),
+                getattr(profile, "fallback_allowed", None),
                 bool(getattr(profile, "rollback_armed", False)),
                 bool(getattr(profile, "ecall_indication", False)),
                 bytes(getattr(profile, "connectivity_params_http", b"") or b""),

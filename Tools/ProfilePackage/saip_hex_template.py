@@ -3,7 +3,7 @@
 
 """Inline typed hex placeholder handling for vendor SAIP templates.
 
-Vendor templates (Telna and similar) ship SAIP payloads as ASCII hex
+Some vendor templates ship SAIP payloads as ASCII hex
 with typed placeholders baked in at byte-aligned positions inside TLV
 values:
 

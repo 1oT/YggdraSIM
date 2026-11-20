@@ -35,7 +35,7 @@ YggdraSIM currently provides:
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
-- commit-pinned upstream `pySim` integration for SAIP, SCP03/SCP80, and
+- commit-pinned `pySim` integration for SAIP, SCP03/SCP80, and
   SCP11-related flows; `[saip]` adds dependencies for spreadsheet extensions
   that are supplied as plugins rather than shipped here, while a local
   `pysim/` developer checkout still takes priority when present
@@ -234,6 +234,15 @@ include:
 - `SET-SMDP`, `SET-ES9`, `SET-ES9-TLS`, and `SET-ES9-CA`
 - `ES9-CERT-INFO`
 - `FLOW` and `EIM-AUTHENTICATE` compatibility probes
+- `ADD-INITIAL-EIM`, a wizard that builds ES10b.AddInitialEim (SGP.32 v1.3
+  §5.9.4) from the AddInitialEim builder store and, once confirmed, sends
+  eUICCMemoryReset (resetEimConfigData, resetImmediateEnableConfig) and then
+  the request; unlike the Local eIM shell's package-driven verb of the same
+  name, it needs no package file. The GUI sends the same request from
+  Offline Tools (`tool.eim_builder.send`) and eSIM Management
+  (`scp11_live.add_initial_eim`)
+- `EIM-CERT-STORE` for that store's certificates and saved values, shared with
+  the Offline Tools AddInitialEim build
 - automatic notification synchronization around transactional flows
 
 ### `SCP11/test`
@@ -367,15 +376,27 @@ Current execution-path families are:
 Current lifecycle and direct-card operations include:
 
 - `ADD-INITIAL-EIM`
-- `ADD-EIM`
 - `GET-EIM-CONFIG`
-- `DELETE-EIM`
 - `EUICC-MEMORY-RESET`
 - `ISDR-ADD-INITIAL-EIM`
-- `ISDR-ADD-EIM`
 - `ISDR-GET-EIM-CONFIG`
-- `ISDR-DELETE-EIM`
 - `LOAD-EIM-PACKAGE`
+
+Current operation-queue functions include:
+
+- an operation queue per eUICC (`QUEUE`, `OPS`, `OP`, `EDIT`, `MOVE`, `CANCEL`, `COPY`):
+  PSMOs, eCOs (`ADD-EIM`, `DELETE-EIM` among them), IPA eUICC data requests and profile
+  download triggers, signed when an IPA takes them
+- association of a card with the Local eIM (`ASSOCIATE`) and eUICC records (`EUICC`)
+- a background ESipa service with a local SM-DP+ (`SERVE`), direct delivery as IPAd
+  (`DELIVER`), eIM Package Injection to an IPAd that listens for it (`INJECT`, with
+  `EIM-LISTEN` in the eSIM Management console; plain HTTP on the loopback, or HTTPS with
+  the eIM's client certificate on an address another host can reach) and export for another
+  IPA (`EXPORT`, `RESULT`)
+- forwarding of the Notifications an IPA hands over to the SM-DP+ each names
+  (`NOTIFICATIONS`; ES9+'.HandleNotification, GSMA SGP.32 v1.3 §5.7.4)
+- Add eIM from an eIM configuration saved in the AddInitialEim builder (`ADD-EIM config=<name>`)
+- package documents queued from templates or a hotfolder (`PACKAGE-IMPORT`)
 
 Current discovery and handover operations include:
 

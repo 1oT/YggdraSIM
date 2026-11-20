@@ -141,17 +141,20 @@ def test_no_shipped_call_site_evaluates_signal_sigkill() -> None:
 
 
 def test_scp80_bundled_config_survives_a_non_ascii_header() -> None:
-    """The bundled ini carries a non-ASCII copyright line.
+    """An operator's ini can carry a non-ASCII copyright line.
 
     Reading it through the platform default codec raised
     UnicodeDecodeError on cp932 and cp874 hosts, and ``except OSError``
-    does not catch it because it is a ValueError.
+    does not catch it because it is a ValueError. The repository no longer
+    ships the file, so the line it used to carry stands in for it.
     """
     source = (REPO_ROOT / "SCP80/config.py").read_text(encoding="utf-8")
     assert _condensed('read_text(encoding="utf-8")') in _condensed(source)
     assert _condensed("except (OSError, ValueError)") in _condensed(source)
 
-    raw = (REPO_ROOT / "SCP80/ota_config.ini").read_bytes()
+    raw = "# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.\n[ota]\n".encode(
+        "utf-8"
+    )
     assert raw.decode("utf-8")
     for hostile in ("cp932", "cp874"):
         with pytest.raises(UnicodeDecodeError):

@@ -458,7 +458,7 @@ class GlobalPlatformOnAHighLogicalChannel(LayerTestBase):
         rows = decode_fields(self.capture, ["yapdu.command_name"])
         self.assertEqual(
             [row[0] for row in rows if row and row[0]],
-            ["STORE_DATA", "STORE_DATA"],
+            ["STORE DATA", "STORE DATA"],
         )
 
     def test_the_logical_channel_is_reported(self) -> None:
@@ -732,7 +732,7 @@ class RspStructureMembers(LayerTestBase):
     def test_a_sequence_of_names_its_elements_by_type(self) -> None:
         """ASN.1 gives the elements of a SEQUENCE OF no field name."""
         text = decode_text(self.capture, display_filter="frame.number==3")
-        self.assertIn("SubjectKeyIdentifier (0x4)", text)
+        self.assertIn("SubjectKeyIdentifier (0x04)", text)
 
     def test_profile_records_are_walked_to_their_fields(self) -> None:
         text = decode_text(self.capture, display_filter="frame.number==2")

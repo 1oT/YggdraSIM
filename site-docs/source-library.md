@@ -40,8 +40,12 @@ Notes:
 - [`guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md`](sources/guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md)
 - [`guides/README.md`](sources/guides/README.md)
 - [`guides/REMOTES_AND_PUBLICATION.md`](sources/guides/REMOTES_AND_PUBLICATION.md)
+- [`guides/RUNBOOK.md`](sources/guides/RUNBOOK.md)
 - [`guides/SIMTRACE2_CARDEM_GUIDE.md`](sources/guides/SIMTRACE2_CARDEM_GUIDE.md)
 - [`guides/TEMPLATE_AND_TOKENS.md`](sources/guides/TEMPLATE_AND_TOKENS.md)
+- [`guides/USER_MANUAL.md`](sources/guides/USER_MANUAL.md)
+- [`guides/USER_MANUAL_CLI.md`](sources/guides/USER_MANUAL_CLI.md)
+- [`guides/USER_MANUAL_GUI.md`](sources/guides/USER_MANUAL_GUI.md)
 
 ## SCP11 Module Docs
 

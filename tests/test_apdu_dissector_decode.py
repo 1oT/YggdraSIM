@@ -106,8 +106,8 @@ class EveryFrameDecodes(DecodeTestBase):
     def test_an_instruction_absent_from_the_tables_still_decodes(self) -> None:
         """0x80AB is deliberately not in _APDU_COMMANDS."""
         text = decode_text(self.capture, display_filter="yapdu.ins == 0xab")
-        self.assertIn("INS_AB", text)
-        self.assertIn("Status word: 9000", text)
+        self.assertIn("INS AB", text)
+        self.assertIn("Status Word: 9000", text)
 
 
 class CommandHeaderDecoding(DecodeTestBase):
@@ -115,14 +115,14 @@ class CommandHeaderDecoding(DecodeTestBase):
         rows = self.rows(["yapdu.ins", "yapdu.command_name"])
         by_ins = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
         self.assertEqual(by_ins.get("0xa4"), "SELECT")
-        self.assertEqual(by_ins.get("0xc0"), "GET_RESPONSE")
-        self.assertEqual(by_ins.get("0xb0"), "READ_BINARY")
-        self.assertEqual(by_ins.get("0xd6"), "UPDATE_BINARY")
+        self.assertEqual(by_ins.get("0xc0"), "GET RESPONSE")
+        self.assertEqual(by_ins.get("0xb0"), "READ BINARY")
+        self.assertEqual(by_ins.get("0xd6"), "UPDATE BINARY")
 
     def test_class_qualified_lookup_beats_the_bare_instruction(self) -> None:
         """0xE2 is STORE DATA under CLA 0x80, not the ETSI meaning."""
         text = decode_text(self.capture, display_filter="yapdu.ins == 0xe2")
-        self.assertIn("STORE_DATA", text)
+        self.assertIn("STORE DATA", text)
         # The defining specification is a filter-only field: naming the
         # standard under every command in a capture buries the decode.
         # Read it as a field rather than looking for it in the tree.
@@ -270,13 +270,13 @@ class RiskClassification(DecodeTestBase):
         rows = self.rows(["yapdu.command_name", "yapdu.risk"])
         risks = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
         self.assertEqual(risks.get("SELECT"), "1")
-        self.assertEqual(risks.get("READ_BINARY"), "1")
+        self.assertEqual(risks.get("READ BINARY"), "1")
 
     def test_write_commands_are_classified_write(self) -> None:
         rows = self.rows(["yapdu.command_name", "yapdu.risk"])
         risks = {row[0]: row[1] for row in rows if len(row) > 1 and row[0]}
-        self.assertEqual(risks.get("UPDATE_BINARY"), "2")
-        self.assertEqual(risks.get("STORE_DATA"), "2")
+        self.assertEqual(risks.get("UPDATE BINARY"), "2")
+        self.assertEqual(risks.get("STORE DATA"), "2")
 
     def test_verify_is_destructive_because_it_burns_a_retry(self) -> None:
         rows = self.rows(["yapdu.command_name", "yapdu.risk"])

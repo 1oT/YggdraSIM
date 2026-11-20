@@ -15,7 +15,7 @@
   padding: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
@@ -50,7 +50,7 @@
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cc-fs-wizard-row {
@@ -156,7 +156,7 @@
   padding: 8px 10px;
   border-left: 3px solid var(--accent);
   background: var(--bg-elev);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   color: var(--fg);
 }

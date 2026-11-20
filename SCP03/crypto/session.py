@@ -149,6 +149,9 @@ def _resolve_kdf():
     if _PYSIM_SCP03_KDF is None:
         from pySim.global_platform.scp import scp03_key_derivation
 
+        from yggdrasim_common.pysim_log_gate import install_pysim_secure_channel_log_gate
+
+        install_pysim_secure_channel_log_gate()
         _PYSIM_SCP03_KDF = scp03_key_derivation
     return _PYSIM_SCP03_KDF
 

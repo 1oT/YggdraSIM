@@ -91,7 +91,12 @@ class SecurityDomainKeyDecodeTests(unittest.TestCase):
 
     @staticmethod
     def _scp03_install_params() -> bytes:
-        # GP Amd. D §7.5: tag 81 = SCP byte (03), tag 82 = i byte (70).
+        # C9 SD install parameters. pySim's UiccSdInstallParams
+        # (pySim/global_platform/uicc.py, citing GP UICC Configuration
+        # v1.0.1 section 4.3.2; that document is not in the library) reads
+        # tag '81' as SCP id plus "i" in one TLV and '82' / '87' as
+        # extradition flags. These bytes carry no '81'; the key decode
+        # under test never reads C9.
         return bytes.fromhex("8201038201708701f0")
 
     def _make_sd_decoded(self) -> dict:

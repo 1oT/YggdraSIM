@@ -24,7 +24,9 @@ helpers on top of the local SCP11 stack.
 
 ## When to use it
 
-- `ADD-INITIAL-EIM`, `ADD-EIM`, `GET-EIM-CONFIG`, `DELETE-EIM`
+- queue PSMOs, eCOs, IPA eUICC data requests and profile download triggers for a
+  test eUICC, and serve them to an IPA from the background ESipa service
+- `ADD-INITIAL-EIM`, `GET-EIM-CONFIG`; `ADD-EIM` and `DELETE-EIM` queue their eCO
 - `LOAD-EIM-PACKAGE` direct to ISD-R
 - hotfolder-driven package campaigns
 - counter and error-code inspection
@@ -68,19 +70,39 @@ helpers on top of the local SCP11 stack.
 | `RESP-LOG-CLEAR` | clear the response log |
 | `NOTIF-HYGIENE` | notification list hygiene |
 
+### Operation queue
+
+| Command | Purpose |
+| --- | --- |
+| `IDENTITY` | show, create (`NEW`) or import the Local eIM identity |
+| `ASSOCIATE` | reset the card's eIM configuration and store the Local eIM (AddInitialEim) |
+| `EUICC` | list, show, add, read, edit or remove eUICC records |
+| `QUEUE` | queue an operation (`--plan` shows it without storing) |
+| `OPS` / `OP` | list operations / show one with its timeline and result |
+| `EDIT` / `MOVE` / `CANCEL` / `COPY` | change, reorder, cancel or copy an operation |
+| `EXPORT` / `RESULT` | sign one operation for another IPA / close it with that IPA's result |
+| `PACKAGE-IMPORT` | queue what a package document (template, hotfolder file) stands for |
+| `EIM-SETTINGS` | queue rules: unknown EIDs, result recovery, retries, result verification, Notification forwarding |
+| `SERVE` | start, stop, restart or show the background ESipa service and local SM-DP+; the service also relays indirect downloads (`QUEUE DOWNLOAD ... indirect=on`) and runs the card-facing TLS listeners a card's own IPAe reaches: the eIM's, and the local SM-DP+'s for a direct download (ES9+ in the ASN.1 binding) |
+| `TLS-SETUP` | build a TLS chain for the card-facing listener and choose the trustedPublicKeyDataTls `ASSOCIATE` gives the card; `LEAF` issues further leaves under a setup's CA and puts one on its name, `RESULTS` counts the recorded handshakes per leaf served (accepted, refused with the client's alert, resumed); a leaf's subject and extensions can be written as text (`subject=`, `ext.<extension>=`, `text=<file>`) and `TEXT` decodes a leaf or any certificate into that text |
+| `DELIVER` | act as IPAd on the card in the reader until its queue is empty |
+| `INJECT` | send an eUICC's queue to an IPA that listens for it: the eIM calls ESipa.TransferEimPackage (plain HTTP on the loopback, or `https://` with the certificate of `INJECT-CERT`; `EIM-LISTEN` in the eSIM Management console is that IPA) |
+| `INJECT-CERT` | make, once, and show the client certificate this eIM presents to an IPA over HTTPS |
+| `NOTIFICATIONS` | list the Notifications IPAs handed to the eIM; `SEND` sends them to the SM-DP+ each names (ES9+'.HandleNotification), `HOLD` stops the attempts. The eIM also sends them after `DELIVER` and `INJECT` and while the service runs |
+| `SMDP-PROFILE` | which profile the local SM-DP+ serves for a Matching ID |
+| `SMDS` | the service's own SM-DS: `REGISTER` and `DELETE` an Event Record for an eUICC, `LIST` them, `ADDRESS` sets the name it answers under; a download queued with `contact_smds=on` retrieves the records over ES11 (`EIM-DOWNLOAD` in the eSIM Management shell runs it), and the service runs a card-facing TLS listener for an IPAe that retrieves them itself (SGP.26 test certificates only) |
+
 ### eIM lifecycle (direct card)
 
 | Command | Purpose |
 | --- | --- |
 | `ADD-INITIAL-EIM` | seed BF55 identity via the eIM path |
-| `ADD-EIM` | add or rotate eIM entries |
+| `ADD-EIM` | queue the addEim eCO (`QUEUE ADD-EIM`) |
 | `GET-EIM-CONFIG` | read eIM configuration data from the card |
-| `DELETE-EIM` | remove an eIM entry |
+| `DELETE-EIM` | queue the deleteEim eCO (`QUEUE DELETE-EIM`) |
 | `EUICC-MEMORY-RESET` | trigger the eUICC memory reset flow |
 | `ISDR-ADD-INITIAL-EIM` | direct-to-ISD-R variant of add-initial-eim |
-| `ISDR-ADD-EIM` | direct-to-ISD-R variant of add-eim |
 | `ISDR-GET-EIM-CONFIG` | direct-to-ISD-R variant of get-eim-config |
-| `ISDR-DELETE-EIM` | direct-to-ISD-R variant of delete-eim |
 | `LOAD-EIM-PACKAGE` | load a generated eIM package onto the card |
 
 ### IPAd discovery and handover

@@ -117,9 +117,16 @@ yggdrasim-apdu-dissect uninstall           # and back out again
 In a running Wireshark, pick up the change with **Analyze > Reload Lua
 Plugins** (++ctrl+shift+l++).
 
-Installing and passing `-X lua_script:` at the same time is harmless: the
+Installing and passing `-X lua_script:` at the same time raises no error: the
 entry point carries a load guard, because `Proto()` raises on a duplicate
-name and Wireshark would otherwise refuse the whole plugin.
+name and Wireshark would otherwise refuse the whole plugin. The first copy
+loaded is the one that runs, and Wireshark loads the personal plugin folder
+before any `-X lua_script:` script (measured on 4.4.7). Once installed, the
+installed copy therefore also decodes in the Wireshark the HIL menu starts,
+whatever the checkout holds: re-run `install` after updating YggdraSIM, or
+`uninstall` to let the automatic paths load the checkout's copy. Where an
+AppArmor profile denies tshark every read under `$HOME`, as Ubuntu's does,
+tshark never sees the installed copy and keeps loading the `-X` one.
 
 !!! note "Why each module bootstraps its own package.path"
     Wireshark's plugin loader executes every `.lua` file in the plugin
@@ -140,19 +147,26 @@ The layout follows Wireshark's `gsm_sim`: a byte appears once, and what the
 instruction makes of it is on that byte's own line rather than repeated
 below it as a second field.
 
-- **Bit fields are rendered as bit fields.** The class and constructed bits
-  of a BER tag show their masks -- `..1. .... = Constructed: True` -- the
-  way Wireshark's own BER dissector renders them.
-- **A reading hangs off the byte it decodes.** `P1: 0x91 (last block,
-  BER-TLV format)`, not a `P1` line followed by three more naming the same
+- **The header carries `gsm_sim`'s labels.** `Class`, `Instruction: READ
+  BINARY (0xb0)`, `Parameter 1`, `Parameter 2`, the two lengths and one
+  `Status Word: 9000 Success` line. A command is named the way the
+  specifications print it, `READ BINARY` and `STORE DATA`, in the tree, in
+  the Info column and in `yapdu.command_name`.
+- **A reading hangs off the byte it decodes.** `Parameter 1: 0x91 (last
+  block, BER-TLV format)`, not a line followed by three more naming the same
   byte. A COMPREHENSION-TLV's meaning sits under that TLV, not in a block
   collected after the run.
-- **Framing is one collapsed node.** How the payload was cut into a command
-  and a response is dissector bookkeeping, so it lives under `Framing`
-  rather than above the APDU.
+- **A TLV is one line.** `File identifier (0x83): 7FF0 (MF / ADF.USIM)`
+  carries the name, the tag and the value; the tag, the length, the class
+  and the constructed bit take no rows of their own.
+- **Framing follows the decode.** How the payload was cut into a command
+  and a response is dissector bookkeeping, so it is one `Framing` node
+  after the response rather than above the APDU.
 - **A field that only restates the line above it is filterable but not
   printed.** `yapdu.sw_meaning`, `yapdu.detail`, `yapdu.command_name`,
-  `yapdu.tlv.name`, `yapdu.tlv.uint`, `yapdu.frame_kind`, `yapdu.case`,
+  `yapdu.tlv.name`, `yapdu.tlv.tag`, `yapdu.tlv.length`, `yapdu.tlv.class`,
+  `yapdu.tlv.constructed`, `yapdu.tlv.uint`, `yapdu.sw1`, `yapdu.sw2`,
+  `yapdu.frame_kind`, `yapdu.case`,
   `yapdu.command_source`, `yapdu.split.command_len`,
   `yapdu.split.response_len`, `yapdu.split.method`, `yapdu.cla.type`,
   `yapdu.tlv.comprehension_required`, `yapdu.cat.type`,
@@ -163,7 +177,7 @@ below it as a second field.
 - **A default value is not a finding.** The class-byte breakdown prints
   `Logical channel`, `Secure messaging` and `Command chaining` only where
   one of them departs from channel 0, no secure messaging and no chaining
-  -- which is also where the CLA line itself names it. `Split confidence`
+  -- which is also where the `Class` line itself names it. `Split confidence`
   and `Cross-frame context available` print when they carry a warning and
   stay filter-only when they do not.
 
@@ -175,14 +189,61 @@ pane: query it rather than looking for it.
 ```
 yapdu.risk == 3                     every irreversible command in the capture
 yapdu.sw != 0x9000                  every exchange the card did not accept
-yapdu.command_name == "STORE_DATA"  eUICC traffic
+yapdu.command_name == "STORE DATA"  eUICC traffic
 yapdu.split.ambiguous == 1          exchanges the decoder could not resolve
 yapdu.ef.iccid                      frames that revealed an ICCID
 yapdu.cla.secure_messaging > 0      SCP-wrapped traffic
 yapdu.command_source contains "GlobalPlatform"
                                     commands the GlobalPlatform card
                                     specification defines
+yapdu.tls.alert                     TLS alerts a BIP channel carried in
+                                    the clear
 ```
+
+A TLS alert also reaches the row's Detail column: the card's own in its SEND
+DATA (`SEND DATA: channel 1, 7 bytes, fatal TLS alert bad_certificate (42)`),
+the peer's in the TERMINAL RESPONSE to RECEIVE DATA, and a ciphered one as
+`encrypted TLS alert`.
+
+## Row colours in a HIL session
+
+The Wireshark a HIL session opens gets its colouring rules from
+`Tools/HilBridge/wireshark_profile.py`. They use the Catppuccin Mocha
+palette: every GSMTAP row sits on the dark base and the text colour names
+the kind of exchange. The first rule that matches a row wins.
+
+| Row | Colour |
+|---|---|
+| Fatal or certificate TLS alert on a BIP channel | dark text on red |
+| Exchange a reset cut short (modem log) | red on the raised surface |
+| Modem note | yellow on the mantle |
+| Error status word | red |
+| Warning status word (`62 XX`, `63 XX`) | peach |
+| Modem-side frame | lavender on the raised surface |
+| ATR | teal |
+| Toolkit and BIP exchange, STATUS, an answer announcing a proactive command | mauve |
+| SELECT, MANAGE CHANNEL, TERMINAL CAPABILITY | blue |
+| Read (READ BINARY, READ RECORD, GET RESPONSE, GET DATA, ...) | green |
+| Write (UPDATE BINARY, UPDATE RECORD, STORE DATA, INSTALL, ...) | peach |
+| PIN and authentication commands | yellow |
+| Any other GSMTAP frame | plain text |
+
+The rules read stock `gsm_sim`, `tls` and `udp` fields, so they compile in a
+Wireshark without this dissector. A colouring rule reaches the packet list
+only, so the rest of the window keeps the desktop's own Qt palette unless
+the profile also carries the style sheet:
+
+```bash
+python -m Tools.HilBridge.wireshark_profile --stylesheet YggdraSIM-HIL
+```
+
+That writes `yggdrasim.qss` into the profile (menus, toolbars, the filter
+bar, the detail and bytes panes in the same palette). Wireshark has no
+setting for a style sheet, so the HIL menu passes the file as
+`-stylesheet=<file>` whenever it is there and keeps it current; a Wireshark
+started by hand takes the same argument, which the command prints. Empty the
+file to go back to the desktop's look. Toolbar icons are Wireshark's own and
+stay as they are.
 
 ## How it attaches
 

@@ -3,14 +3,13 @@
 
 """Legacy 2G modem cold-attach regression.
 
-Real basebands -- particularly Quectel BG95/BG96/EC25 derivatives and
-older Cinterion/Telit modules -- still issue ``CLA=A0`` commands per
-3GPP TS 11.11 / TS 51.011 even when the card is a UICC, because their
+Some real basebands still issue ``CLA=A0`` commands per 3GPP
+TS 11.11 / TS 51.011 even when the card is a UICC, because their
 SIM driver layer was originally written for plain GSM SIMs and the
 boot path was never re-targeted at ETSI TS 102 221's ``CLA=00`` family.
 
 The script below mirrors the byte sequence captured live on the HIL
-bridge against a Telna BPP-provisioned UICC. Two failures observed
+bridge against a BPP-provisioned UICC. Two failures observed
 there motivate this test:
 
 1. ``A0 B0 00 00 0A`` (READ BINARY of EF.ICCID under legacy CLA) used
@@ -115,7 +114,7 @@ class LegacyGsmModemAttachTests(unittest.TestCase):
     def test_02_select_df_gsm_returns_fcp(self) -> None:
         # The fix under test: legacy SELECT 7F20 must succeed even when
         # the active BPP did not carve out a DF.GSM via GFM. The stub
-        # is what 2G modems like BG95 expect to find right after MF.
+        # is what 2G modems expect to find right after MF.
         data, sw1, sw2 = self._exchange("A0A40000027F20")
         self.assertEqual(
             sw1,

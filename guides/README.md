@@ -16,6 +16,12 @@ needs at runtime (`RSPRO.asn`) is shipped as package data under
 `Tools/HilBridge/RSPRO.asn`. Operators who want offline reference
 reading can populate `docs/` themselves from the issuing body.
 
+## User Manual
+
+- `USER_MANUAL.md` - start here: what each module is for, installing and starting, the concepts the GUI and the CLI share, work on a real card, what to do when something fails
+- `USER_MANUAL_GUI.md` - the GUI Command Center: the window, running an action and reading its answer, every module in sidebar order
+- `USER_MANUAL_CLI.md` - the launcher and the shells: how every shell works, every module in the same order as the GUI chapter
+
 ## Install Guides
 
 - `INSTALL_CLEAN.md` - clean-flavor executable install (Win / macOS / Linux / Pi)
@@ -27,6 +33,7 @@ reading can populate `docs/` themselves from the issuing body.
 
 ## Core Guides
 
+- `RUNBOOK.md` - short procedures: each task on the CLI and in the GUI, repository maintenance, real-card and simulator runs
 - `ARCHITECTURE.md` - system structure, dependency map, runtime state, and flow charts
 - `CAPABILITIES.md` - suite-level capability reference grouped by subsystem
 - `CLI_AND_PIPING_GUIDE.md` - non-interactive command, piping, and automation patterns

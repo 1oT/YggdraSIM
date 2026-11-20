@@ -19,6 +19,36 @@ from typing import Final
 
 
 GENERATED_PALETTES: Final[dict[str, dict[str, str]]] = {
+    "bench-dark": {
+        "BLUE": "#FFFFFF",
+        "CYAN": "#EEF1F3",
+        "DEEP_BLUE": "#FFFFFF",
+        "GREEN": "#62D394",
+        "GUIDE": "#202428",
+        "HEADER": "#FFFFFF",
+        "ORANGE": "#F0C75E",
+        "PURPLE": "#9BA4AD",
+        "RED": "#FF7A6E",
+        "SURFACE": "#E4E7EA",
+        "TEXT_DIM": "#9BA4AD",
+        "WHITE": "#E4E7EA",
+        "YELLOW": "#F0C75E",
+    },
+    "bench-light": {
+        "BLUE": "#000000",
+        "CYAN": "#14171A",
+        "DEEP_BLUE": "#000000",
+        "GREEN": "#17733F",
+        "GUIDE": "#DDE1E4",
+        "HEADER": "#000000",
+        "ORANGE": "#7D5900",
+        "PURPLE": "#4C555E",
+        "RED": "#B8322A",
+        "SURFACE": "#14171A",
+        "TEXT_DIM": "#4C555E",
+        "WHITE": "#14171A",
+        "YELLOW": "#7D5900",
+    },
     "catppuccin-frappe": {
         "BLUE": "#B680E9",
         "CYAN": "#CA9EE6",
@@ -308,6 +338,8 @@ GENERATED_PALETTES: Final[dict[str, dict[str, str]]] = {
 
 
 GENERATED_APPEARANCE: Final[dict[str, str]] = {
+    "bench-dark": "dark",
+    "bench-light": "light",
     "catppuccin-frappe": "dark",
     "catppuccin-latte": "light",
     "catppuccin-macchiato": "dark",

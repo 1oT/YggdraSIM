@@ -849,8 +849,8 @@ def ensure_workspace_pysim_on_path(
     1. A developer checkout at ``<workspace>/pysim`` or the PyInstaller
        bundle root. This lets a maintainer work against an unreleased
        upstream branch without reinstalling after every change.
-    2. A pip-installed ``pySim`` package (e.g. from the ``[saip]`` extra
-       or ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
+    2. An installed ``pySim`` package (the base dependency YggdraSIM pins
+       or ``pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'``).
        When the package is already importable we accept it as-is and
        return the directory that ``pySim.__file__`` resolves to, so
        callers that log the "pysim root" still get a meaningful path.
@@ -889,37 +889,13 @@ def ensure_workspace_pysim_on_path(
             root_text = str(candidate)
             if root_text not in sys.path:
                 sys.path.insert(0, root_text)
-            from yggdrasim_common.asn1tools_compat import (
-                install_object_identifier_arc2_decoding,
-            )
             from Tools.ProfilePackage.saip_pysim_compat import (
                 install_base_df_path_compatibility,
-                install_body_encoding_against_creation_content,
-                install_erased_state_file_fill,
-                install_extra_profile_elements,
-                install_gfm_mf_creation,
-                install_lossless_security_domain_encoding,
-                install_optional_security_domain_key_list,
-                install_phonebook_pbc_template,
-                install_proprietary_efinfo_without_descriptor,
-                install_record_aware_fill_pattern,
-                install_record_aware_template_default,
-                install_template_range_start_fids,
+                require_pinned_pysim_fixes,
             )
 
+            require_pinned_pysim_fixes()
             install_base_df_path_compatibility()
-            install_lossless_security_domain_encoding()
-            install_optional_security_domain_key_list()
-            install_object_identifier_arc2_decoding()
-            install_erased_state_file_fill()
-            install_record_aware_fill_pattern()
-            install_record_aware_template_default()
-            install_proprietary_efinfo_without_descriptor()
-            install_body_encoding_against_creation_content()
-            install_gfm_mf_creation()
-            install_extra_profile_elements()
-            install_phonebook_pbc_template()
-            install_template_range_start_fids()
             return candidate
 
     try:
@@ -927,47 +903,23 @@ def ensure_workspace_pysim_on_path(
     except ImportError as import_error:
         tried = ", ".join(str(path) for path in seen)
         raise RuntimeError(
-            "pySim is not available. Install the upstream package via "
-            "`pip install 'yggdrasim[saip]'` (recommended) or "
-            "`pip install 'pySim @ git+https://github.com/osmocom/pysim.git'`, "
-            "or clone the upstream tree into one of: "
+            "pySim is not available. Install the pinned pySim fork: `pip install -e .` "
+            "in a YggdraSIM checkout (pySim is a base dependency), or "
+            "`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`, "
+            "or clone that tree into one of: "
             f"{tried}. Underlying import error: "
             f"{type(import_error).__name__}: {import_error}."
         ) from import_error
 
     package_path = getattr(pySim, "__file__", None)
     if isinstance(package_path, str) and len(package_path) > 0:
-        from yggdrasim_common.asn1tools_compat import (
-            install_object_identifier_arc2_decoding,
-        )
         from Tools.ProfilePackage.saip_pysim_compat import (
             install_base_df_path_compatibility,
-            install_body_encoding_against_creation_content,
-            install_erased_state_file_fill,
-            install_extra_profile_elements,
-            install_gfm_mf_creation,
-            install_lossless_security_domain_encoding,
-            install_optional_security_domain_key_list,
-            install_phonebook_pbc_template,
-            install_proprietary_efinfo_without_descriptor,
-            install_record_aware_fill_pattern,
-            install_record_aware_template_default,
-            install_template_range_start_fids,
+            require_pinned_pysim_fixes,
         )
 
+        require_pinned_pysim_fixes()
         install_base_df_path_compatibility()
-        install_lossless_security_domain_encoding()
-        install_optional_security_domain_key_list()
-        install_object_identifier_arc2_decoding()
-        install_erased_state_file_fill()
-        install_record_aware_fill_pattern()
-        install_record_aware_template_default()
-        install_proprietary_efinfo_without_descriptor()
-        install_body_encoding_against_creation_content()
-        install_gfm_mf_creation()
-        install_extra_profile_elements()
-        install_phonebook_pbc_template()
-        install_template_range_start_fids()
         installed_root = Path(package_path).resolve().parent
         return installed_root
 

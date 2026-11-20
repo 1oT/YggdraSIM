@@ -63,8 +63,8 @@
 
 /* Action strip wrapper -- pushes itself to the right when the
    header has room (margin-left:auto), otherwise wraps under the
-   chips. Two sub-groups inside: file-scoped actions + a small
-   "Card" group for SUSPEND so it can't be confused for a file op. */
+   chips. Two sub-groups inside: the file actions, then a "Danger"
+   group (Delete, Resize, card-wide SUSPEND) at the end. */
 .cc-fs-actions {
   display: inline-flex;
   align-items: center;
@@ -84,9 +84,28 @@
   border-radius: var(--radius-pill);
 }
 
-.cc-fs-actions-group--card {
-  background: var(--bg-danger-soft);
-  border-color: var(--err-soft);
+/* Danger keys sit on --bg-elev: --fail is guaranteed 4.5:1 there in every
+   theme, which --surface and --bg-elev-2 are not. */
+.cc-fs-actions-group--danger {
+  background: var(--bg-elev);
+  border-color: color-mix(in oklab, var(--fail) 45%, transparent);
+}
+
+.cc-fs-actions-group--danger .cc-fs-action-btn {
+  background: var(--bg-elev);
+}
+
+.cc-fs-actions-legend {
+  padding: 0 4px 0 2px;
+  color: var(--fail);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.cc-fs-action-btn--card {
+  margin-left: 4px;
 }
 
 .cc-fs-actions-hint {

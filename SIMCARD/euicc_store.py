@@ -185,6 +185,7 @@ def _serialize_state(state: SimCardState) -> dict[str, Any]:
         ],
         "eum_certificate_der_hex": bytes(state.eum_certificate_der or b"").hex().upper(),
         "euicc_certificate_der_hex": bytes(state.euicc_certificate_der or b"").hex().upper(),
+        "euicc_private_key_pem_hex": bytes(state.euicc_private_key_pem or b"").hex().upper(),
         "conformance_strict": bool(state.conformance_strict),
         "ci_certificates_der_hex": [bytes(item).hex().upper() for item in state.ci_certificates],
         "scp03_keys": {
@@ -211,6 +212,7 @@ def _serialize_state(state: SimCardState) -> dict[str, Any]:
             }
             for entry in state.euicc_package_results
         ],
+        "last_euicc_package_result": _package_result_payload(state.last_euicc_package_result),
         "association_token_counter": int(state.association_token_counter),
         "next_notification_seq": int(state.next_notification_seq),
         "immediate_enable": {
@@ -405,6 +407,8 @@ def apply_euicc_state_payload(
         state.eum_certificate_der = _hex_bytes(payload.get("eum_certificate_der_hex"), fallback=b"")
     if "euicc_certificate_der_hex" in payload:
         state.euicc_certificate_der = _hex_bytes(payload.get("euicc_certificate_der_hex"), fallback=b"")
+    if "euicc_private_key_pem_hex" in payload:
+        state.euicc_private_key_pem = _hex_bytes(payload.get("euicc_private_key_pem_hex"), fallback=b"")
     if "conformance_strict" in payload:
         state.conformance_strict = payload.get("conformance_strict") is True
     raw_ci_certificates = payload.get("ci_certificates_der_hex")
@@ -468,6 +472,9 @@ def apply_euicc_state_payload(
                 )
             )
         state.euicc_package_results = package_results
+
+    if "last_euicc_package_result" in payload:
+        state.last_euicc_package_result = _package_result_entry(payload.get("last_euicc_package_result"))
 
     if "association_token_counter" in payload:
         try:
@@ -541,6 +548,39 @@ def apply_euicc_state_payload(
             )
 
     apply_security_domain_config(state)
+
+
+def _package_result_payload(entry: SimEuiccPackageResultEntry | None) -> dict[str, Any] | None:
+    """The JSON form of one stored eUICC Package Result, the shape the result list uses."""
+    if entry is None:
+        return None
+    return {
+        "seq_number": int(entry.seq_number),
+        "eim_id": str(entry.eim_id),
+        "counter_value": int(entry.counter_value),
+        "eim_transaction_id_hex": bytes(entry.eim_transaction_id or b"").hex().upper(),
+        "payload_hex": bytes(entry.payload or b"").hex().upper(),
+    }
+
+
+def _package_result_entry(raw_entry: Any) -> SimEuiccPackageResultEntry | None:
+    """The stored eUICC Package Result of `_package_result_payload`; None for a missing or damaged entry."""
+    if isinstance(raw_entry, dict) is False:
+        return None
+    try:
+        seq_number = int(raw_entry.get("seq_number", 0))
+        counter_value = int(raw_entry.get("counter_value", 0))
+    except (TypeError, ValueError):
+        return None
+    if seq_number <= 0:
+        return None
+    return SimEuiccPackageResultEntry(
+        seq_number=seq_number,
+        eim_id=str(raw_entry.get("eim_id", "")).strip(),
+        counter_value=counter_value,
+        eim_transaction_id=_hex_bytes(raw_entry.get("eim_transaction_id_hex"), fallback=b""),
+        payload=_hex_bytes(raw_entry.get("payload_hex"), fallback=b""),
+    )
 
 
 def _hex_bytes(value: Any, *, fallback: bytes) -> bytes:

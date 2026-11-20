@@ -510,7 +510,7 @@ def test_invite_import_stores_token_file_not_registry_json(tmp_path: Path, monke
             "id": "rig-a",
             "name": "Rig A",
             "location": "Lab",
-            "tags": ["ec25"],
+            "tags": ["lte-modem"],
         },
         "agent": {"host": "10.0.0.42", "control_port": 8700},
         "stream": {"transport": "http-card-bridge"},

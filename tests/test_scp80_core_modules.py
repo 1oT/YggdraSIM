@@ -370,7 +370,7 @@ class OtaPacketBuilderTests(unittest.TestCase):
         self.assertEqual(len(plan.apdus), 1)
         self.assertEqual(len(plan.reader_apdus), 1)
         self.assertEqual(plan.payload_hex, "AA" * 10)
-        self.assertIn("02028381060280018B", plan.apdus[0].apdu_hex)
+        self.assertIn("02028281060280018B", plan.apdus[0].apdu_hex)
         self.assertNotIn("820283818B", plan.apdus[0].apdu_hex)
         self.assertIn("4005811250F37FF62222222222222225027000", plan.apdus[0].apdu_hex)
 
@@ -463,9 +463,10 @@ class TransportTests(unittest.TestCase):
 
         transport.transmit = fake_transmit
 
-        por = transport._recv_por(0x9101)
+        por, pending = transport._collect_por(0x9101)
 
         self.assertEqual(por, b"\xAA\xBB\xCC")
+        self.assertEqual(pending, b"")
         self.assertEqual(calls, ["8012000001", "00C0000002"])
 
     def test_decode_por_success_response_packet(self) -> None:
@@ -545,9 +546,10 @@ class TransportTests(unittest.TestCase):
 
         transport.transmit = fake_transmit
 
-        por = transport._recv_por(0x910E)
+        por, pending = transport._collect_por(0x910E)
 
         self.assertEqual(por, send_sms)
+        self.assertEqual(pending, b"")
         self.assertEqual(
             calls,
             [
@@ -573,9 +575,10 @@ class TransportTests(unittest.TestCase):
 
         transport.transmit = fake_transmit
 
-        por = transport._recv_por(0x910E)
+        por, pending = transport._collect_por(0x910E)
 
         self.assertEqual(por, open_channel)
+        self.assertEqual(pending, b"")
         self.assertEqual(calls, ["801200000E"])
 
     def test_send_ota_sequence_print_mode_increments_counter(self) -> None:

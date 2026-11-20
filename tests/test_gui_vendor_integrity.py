@@ -28,6 +28,41 @@ UPSTREAM = {
         "package/dist/mermaid.min.js",
         "581ed7d74bd9048d0e3a91363927d72ef22942d7722546b27f7cc29e35390eb8",
     ),
+    "plex-sans-condensed/IBMPlexSansCondensed-Medium-Latin1.woff2": (
+        "@ibm/plex-sans-condensed@2.0.0",
+        "package/fonts/split/woff2/IBMPlexSansCondensed-Medium-Latin1.woff2",
+        "77566d36b1dea360fcdadfa87766cea062d917d73bf7e6e3f52ca4b35edf405d",
+    ),
+    "plex-sans-condensed/IBMPlexSansCondensed-Regular-Latin1.woff2": (
+        "@ibm/plex-sans-condensed@2.0.0",
+        "package/fonts/split/woff2/IBMPlexSansCondensed-Regular-Latin1.woff2",
+        "9890d76dfb458471559cb28034e34a06abb70c23d92656b9f2a7ce23cd4a9932",
+    ),
+    "plex-sans-condensed/IBMPlexSansCondensed-SemiBold-Latin1.woff2": (
+        "@ibm/plex-sans-condensed@2.0.0",
+        "package/fonts/split/woff2/IBMPlexSansCondensed-SemiBold-Latin1.woff2",
+        "6738b1096fd433204a070db0b4a9b1172ad3e6bdff8aad5f05f7351e7c157d06",
+    ),
+    "plex-sans-condensed/license.txt": (
+        "@ibm/plex-sans-condensed@2.0.0",
+        "package/fonts/split/woff2/license.txt",
+        "91c25c350d3cac39da2736d74f7ba37ef648f5237a4e330a240615bc8d8c4360",
+    ),
+    "plex-mono/IBMPlexMono-Regular-Latin1.woff2": (
+        "@ibm/plex-mono@2.5.0",
+        "package/fonts/split/woff2/IBMPlexMono-Regular-Latin1.woff2",
+        "e8993d946649b9d01abb1ed06d574b19d8ea3e66b5c3948602db335c44c18e56",
+    ),
+    "plex-mono/IBMPlexMono-SemiBold-Latin1.woff2": (
+        "@ibm/plex-mono@2.5.0",
+        "package/fonts/split/woff2/IBMPlexMono-SemiBold-Latin1.woff2",
+        "b7acd05041ab65f3b7039e218ddd893065e11a07e85ea85019473152a51b6b7d",
+    ),
+    "plex-mono/license.txt": (
+        "@ibm/plex-mono@2.5.0",
+        "package/fonts/split/woff2/license.txt",
+        "91c25c350d3cac39da2736d74f7ba37ef648f5237a4e330a240615bc8d8c4360",
+    ),
     "xterm/xterm.js": (
         "xterm@5.3.0",
         "package/lib/xterm.js",

@@ -3,25 +3,19 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from Tools.ProfilePackage.saip_asn1_value import parse_asn1_value_profile
 from Tools.ProfilePackage.saip_hex_template import substitute_inline_placeholders
 from Tools.ProfilePackage.saip_json_codec import ensure_workspace_pysim_on_path
 from Tools.ProfilePackage.saip_pysim_compat import (
-    _positional_body_tuples,
-    _replay_body_tuples,
+    PinnedPySimFixesMissing,
     install_base_df_path_compatibility,
-    install_body_encoding_against_creation_content,
-    install_erased_state_file_fill,
-    install_gfm_mf_creation,
-    install_lossless_security_domain_encoding,
-    install_optional_security_domain_key_list,
-    install_proprietary_efinfo_without_descriptor,
-    install_record_aware_fill_pattern,
-    install_record_aware_template_default,
+    require_pinned_pysim_fixes,
 )
 from yggdrasim_common.gui_server.actions.saip import _load_package_from_path
 
@@ -84,15 +78,11 @@ class LosslessSecurityDomainEncodingTests(unittest.TestCase):
         ensure_workspace_pysim_on_path(cls.workspace_root)
 
     def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import FsProfileElement, ProfileElementSD
+        from pySim.esim.saip import FsProfileElement
 
-        install_lossless_security_domain_encoding()
-        wrapped = ProfileElementSD._pre_encode
         install_base_df_path_compatibility()
         wrapped_add_file = FsProfileElement.add_file
 
-        self.assertFalse(install_lossless_security_domain_encoding())
-        self.assertIs(ProfileElementSD._pre_encode, wrapped)
         self.assertFalse(install_base_df_path_compatibility())
         self.assertIs(FsProfileElement.add_file, wrapped_add_file)
 
@@ -177,7 +167,8 @@ def _profile_der(commands: list) -> bytes:
 
 class OptionalSecurityDomainKeyListTests(unittest.TestCase):
     """TCA SAIP v3.4.1 §8.6.1 (page 55): ``keyList SEQUENCE (SIZE (1..MAX)) OF
-    KeyObject OPTIONAL`` -- an SD without keys omits the member."""
+    KeyObject OPTIONAL`` -- an SD without keys omits the member. The pinned
+    pySim carries upstream_patches/osmocom-pysim-saip-sd-optional-key-list/."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -199,15 +190,6 @@ class OptionalSecurityDomainKeyListTests(unittest.TestCase):
         body.pop("keyList", None)
         return asn1.encode("ProfileElement", ("securityDomain", body))
 
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import ProfileElementSD
-
-        install_optional_security_domain_key_list()
-        post, pre = ProfileElementSD._post_decode, ProfileElementSD._pre_encode
-        self.assertFalse(install_optional_security_domain_key_list())
-        self.assertIs(ProfileElementSD._post_decode, post)
-        self.assertIs(ProfileElementSD._pre_encode, pre)
-
     def test_an_sd_without_keys_encodes_without_key_list(self) -> None:
         from pySim.esim.saip import asn1
 
@@ -224,7 +206,8 @@ class OptionalSecurityDomainKeyListTests(unittest.TestCase):
         self.assertNotIn("keyList", element.decoded)
 
     def test_keys_encode_with_their_optional_fields(self) -> None:
-        # The lossless wrapper keeps keyAccess and keyCounterValue beside it.
+        # The pinned pySim keeps keyAccess and keyCounterValue beside it
+        # (upstream_patches/osmocom-pysim-saip-sd-key-access-counter/).
         from pySim.esim.saip import ProfileElement, ProfileElementSD, asn1
 
         decoded = dict(self._blank().decoded)
@@ -243,43 +226,15 @@ class OptionalSecurityDomainKeyListTests(unittest.TestCase):
         self.assertEqual(body["keyList"][0]["keyCounterValue"], b"\x00" * 5)
         self.assertEqual(len(ProfileElement.from_der(element.to_der()).keys), 1)
 
-    def test_upstream_still_needs_the_compensation(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        import inspect
-
-        from pySim.esim.saip import ProfileElementSD
-
-        upstream_post = inspect.unwrap(ProfileElementSD._post_decode)
-        upstream_pre = inspect.unwrap(ProfileElementSD._pre_encode)
-        retire = (
-            "upstream pySim now treats keyList as optional: delete "
-            "install_optional_security_domain_key_list() and "
-            "upstream_patches/osmocom-pysim-saip-sd-optional-key-list/"
-        )
-        element = self._blank()
-        element.decoded.pop("keyList", None)
-        with self.assertRaises(KeyError, msg=retire):
-            upstream_post(element)
-        element = self._blank()
-        upstream_pre(element)
-        self.assertEqual(element.decoded.get("keyList"), [], retire)
 
 class GfmMfCreationTests(unittest.TestCase):
+    """A PE-GenericFileManagement that creates the MF (the pinned pySim carries
+    upstream_patches/osmocom-pysim-saip-gfm-mf-creation/)."""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.workspace_root = Path(__file__).resolve().parents[1]
         ensure_workspace_pysim_on_path(cls.workspace_root)
-        install_gfm_mf_creation()
-
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import ProfileElementGFM, ProfileElementSequence
-
-        add_file = ProfileElementGFM.add_file
-        cd = ProfileElementSequence.cd
-
-        self.assertFalse(install_gfm_mf_creation())
-        self.assertIs(ProfileElementGFM.add_file, add_file)
-        self.assertIs(ProfileElementSequence.cd, cd)
 
     def test_gfm_created_mf_roots_the_sequence(self) -> None:
         from pySim.esim.saip import FsNodeMF, ProfileElementSequence
@@ -321,28 +276,6 @@ class GfmMfCreationTests(unittest.TestCase):
         self.assertIsNone(gfm.files["3F00/7F20/2F06"].node)
         self.assertEqual(pes.to_der(), der)
 
-    def test_upstream_still_needs_the_gfm_mf_compensation(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        from pySim.esim.saip import File, ProfileElementGFM, ProfileElementSequence
-
-        upstream_add_file = ProfileElementGFM.add_file.__wrapped__
-        sequence = ProfileElementSequence()
-        gfm = ProfileElementGFM(pe_sequence=sequence)
-        mf = File(None, [("fileDescriptor", dict(_MF_FCP))])
-        mf.path = [0x3F00]
-        mf.pe_name = "3F00/3F00"
-
-        with self.assertRaises(
-            AttributeError,
-            msg=(
-                "upstream pySim now roots a GFM-created MF: delete "
-                "install_gfm_mf_creation() and "
-                "upstream_patches/osmocom-pysim-saip-gfm-mf-creation/"
-            ),
-        ):
-            upstream_add_file(gfm, mf, [0x3F00, 0x3F00])
-        self.assertIsNone(sequence.mf)
-
 
 class RecordAwareTemplateDefaultTests(unittest.TestCase):
     """A record template's default value lands in every record (SAIP V3.4.1 section 9)."""
@@ -355,7 +288,6 @@ class RecordAwareTemplateDefaultTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.workspace_root = Path(__file__).resolve().parents[1]
         ensure_workspace_pysim_on_path(cls.workspace_root)
-        install_record_aware_template_default()
 
     @staticmethod
     def _ici(records: int):
@@ -363,46 +295,22 @@ class RecordAwareTemplateDefaultTests(unittest.TestCase):
 
         return FileTemplate(0x6F80, "EF.ICI", "CY", records, 38, 5, 0x14, "FF...FF0000000001FFFF")
 
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip.templates import FileTemplate
-
-        expand = FileTemplate.expand_default_value_pattern
-        self.assertFalse(install_record_aware_template_default())
-        self.assertIs(FileTemplate.expand_default_value_pattern, expand)
-
     def test_default_is_repeated_per_record(self) -> None:
         self.assertEqual(self._ici(2).expand_default_value_pattern(76), self._RECORD * 2)
         self.assertEqual(self._ici(2).expand_default_value_pattern(50), self._RECORD + self._RECORD[:12])
 
-    def test_one_record_and_a_transparent_file_keep_upstream(self) -> None:
+    def test_one_record_and_a_transparent_file_expand_once(self) -> None:
         from pySim.esim.saip.templates import FileTemplate
 
-        upstream = FileTemplate.expand_default_value_pattern.__wrapped__
-        single = self._ici(1)
-        self.assertEqual(single.expand_default_value_pattern(38), upstream(single, 38))
+        self.assertEqual(self._ici(1).expand_default_value_pattern(38), self._RECORD)
         transparent = FileTemplate(0x6F07, "EF.IMSI", "TR", None, 9, 5, 0x07, "08FF...FF")
-        self.assertEqual(transparent.expand_default_value_pattern(9), upstream(transparent, 9))
+        self.assertEqual(transparent.expand_default_value_pattern(9), b"\x08" + b"\xff" * 8)
 
     def test_file_body_starts_from_the_per_record_default(self) -> None:
         from pySim.esim.saip import File
 
         image = File("ef-ici", [("fillFileContent", b"\x11")], template=self._ici(2)).body
         self.assertEqual(image, b"\x11" + self._RECORD[1:] + self._RECORD)
-
-    def test_upstream_still_needs_the_template_default_compensation(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        from pySim.esim.saip.templates import FileTemplate
-
-        upstream = FileTemplate.expand_default_value_pattern.__wrapped__
-        self.assertNotEqual(
-            upstream(self._ici(2), 76),
-            self._RECORD * 2,
-            msg=(
-                "upstream pySim now lays a record template's default into every "
-                "record: delete install_record_aware_template_default() and bug 3 "
-                "of upstream_patches/osmocom-pysim-saip-fill-file-offset-erased-state/"
-            ),
-        )
 
 
 class ProprietaryEfInfoWithoutDescriptorTests(unittest.TestCase):
@@ -413,9 +321,6 @@ class ProprietaryEfInfoWithoutDescriptorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_erased_state_file_fill()
-        install_record_aware_fill_pattern()
-        install_proprietary_efinfo_without_descriptor()
 
     @staticmethod
     def _file(pename: str, fcp: dict, template_file, content: bytes = b""):
@@ -431,13 +336,6 @@ class ProprietaryEfInfoWithoutDescriptorTests(unittest.TestCase):
         from pySim.esim.saip import templates
 
         return getattr(templates, holder).files_by_pename[pename]
-
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import File
-
-        reader = File.from_fileDescriptor
-        self.assertFalse(install_proprietary_efinfo_without_descriptor())
-        self.assertIs(File.from_fileDescriptor, reader)
 
     def test_pattern_fills_a_template_file_without_a_default(self) -> None:
         umpc = self._template("FilesAtMF", "ef-umpc")
@@ -465,32 +363,13 @@ class ProprietaryEfInfoWithoutDescriptorTests(unittest.TestCase):
         self.assertTrue(pe_file.high_update)
         self.assertTrue(pe_file.read_and_update_when_deact)
 
-    def test_an_fcp_with_a_descriptor_keeps_upstream(self) -> None:
-        from pySim.esim.saip import File
-
+    def test_an_fcp_with_a_descriptor_reads_its_pattern(self) -> None:
         umpc = self._template("FilesAtMF", "ef-umpc")
         fcp = {"fileDescriptor": b"\x41\x21", "efFileSize": b"\x05",
                "proprietaryEFInfo": {"fillPattern": b"\x07"}}
-        compensated = self._file("ef-umpc", dict(fcp), umpc)
-        plain = File("ef-umpc", None, umpc)
-        File.from_fileDescriptor.__wrapped__(plain, dict(fcp))
-        self.assertEqual(compensated.fill_pattern, plain.fill_pattern)
-        self.assertEqual(compensated.body, b"\x07" * 5)
-
-    def test_upstream_still_needs_the_compensation(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        from pySim.esim.saip import File
-
-        plain = File("ef-umpc", None, self._template("FilesAtMF", "ef-umpc"))
-        File.from_fileDescriptor.__wrapped__(plain, {"proprietaryEFInfo": {"fillPattern": b"\xaa"}})
-        self.assertIsNone(
-            plain.fill_pattern,
-            msg=(
-                "upstream pySim now reads proprietaryEFInfo without a fileDescriptor: "
-                "delete install_proprietary_efinfo_without_descriptor() and "
-                "upstream_patches/osmocom-pysim-saip-proprietary-efinfo-without-descriptor/"
-            ),
-        )
+        pe_file = self._file("ef-umpc", dict(fcp), umpc)
+        self.assertEqual(pe_file.fill_pattern, b"\x07")
+        self.assertEqual(pe_file.body, b"\x07" * 5)
 
 
 
@@ -504,10 +383,6 @@ class BodyEncodingAgainstCreationContentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
-        install_erased_state_file_fill()
-        install_record_aware_fill_pattern()
-        install_proprietary_efinfo_without_descriptor()
-        install_body_encoding_against_creation_content()
 
     def _literal(self):
         from pySim.esim.saip.templates import FileTemplate
@@ -533,13 +408,6 @@ class BodyEncodingAgainstCreationContentTests(unittest.TestCase):
         body[3], body[10], body[15] = 0xAA, 0xBB, 0xCC
         return bytes(body)
 
-    def test_installer_is_idempotent(self) -> None:
-        from pySim.esim.saip import File
-
-        encoder = File.file_content_to_tuples
-        self.assertFalse(install_body_encoding_against_creation_content())
-        self.assertIs(File.file_content_to_tuples, encoder)
-
     def test_several_differences_rebuild_the_body(self) -> None:
         body = self._three_differences()
         tuples = self._file(self._literal(), body).file_content_to_tuples(optimize=True)
@@ -558,9 +426,12 @@ class BodyEncodingAgainstCreationContentTests(unittest.TestCase):
 
         pl = templates.FilesAtMF.files_by_pename["ef-pl"]
         fcp = {"proprietaryEFInfo": {"fillPattern": b"\xaa"}}
-        # Byte 0 equals the template default 'FF' but not the pattern 'AA'.
+        # Byte 0 equals the template default 'FF' but not the pattern 'AA', so it
+        # has to be written; against the template default it would be left out.
         tuples = self._file(pl, b"\xff\xaa", fcp).file_content_to_tuples(optimize=True)
-        self.assertEqual(tuples, [("fillFileOffset", 0), ("fillFileContent", b"\xff")])
+        self.assertEqual(tuples[0], ("fillFileOffset", 0))
+        self.assertEqual(tuples[1][0], "fillFileContent")
+        self.assertEqual(tuples[1][1][:1], b"\xff")
         self.assertEqual(self._decode(pl, tuples, fcp), b"\xff\xaa")
 
     def test_the_creation_content_encodes_as_nothing_and_verbatim_stays(self) -> None:
@@ -568,33 +439,119 @@ class BodyEncodingAgainstCreationContentTests(unittest.TestCase):
         self.assertEqual(pe_file.file_content_to_tuples(optimize=True), [])
         self.assertEqual(pe_file.file_content_to_tuples(optimize=False), [("fillFileContent", self._DEFAULT)])
 
-    def test_an_offset_beyond_uint16_is_split(self) -> None:
-        base = b"\xff" * 70000
-        body = bytearray(base)
+    @staticmethod
+    def _sparse_large_file():
+        fcp = {"fileDescriptor": b"\x41\x21", "efFileSize": (70000).to_bytes(3, "big")}
+        body = bytearray(b"\xff" * 70000)
         body[66000] = 0x01
-        tuples = _positional_body_tuples(base, bytes(body))
-        self.assertEqual(
-            tuples,
-            [("fillFileOffset", 65535), ("fillFileOffset", 465), ("fillFileContent", b"\x01")],
-        )
-        self.assertEqual(_replay_body_tuples(base, tuples), bytes(body))
+        return fcp, bytes(body)
 
-    def test_upstream_still_needs_the_compensation(self) -> None:
-        """Pin the upstream gap so the compensation cannot outlive it unnoticed."""
-        from pySim.esim.saip import File
+    def test_an_offset_beyond_uint16_is_split(self) -> None:
+        # TCA SAIP V3.4.1 section 8.3.2: fillFileOffset is a UInt16; the pinned
+        # pySim splits a longer move (osmocom-pysim-saip-optimised-body-encoding).
+        fcp, body = self._sparse_large_file()
+        tuples = self._file(None, body, fcp).file_content_to_tuples(optimize=True)
+        offsets = [value for key, value in tuples if key == "fillFileOffset"]
+        self.assertEqual(offsets, [0xFFFF, 66000 - 0xFFFF])
+        self.assertEqual(self._decode(None, tuples, fcp), body)
 
-        body = self._three_differences()
-        upstream = File.file_content_to_tuples.__wrapped__(self._file(self._literal(), body), True)
-        self.assertNotEqual(
-            _replay_body_tuples(self._DEFAULT, upstream),
-            body,
-            msg=(
-                "upstream pySim now encodes relative offsets: delete "
-                "install_body_encoding_against_creation_content() once it also takes "
-                "the Fcp pattern as the baseline, and "
-                "upstream_patches/osmocom-pysim-saip-optimised-body-encoding/"
+
+class RfuProfileElementTests(unittest.TestCase):
+    """rfu2..rfu5 are PE-Dummy, an empty SEQUENCE without header (TCA SAIP
+    V3.4.1 page 16; pySim's v3.3.1 module has rfu1 too). The pinned pySim
+    carries upstream_patches/osmocom-pysim-saip-empty-pe-body/."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
+
+    def test_an_rfu_pe_decodes_and_reencodes(self) -> None:
+        from pySim.esim.saip import ProfileElement
+
+        element = ProfileElement.from_der(bytes.fromhex("ac00"))
+        self.assertEqual(element.type, "rfu2")
+        self.assertEqual(element.to_der(), bytes.fromhex("ac00"))
+
+    def test_a_package_with_an_rfu_pe_loads_in_the_workbench(self) -> None:
+        from pySim.esim.saip import asn1
+
+        header = asn1.encode("ProfileElement", ("header", {
+            "major-version": 2,
+            "minor-version": 3,
+            "iccid": bytes.fromhex("988802214365870921F3"),
+            "eUICC-Mandatory-services": {},
+            "eUICC-Mandatory-GFSTEList": [],
+        }))
+        end = asn1.encode("ProfileElement", ("end", {
+            "end-header": {"mandated": None, "identification": 1},
+        }))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "rfu.der"
+            path.write_bytes(header + bytes.fromhex("ac00") + end)
+            parsed = _load_package_from_path(path)
+        self.assertEqual([pe.type for pe in parsed["pes"].pe_list], ["header", "rfu2", "end"])
+
+
+class PinnedPySimFixesTests(unittest.TestCase):
+    """YggdraSIM relies on the fixes of the pinned pySim and checks for them."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        ensure_workspace_pysim_on_path(Path(__file__).resolve().parents[1])
+
+    def test_the_pinned_pysim_passes(self) -> None:
+        require_pinned_pysim_fixes()
+
+    def test_a_missing_fix_is_named(self) -> None:
+        from pySim.esim.saip import ProfileElement
+
+        with mock.patch.object(ProfileElement, "class_for_petype", return_value=None):
+            with self.assertRaises(PinnedPySimFixesMissing) as raised:
+                require_pinned_pysim_fixes()
+        self.assertIn("osmocom-pysim-saip-extra-profile-elements", str(raised.exception))
+
+    def test_the_fixes_of_the_former_workarounds_are_named_when_missing(self) -> None:
+        # Each stand-in behaves like pySim before the fix.
+        from pySim.esim.saip import File, ProfileElement, SecurityDomainKey
+
+        unfixed = {
+            "osmocom-pysim-saip-sd-key-access-counter": mock.patch.object(
+                SecurityDomainKey, "to_saip_dict", lambda self: {"keyIdentifier": b"\x01"}
             ),
-        )
+            "osmocom-pysim-saip-optimised-body-encoding (fillFileOffset beyond UInt16)": mock.patch.object(
+                File, "file_content_to_tuples",
+                lambda self, optimize=False: [("fillFileOffset", 66000), ("fillFileContent", b"\x01")],
+            ),
+            "osmocom-pysim-saip-empty-pe-body": mock.patch.object(
+                ProfileElement, "from_der",
+                side_effect=AttributeError("'ProfileElement' object has no attribute 'type'"),
+            ),
+        }
+        for folder, patch in unfixed.items():
+            with self.subTest(folder=folder), patch:
+                with self.assertRaises(PinnedPySimFixesMissing) as raised:
+                    require_pinned_pysim_fixes()
+                self.assertIn(folder, str(raised.exception))
+                self.assertEqual(str(raised.exception).count("osmocom-pysim-"), 1)
+
+    def test_the_card_engine_runs_without_an_unfixed_pysim(self) -> None:
+        # SIMCARD imports the registry at start-up, so an unfixed pySim must
+        # leave the engine running without pySim's view, warning once.
+        from SIMCARD import saip_pysim_specs
+
+        stderr = io.StringIO()
+        saip_pysim_specs.reset_registry_cache()
+        try:
+            with mock.patch(
+                "Tools.ProfilePackage.saip_pysim_compat.require_pinned_pysim_fixes",
+                side_effect=PinnedPySimFixesMissing("stand-in for a pySim without the fixes"),
+            ), mock.patch("sys.stderr", stderr):
+                self.assertFalse(saip_pysim_specs._ensure_pysim_saip_compat())
+                self.assertEqual(saip_pysim_specs.pysim_file_template_registry(), {})
+                self.assertIsNone(saip_pysim_specs._import_pysim_file_class())
+            self.assertEqual(stderr.getvalue().count("pySim skipped"), 1)
+        finally:
+            saip_pysim_specs.reset_registry_cache()
 
 
 if __name__ == "__main__":

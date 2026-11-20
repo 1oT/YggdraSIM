@@ -257,7 +257,7 @@
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--pc-status-color);
 }
 

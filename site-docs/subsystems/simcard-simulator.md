@@ -372,7 +372,7 @@ probed by management tools and modems:
 
 | `P1 P2` | Tag | Body |
 | --- | --- | --- |
-| `00 5A` | EID (`5A`) | Full EID OCTET STRING; SGP.22 §5.6.2.1 anchor. |
+| `00 5A` | EID (`5A`) | Full EID OCTET STRING; SGP.02 v4.2 §2.2.2 anchor. |
 | `00 42` | IIN (`42`) | First four EID bytes per GP §H.4. |
 | `00 45` | CIN (`45`) | Full EID echoed as the card image number per GP §H.5. |
 | `00 66` | Card Recognition Data (`66`) | GP §H.2 `73` template carrying CRD OID, GP version (2.3.1), card identification scheme, SCP03 with the live `i` byte, plus `65`/`66` placeholders. |
@@ -400,7 +400,7 @@ relevant section of TS 102 223 / TS 31.111:
 | `D5` | MO Short Message Control | `80 01 00` per TS 31.111 §7.3.2. |
 | `D6` | Event Download | Existing local handler that updates `state.toolkit` and queues follow-up proactive commands. |
 | `D7` | Timer Expiration | `90 00`, no body. |
-| `D9` | USSD Download | `80 01 00` per TS 31.111 §7.3.3 (tag `D9` per §9.1; `D8` reserved). |
+| `D9` | USSD Download | `80 01 00` per TS 31.111 v19.4 §7.6.2 (tag `D9` per §9.1; `D8` reserved). |
 | other | Legacy passthrough | Falls through to the SCP80 handler so plaintext OTA traffic keeps working. |
 
 When a proactive command queues into `state.pending_fetch_queue` while
@@ -692,7 +692,7 @@ the TLS engine was wired in.
 
 ### ESipa request body -- `BF4F` GetEimPackageRequest
 
-SGP.32 v1.2 §6.5.2.1 `GetEimPackageRequest` (BF4F) wrapped in
+SGP.32 v1.2 §6.3.2.6 `GetEimPackageRequest` (BF4F) wrapped in
 HTTP/1.1 framing:
 
 - `5A` 16-byte EID (mandatory).
@@ -709,7 +709,7 @@ opener.
 ### ESipa response dispatch on RECEIVE DATA
 
 through the **RECEIVE DATA** terminal response are the eIM's
-ESipa payload (SGP.32 §6.5). The toolkit:
+ESipa payload (SGP.32 v1.3 §6.1.1). The toolkit:
 
    and cleared on the **CLOSE CHANNEL** TR (success *or* failure;
    the bearer is gone either way).
@@ -734,7 +734,7 @@ is the only place that introduces the dependency. Failures from
 the dispatcher (raised exceptions, `6Axx` SW pairs) are isolated
 to their package and do not abort the rest of the chain.
 
-### LoadCRL -- `BF35` (SGP.22 §5.7.13)
+### LoadCRL -- `BF35` (SGP.22 v3.1 §5.7.12)
 
 The eUICC accepts CRL DER blobs pushed by the RSP server. Each
 non-empty `BF35` STORE DATA payload is appended to
@@ -752,7 +752,7 @@ After the dispatcher consumed at least one package and produced
 non-empty response bytes, the IPA injects a fresh **SEND DATA**
 (plus a follow-up RECEIVE DATA to drain the eIM's
 acknowledgement) directly in front of the still-pending CLOSE
-CHANNEL. The injected SEND DATA carries an SGP.32 v1.2 §6.5.2.1
+CHANNEL. The injected SEND DATA carries an SGP.32 v1.2 §6.3.2.7
 `ProvideEimPackageResult` (BF50) body wrapping:
 
 - `5A` EID,
@@ -774,7 +774,7 @@ result for cycle N".
 
 When *every* dispatched package failed (the SGP layer returned a
 non-9000 SW pair, or the dispatcher itself raised), the IPA
-emits the error branch of the SGP.32 v1.2 §6.5.2.1 EimPackageResult
+emits the error branch of the SGP.32 v1.2 §6.3.2.7 EimPackageResult
 CHOICE instead of `BF51`/`BF52`/`BF54`:
 
 ```
@@ -945,11 +945,10 @@ patch (`tests/test_simcard_gap21_coverage.py`).
 
 ### Legacy GSM (CLA=A0) cold-attach compatibility
 
-Some basebands -- particularly older Quectel BG95 / BG96 / EC25
-families and Cinterion / Telit derivatives -- still issue 3GPP
-TS 11.11 / TS 51.011 ``CLA=A0`` commands during the SIM cold-attach
-sequence even when the card answers as a UICC. Two compatibility
-hooks keep that boot path unblocked:
+Some basebands still issue 3GPP TS 11.11 / TS 51.011 ``CLA=A0``
+commands during the SIM cold-attach sequence even when the card
+answers as a UICC. Two compatibility hooks keep that boot path
+unblocked:
 
 1. ``SimulatedSimCardEngine._is_supported_cla`` accepts the
    ``0xA0..0xAF`` family and routes those APDUs through the same
@@ -1049,8 +1048,8 @@ captured-style SFI READ BINARY (`00B0870009`) that returned
 must surface identical content irrespective of whether the modem
 is reading them under DF.GSM (legacy SIM context) or ADF.USIM
 (modern UICC context). BPP issuers can lean on this
-contract heavily: a typical TCA Profile Interoperability §3.5.5
-profile only ships the canonical bytes of EF.IMSI (`6F07`),
+contract heavily: a typical TCA SAIP v3.4.1 §8.3 file system
+only ships the canonical bytes of EF.IMSI (`6F07`),
 EF.AD (`6FAD`), EF.LOCI (`6F7E`), EF.FPLMN (`6F7B`), EF.SPN
 (`6F46`), EF.LI (`6F05`), EF.HPLMN-related EFs and a handful of
 others under DF.GSM, and registers an empty FCP-only stub under
@@ -1087,18 +1086,19 @@ coverage lives in `tests/test_simcard_shared_ef_mirror.py`,
 including an optional slot that replays SFI READ BINARY against a
 locally selected BPP. The tracked suite contains no operator identity.
 
-### TCA Profile Interoperability §3.5 / §9 template default fill-in
+### TCA SAIP v3.4.1 §9 template default fill-in
 
 After the Annex H mirror has run, `rebuild_runtime_filesystem`
 calls `_apply_saip_template_defaults_to_runtime` to layer in the
-**SAIP / TS 31.102 §9 template default values** for every EF the
+**TCA SAIP v3.4.1 §9 template default values** for every EF the
 issuer left as a skeleton FCP. Operator BPPs routinely register a
 `createFCP` for files like `EF.AD`, `EF.HPPLMN`, `EF.PSLOCI`,
 `EF.LOCI`, `EF.EPSLOCI`, `EF.START-HFN`, `EF.THRESHOLD`,
 `EF.Keys`, `EF.KeysPS`, `EF.FPLMN`, `EF.NETPAR`, `EF.EPSNSC`,
 `EF.PL`, `EF.UMPC`, ... without any matching `fillFileContent`,
-because the TCA Profile Interoperability §3.5 contract says the
-card materialises the template default at runtime. Without this
+because TCA SAIP v3.4.1 §9.1 Templates rules and usage gives each
+template file a default value that applies to any content the
+Profile Package does not set. Without this
 pass the modem reads `9000` with an empty body, which historically
 caused `00B0830004` (SFI=0x03 -> EF.AD) to return `6A82` -- the EF
 existed in the FCP tree but had no SFI registered because the
@@ -1393,7 +1393,7 @@ intercept without parsing `envelope_history` by hand:
 | --- | --- | --- | --- |
 | `D4` Call Control by USIM | TS 31.111 §7.3.1.1 | `last_cc_address` (BCD digits), `last_cc_address_ton_npi`, `last_cc_capability_params` (TLV `07`/`87`), `last_cc_subaddress` (`08`/`88`), `last_cc_location_information` (`13`/`93`) | `cc_envelopes_received` |
 | `D5` MO Short Message Control | TS 31.111 §7.3.2.1 / §7.3.2.2 | `last_mo_sms_destination_address` + TON/NPI (first Address TLV = RP-DA), `last_mo_sms_sc_address` + TON/NPI (second Address TLV = RP-OA), `last_mo_sms_location_information` | `mo_sms_envelopes_received` |
-| `D9` USSD Download | TS 31.111 §7.3.3 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
+| `D9` USSD Download | TS 31.111 v19.4 §7.6.2 | `last_ussd_download_dcs`, `last_ussd_download_raw`, `last_ussd_download_text` (best-effort decoded via `_decode_text_string`) | `ussd_downloads_received` |
 
 The reply path is unchanged -- each envelope continues to return
 the canned `80 01 00` Result TLV ("Allowed, no modification")
@@ -1644,8 +1644,8 @@ provisioning JSON.
 
 ### Call-lifecycle event downloads (round 12)
 
-`_handle_event_download` now decodes the three TS 102 223 §7.4.0
-.. §7.4.2 call events:
+`_handle_event_download` now decodes the three TS 102 223 v18.3 §7.5.1
+.. §7.5.3 call events:
 
 | Event code | Latched into |
 | --- | --- |
@@ -1883,6 +1883,6 @@ python main/main.py \
 - 3GPP TS 31.111 §7.1.2 Cell Broadcast Download (envelope `D2`)
 - 3GPP TS 31.111 §7.3.1 Call Control by USIM (envelope `D4`)
 - 3GPP TS 31.111 §7.3.2 MO Short Message Control (envelope `D5`)
-- 3GPP TS 102 223 §7.1.7 Timer Expiration (envelope `D7`)
-- 3GPP TS 31.111 §7.3.3 USSD Download (envelope `D9`; `D8` reserved for intra-UICC communication)
-- TCA Profile Interoperability §3.4.2 profileHeader.connectivityParameters
+- ETSI TS 102 223 v18.3 §7.4 Timer Expiration (envelope `D7`)
+- 3GPP TS 31.111 v19.4 §7.6 USSD Download (envelope `D9`; `D8` reserved for intra-UICC communication)
+- TCA SAIP v3.4.1 §8.2.1 Profile header definition, profileHeader.connectivityParameters

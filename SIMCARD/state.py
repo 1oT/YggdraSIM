@@ -116,7 +116,7 @@ class SimProfileFsNode:
     # Other values from §11.1.1.4.9 (creation, initialisation) are
     # accepted but never set by the simulator.
     lifecycle_state: int = 0x05
-    # SAIP / TCA Profile Interoperability v2.3.1 §8.3.5 ``linkPath``
+    # TCA SAIP v3.4.1 §8.3.2 ``linkPath``
     # (``Fcp.linkPath``, ``[PRIVATE 7]`` OCTET STRING). Concatenation
     # of 2-byte FIDs walking from the MF (or, for ADF-rooted paths,
     # from the temporary ADF FID) down to the file this slot
@@ -144,11 +144,12 @@ class SimProfileAuthConfig:
 
 @dataclass
 class SimProfilePinEntry:
-    """SAIP §5.6.1 PINKey decoded from a ``pinCodes`` ProfileElement.
+    """``PINConfiguration`` of a TCA SAIP v3.4.1 §8.5.1 Pin Code PE.
 
-    ``key_reference`` is the ETSI TS 102 221 §9.5.1 P2 byte (0x01 = global
-    PIN1, 0x02..0x08 = global PIN2..PIN8, 0x0A..0x0E = ADM1..ADM5, 0x81 =
-    universal PIN1 / local PIN1 of the current application). ``value`` is
+    ``key_reference`` is the ``PINKeyReferenceValue``, which equals the
+    ETSI TS 102 221 §9.5.1 P2 byte: 0x01..0x08 = global PIN of App 1..8,
+    0x0A..0x0E = ADM1..ADM5, 0x81..0x88 = local PIN of App 1..8,
+    0x8A..0x8E = ADM6..ADM10; SAIP supports no universal PIN. ``value`` is
     the 8-byte PIN block exactly as the card would compare it (left-aligned
     ASCII digits, right-padded with 0xFF).
     """
@@ -163,7 +164,7 @@ class SimProfilePinEntry:
 
 @dataclass
 class SimProfilePukEntry:
-    """SAIP §5.6.2 PUKKey decoded from a ``pukCodes`` ProfileElement."""
+    """``PUKConfiguration`` of a TCA SAIP v3.4.1 §8.5.2 PUK Code PE."""
 
     key_reference: int = 0x01
     value: bytes = b""
@@ -191,7 +192,7 @@ class SimProfileSecurityDomainKey:
 
 @dataclass
 class SimProfileSecurityDomain:
-    """SAIP §5.5 SecurityDomain ProfileElement.
+    """TCA SAIP v3.4.1 §8.6.1 Security Domain PE (``PE-SecurityDomain``).
 
     Mirrors the on-card GP §11.4 application registry tuple plus the
     SCP03/SCP02 keyset that is normally provisioned by INSTALL [for
@@ -211,7 +212,7 @@ class SimProfileSecurityDomain:
 
 @dataclass
 class SimProfileRfmInstance:
-    """SAIP §5.7 RFM ProfileElement.
+    """TCA SAIP v3.4.1 §8.8 RFM Parameters PE (``PE-RFM``).
 
     Captures the OTA SAT remote-file-management applet binding so
     SCP80 / SCP81 dispatch can match incoming TARs to the right
@@ -293,24 +294,26 @@ class SimProfileImage:
     impi: str = ""
     nodes: list[SimProfileFsNode] = field(default_factory=list)
     auth_config: SimProfileAuthConfig | None = None
-    # SAIP profileHeader.connectivityParameters (TCA Profile
-    # Interoperability §3.4.2). Captured verbatim from the SAIP image
-    # so SGP.32 ES10b.GetConnectivityParameters can echo the same TLV
-    # stream a real card would. Empty bytes mean "not provisioned".
+    # SAIP profileHeader.connectivityParameters (TCA SAIP v3.4.1
+    # §8.2.1 Profile header definition). Captured verbatim from the
+    # SAIP image so SGP.32 ES10b.GetConnectivityParameters can echo the
+    # same TLV stream a real card would. Empty bytes mean "not
+    # provisioned".
     connectivity_params_http: bytes = b""
-    # SAIP §5.6 PIN/PUK material extracted from the BPP. The runtime
-    # ``rebuild_runtime_filesystem`` path applies these to
+    # TCA SAIP v3.4.1 §8.5 PIN and PUK codes extracted from the BPP.
+    # The runtime ``rebuild_runtime_filesystem`` path applies these to
     # ``SimCardState.chv_references`` so VERIFY PIN / UNBLOCK PIN react
     # to the issuer's secrets rather than the simulator's lab defaults.
     pin_codes: list[SimProfilePinEntry] = field(default_factory=list)
     puk_codes: list[SimProfilePukEntry] = field(default_factory=list)
-    # SAIP §5.5 SecurityDomain instances (MNO-SD, SSDs, RFM hosts).
-    # Holds GP keys + lifecycle state so the runtime can bring up
-    # SCP03/SCP80 secure channels with the issuer-provisioned material.
+    # TCA SAIP v3.4.1 §8.6.1 Security Domain PE instances (MNO-SD,
+    # SSDs, RFM hosts). Holds GP keys + lifecycle state so the runtime
+    # can bring up SCP03/SCP80 secure channels with the
+    # issuer-provisioned material.
     security_domains: list[SimProfileSecurityDomain] = field(default_factory=list)
-    # SAIP §5.7 RFM applet bindings. Non-functional placeholders today
-    # but available to ``SIMCARD.scp80`` so OTA dispatch can be wired
-    # up without re-parsing the BPP.
+    # TCA SAIP v3.4.1 §8.8 RFM Parameters bindings. Non-functional
+    # placeholders today but available to ``SIMCARD.scp80`` so OTA
+    # dispatch can be wired up without re-parsing the BPP.
     rfm_instances: list[SimProfileRfmInstance] = field(default_factory=list)
     # ProfileHeader metadata not already projected to top-level fields.
     header_major_version: int = 0
@@ -349,6 +352,10 @@ class SimProfileEntry:
     # consults this to pick the target Profile and ReturnFromFallback
     # uses it to clear the marker.
     fallback_attribute: bool = False
+    # SGP.32 v1.3 §4.4 fallbackAllowed ('9F67', BOOLEAN OPTIONAL): whether the
+    # Profile Owner authorises Fallback. None means the Profile Metadata
+    # carried no such data item, and GetProfilesInfo omits it.
+    fallback_allowed: bool | None = None
     # SGP.32 §5.9.16 enable.rollbackFlag. Set when the eIM-issued
     # ``enable`` PSMO requested rollback authorisation; cleared when
     # rollback is consumed or the IPA confirms attach.
@@ -394,8 +401,8 @@ class SimFileNode:
     # can flip the runtime state without touching the persistent image
     # in the same code path.
     lifecycle_state: int = 0x05
-    # SAIP §8.3.5 ``Fcp.linkPath`` -- chain of 2-byte FIDs walking
-    # from the MF down to the file this node mirrors. Carried from
+    # TCA SAIP v3.4.1 §8.3.2 ``Fcp.linkPath`` -- chain of 2-byte FIDs
+    # walking from the MF down to the file this node mirrors. Carried from
     # the parsed ``SimProfileFsNode.link_path`` so the runtime FS
     # builder and any later read-time alias resolver can follow the
     # link without re-walking the BPP image. See
@@ -691,35 +698,35 @@ class SimToolkitState:
     last_reader_status: bytes = b""
     last_card_apdu_response: bytes = b""
     last_card_apdu_reader: int = 0
-    # ETSI TS 102 223 §6.4.16 RUN AT COMMAND terminal-response
+    # ETSI TS 102 223 v18.3 §6.4.23 RUN AT COMMAND terminal-response
     # bookkeeping. The simulator stores both the raw bytes and a
     # utf-8 best-effort decode so test fixtures can match either
     # against the recorded modem reply.
     last_at_response: bytes = b""
     last_at_response_text: str = ""
-    # ETSI TS 102 223 §7.4.13 HCI Connectivity Event. Tracks
+    # ETSI TS 102 223 v18.3 §7.5.18 HCI connectivity event. Tracks
     # whether the most recent embedded-SE HCI gate notification
     # signalled the gate as connected (True) or disconnected
     # (False).
     hci_connectivity_active: bool = False
-    # ETSI TS 102 223 §6.4.36 SET FRAMES bookkeeping. The card
+    # ETSI TS 102 223 v18.3 §6.4.35 SET FRAMES bookkeeping. The card
     # advertises one or more frames (sub-rectangles of the display)
     # via this proactive; on a successful TR the layout is cached
     # so a follow-on toolkit applet can render relative to the
     # negotiated geometry.
     last_set_frames_layout: bytes = b""
     last_set_frames_default_id: int = 0
-    # ETSI TS 102 223 §6.4.37 GET FRAMES STATUS. The Frames
+    # ETSI TS 102 223 v18.3 §6.4.36 GET FRAME STATUS. The Frames
     # Information TLV (tag 0x49 / 0xC9) returned by the terminal
     # describes how many frames are available and which is active.
     last_frames_information: bytes = b""
-    # ETSI TS 102 223 §7.4.20 Contactless State Request event
+    # ETSI TS 102 223 v18.3 §7.5.19 Contactless state request event
     # (event code 0x16) bookkeeping. The status byte (TLV 0x40)
     # tracks whether the contactless front-end is currently
     # active.
     contactless_active: bool = False
-    # 3GPP TS 31.111 §7.5.x IMS Registration Event (0x18) and
-    # IMS Incoming Data Event (0x19). The simulator caches the
+    # 3GPP TS 31.111 v19.4 §7.5.21 IMS Registration Event (0x17) and
+    # §7.5.20 Incoming IMS Data event (0x18). The simulator caches the
     # most recent registration-status byte plus the IMS payload so
     # an STK applet can correlate the two without scraping the
     # event history.
@@ -826,8 +833,9 @@ class SimToolkitState:
     last_poll_interval_result: int = 0
     last_poll_interval_negotiated_seconds: int = 0
     last_poll_interval_negotiated_raw: bytes = b""
-    # ETSI TS 102 223 §7.4 call-lifecycle event downloads (round
-    # 12). The simulator captures the per-event metadata so STK
+    # ETSI TS 102 223 v18.3 §7.5.1-§7.5.3 MT call / call connected /
+    # call disconnected event downloads (round 12). The simulator
+    # captures the per-event metadata so STK
     # applets can correlate MT-call -> Call-Connected -> Call-
     # Disconnected without scraping ``event_history``.
     last_mt_call_transaction_id: int = 0
@@ -837,23 +845,23 @@ class SimToolkitState:
     last_call_disconnected_transaction_id: int = 0
     last_call_disconnected_cause: bytes = b""
     call_active: bool = False
-    # §7.4.4 User Activity Event. The terminal raises this when
-    # the user touches a key / dial; the simulator just bumps a
+    # TS 102 223 v18.3 §7.5.5 User activity event. The terminal
+    # raises this when the user touches a key / dial; the simulator just bumps a
     # monotonic counter so an STK applet polling for activity
     # gets a non-decreasing signal.
     user_activity_count: int = 0
-    # §7.4.x Access Technology Change. Byte 0 is the access
-    # technology code per TS 102 223 §8.85 (0x00 = GSM, 0x01 =
-    # UTRAN/UMTS, 0x02 = E-UTRAN/LTE, 0x03 = NG-RAN/5G).
+    # TS 102 223 v18.3 §7.5.12 Access Technology Change Event.
+    # Byte 0 is the code of TS 102 223 v18.3 §8.61 Access technology
+    # (0x00 = GSM, 0x03 = UTRAN, 0x08 = E-UTRAN, 0x0A = 3GPP NG-RAN).
     last_access_technology: int = 0
     access_technology_changes: int = 0
-    # §7.4.x Display Parameters Change Event. The TLV payload
-    # carries terminal-side display geometry; the simulator caches
+    # TS 102 223 v18.3 §7.5.13 Display parameters changed event. The
+    # TLV payload carries terminal-side display geometry; the simulator caches
     # the raw blob plus a counter so a UI-aware applet can react
     # without parsing every event.
     last_display_parameters: bytes = b""
     display_parameters_changes: int = 0
-    # ETSI TS 102 223 §7.4.4 Location Status Event Download
+    # ETSI TS 102 223 v18.3 §7.5.4 Location status event download
     # (round 17). The 1-byte status TLV (0x9B / 0x1B) takes one
     # of three values:
     #   0x00 normal service
@@ -867,7 +875,7 @@ class SimToolkitState:
     # values.
     last_location_status: int = 0
     location_status_changes: int = 0
-    # ETSI TS 102 223 §7.4.x Data Available Event Download
+    # ETSI TS 102 223 v18.3 §7.5.10 Data available event download
     # (round 17). The terminal raises this with TLV 0x37 (Channel
     # Data Length) -- and optionally TLV 0x38 (Channel Status) --
     # when a BIP socket has accumulated received data ready for
@@ -879,7 +887,7 @@ class SimToolkitState:
     last_data_available_channel_length: int = 0
     last_data_available_channel_status: bytes = b""
     data_available_events: int = 0
-    # ETSI TS 102 223 §7.4.16 Frames Information Change Event
+    # ETSI TS 102 223 v18.3 §7.5.17 Frames Information changed event
     # (round 17). When the user reshapes the terminal display
     # the modem forwards the new layout under TLV 0x49 (Frames
     # Information). The simulator already exposes
@@ -887,7 +895,7 @@ class SimToolkitState:
     # this counter increments on each event so applets can tell
     # how many times the user reshaped the display since boot.
     frames_information_changes: int = 0
-    # ETSI TS 102 223 §7.4.7 Card Reader Status Event Download
+    # ETSI TS 102 223 v18.3 §7.5.7 Card reader status event download
     # (round 17). Multi-card terminals broadcast a 1-byte status
     # under TLV 0xA0 (Card Reader Status) describing the reader
     # whose state changed (bit 7 = card present, bit 6 = card
@@ -958,9 +966,9 @@ class SimToolkitState:
     last_mo_sms_sc_ton_npi: int = 0
     last_mo_sms_location_information: bytes = b""
     mo_sms_envelopes_received: int = 0
-    # 3GPP TS 31.111 §7.3.3 USSD Download envelope decode (round
+    # 3GPP TS 31.111 v19.4 §7.6.2 ENVELOPE (USSD Data Download) decode (round
     # 19). The terminal forwards an MT USSD that the network
-    # initiated, wrapped in the D8 envelope; the body carries the
+    # initiated, wrapped in the D9 envelope; the body carries the
     # USSD String TLV (8A) with byte 0 = DCS, bytes 1.. = encoded
     # text. The simulator latches the DCS, the raw bytes, and a
     # best-effort decoded string so an applet can react without
@@ -1071,6 +1079,10 @@ class SimCardState:
     eim_entries: list[SimEimEntry] = field(default_factory=list)
     eum_certificate_der: bytes = b""
     euicc_certificate_der: bytes = b""
+    # SK.EUICC.ECDSA (PKCS#8 PEM) when the SGP.26 Variant O key cannot be read:
+    # generated once and kept with euicc_certificate_der in the eUICC store, so
+    # the certificate and every signature use one key across processes.
+    euicc_private_key_pem: bytes = b""
     scp03_keys: SimScp03StaticKeys = field(default_factory=SimScp03StaticKeys)
     scp80_security: SimScp80SecurityConfig = field(default_factory=SimScp80SecurityConfig)
     current_node_id: str = "3F00"
@@ -1093,6 +1105,10 @@ class SimCardState:
     # SGP.32 §2.11.2 stored eUICC Package Results (signed). Drained by the
     # IPA via ES10b.RemoveNotificationFromList referencing ``seq_number``.
     euicc_package_results: list[SimEuiccPackageResultEntry] = field(default_factory=list)
+    # The result of the last eUICC Package, kept after the IPA deleted it from the list above:
+    # a successful ES10b.ProfileRollback returns it again with a rollbackResult appended
+    # (SGP.32 v1.3 §5.9.16). One entry, replaced by every package.
+    last_euicc_package_result: SimEuiccPackageResultEntry | None = None
     # SGP.22 §5.7.13 LoadCRL persistence. Each entry is one canonical,
     # signature-validated X.509 CRL in DER form. Server certificates are
     # checked against current entries during authenticated RSP flows.
@@ -1148,8 +1164,8 @@ class SimCardState:
     # ELF graduates to ``gp_apps`` and ``gp_install`` is reset.
     gp_apps: list[SimGpAppEntry] = field(default_factory=list)
     gp_install: SimGpInstallContext = field(default_factory=SimGpInstallContext)
-    # SAIP §5.7 RFM applet bindings activated for the currently enabled
-    # Profile. Populated by ``rebuild_runtime_filesystem`` from
+    # TCA SAIP v3.4.1 §8.8 RFM Parameters bindings activated for the
+    # currently enabled Profile. Populated by ``rebuild_runtime_filesystem`` from
     # ``SimProfileImage.rfm_instances`` so SCP80/SCP81 dispatch can
     # resolve incoming TARs against the correct ADF + access policy
     # without reaching back into the BPP.

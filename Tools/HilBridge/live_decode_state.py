@@ -11,7 +11,7 @@ import re
 from SIMCARD.utils import read_tlv
 from Tools.HilBridge.live_decode_view import PacketSummary
 from yggdrasim_common.bip_stream_decode import LAYER_PAYLOAD, decode_payload
-from Tools.HilBridge.protocol import GSMTAP_SIM_APDU, GSMTAP_TYPE_SIM
+from Tools.HilBridge.protocol import GSMTAP_SIM_APDU, GSMTAP_TYPE_SIM, GSMTAP_VERSION
 from Tools.HilBridge.scp_replay import (
     ScpReplayEngine,
     SECURE_MESSAGING_CLA_BIT,
@@ -571,6 +571,18 @@ class LiveDecodeStateTracker:
         """Consume one summary row dict and advance the decode-state machine."""
         frame_number = int(row.number)
         frame_time_seconds = _parse_capture_time_seconds(row.time_text)
+        if _gsmtap_antenna(row.udp_payload_hex) not in (None, 0):
+            # A second observer of the same exchanges: the modem-side DIAG
+            # mirror sends antenna 1. The row is shown as it is; feeding it to
+            # the state machine would pair every FETCH and TERMINAL RESPONSE
+            # twice and move the idle-gap clock.
+            return StatefulFrameAnnotation(
+                frame_number=frame_number,
+                active_channel_count=self._active_channel_count(),
+                active_timer_count=self._active_timer_count(frame_time_seconds),
+                active_timers=self._active_timer_snapshots(frame_time_seconds),
+                capture_time_seconds=frame_time_seconds,
+            )
         self._row_time_seconds = frame_time_seconds
         # Apply any pending session bump (e.g. from a previous REFRESH
         # terminal response) *before* we classify the current frame, so
@@ -2029,6 +2041,20 @@ def _parse_exchange_from_udp_payload_hex(udp_payload_hex: str) -> ParsedApduExch
         sw1=int(response[-2]),
         sw2=int(response[-1]),
     )
+
+
+def _gsmtap_antenna(udp_payload_hex: str) -> int | None:
+    """Return the GSMTAP v2 ``antenna_nr`` byte, or None for anything else."""
+    normalized_hex = str(udp_payload_hex or "").strip()
+    if len(normalized_hex) < 32:
+        return None
+    try:
+        header = bytes.fromhex(normalized_hex[:32])
+    except ValueError:
+        return None
+    if int(header[0]) != GSMTAP_VERSION:
+        return None
+    return int(header[13])
 
 
 def _extract_apdu_payload(gsmtap_packet: bytes) -> bytes:

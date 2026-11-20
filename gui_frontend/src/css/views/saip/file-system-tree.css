@@ -33,7 +33,7 @@
   min-width: 0;
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg);
   padding: 3px 7px;
@@ -50,7 +50,7 @@
   height: 30px;
   max-width: 98px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
   color: var(--fg-muted);
   font-size: 11px;
@@ -91,7 +91,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 8px 3px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background-color 0.12s ease;
   user-select: none;
 }
@@ -171,7 +171,7 @@
    change alone. */
 .saip-file-caret--toggle:hover {
   background: var(--surface-alt);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-file-caret--leaf {
@@ -219,7 +219,7 @@
   letter-spacing: 0.04em;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   color: var(--fg-muted);
   flex-shrink: 0;
@@ -239,7 +239,7 @@
   letter-spacing: 0.06em;
   background: var(--accent-soft);
   border: 1px solid var(--accent-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 4px;
   color: var(--accent);
   flex-shrink: 0;

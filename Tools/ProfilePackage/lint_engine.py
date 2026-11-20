@@ -158,6 +158,7 @@ class SaipProfileLinter:
         self._check_connectivity_parameters(sections)
         self._check_identification_uniqueness(section_items)
         self._check_security_domain_integrity(sections)
+        self._check_security_domain_keys_and_protocols(sections)
         self._check_application_integrity(sections)
         self._check_fs_core_constraints(file_definitions)
         self._check_fcp_record_geometry(section_items)
@@ -2129,7 +2130,7 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-HDR-006",
                 severity="FAIL",
-                spec="TCA PP TS §3.1",
+                spec="TCA SAIP v3.4.1 §8.2.1 / §14 (Annex F)",
                 path="header.major-version / header.minor-version",
                 message=(
                     f"SAIP version {version_pair[0]}.{version_pair[1]} is not in the "
@@ -2905,6 +2906,215 @@ class SaipProfileLinter:
                     path=key_text,
                     message="securityDomain keyList is empty.",
                     recommendation="Add at least one valid SD key entry.",
+                )
+
+    # GP Card Spec v2.4 Annex H.2 (Tables H-1, H-2): Card Recognition Data
+    # names each secure channel protocol of the Security Domain in a tag '64'
+    # as the OID {globalPlatform 4 scp i}; H.1.1 gives the GlobalPlatform OID
+    # as '2A864886FC6B'.
+    _SD_RECOGNITION_SCP_OID_PREFIX = "2A864886FC6B04"
+
+    def _sd_install_parameter_protocols(self, payload: Any) -> list[str] | None:
+        """Protocol names in the SD's C9 install parameters (tag '81'), or None without the field."""
+        from .saip_asn1_decode import _decode_sd_install_scp
+
+        values = self._find_key_values(payload, "applicationSpecificParametersC9")
+        raw_hex = self._coerce_hex_string(values[0]) if len(values) > 0 else None
+        if raw_hex is None:
+            return None
+        try:
+            data = bytes.fromhex(raw_hex)
+        except ValueError:
+            return None
+        names: list[str] = []
+        position = 0
+        while position + 2 <= len(data):
+            tag = data[position]
+            length = data[position + 1]
+            value = data[position + 2:position + 2 + length]
+            if len(value) != length:
+                break
+            position += 2 + length
+            if tag != 0x81:
+                continue
+            decoded = _decode_sd_install_scp(value) or {}
+            names.append(str(decoded.get("scpName") or decoded.get("scp") or ""))
+        return [name for name in names if len(name) > 0]
+
+    def _sd_recognition_data_protocols(self, payload: Any) -> list[str] | None:
+        """Protocol names in the SD's Card Recognition Data, or None when it carries none."""
+        from .saip_asn1_decode import _scp_name
+        from .saip_dgi_decode import decode_dgi_records
+
+        values = self._find_key_values(payload, "sdPersoData")
+        if len(values) == 0 or isinstance(values[0], list) is False:
+            return None
+        blocks = [self._coerce_hex_string(item) for item in values[0]]
+        blocks = [item for item in blocks if item is not None]
+        if len(blocks) == 0:
+            return None
+        try:
+            records = decode_dgi_records(blocks)
+        except Exception:
+            # Unreadable personalisation data is another rule's finding.
+            return None
+        if records is None:
+            return None
+        oids: list[str] = []
+
+        def collect(node: Any, inside_scp_tag: bool) -> None:
+            if isinstance(node, dict):
+                tag = str(node.get("tag") or "").upper()
+                if inside_scp_tag and tag == "06":
+                    oids.append(str(node.get("raw") or "").upper())
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        collect(value, tag == "64")
+            elif isinstance(node, list):
+                for item in node:
+                    collect(item, inside_scp_tag)
+
+        collect(records, False)
+        names: list[str] = []
+        seen_recognition_data = False
+        for oid in oids:
+            if oid.startswith(self._SD_RECOGNITION_SCP_OID_PREFIX) is False:
+                continue
+            seen_recognition_data = True
+            rest = oid[len(self._SD_RECOGNITION_SCP_OID_PREFIX):]
+            if len(rest) < 2:
+                continue
+            try:
+                scp_value = int(rest[:2], 16)
+            except ValueError:
+                continue
+            names.append(_scp_name(scp_value) or f"0x{scp_value:02X}")
+        return names if seen_recognition_data else None
+
+    def _check_security_domain_keys_and_protocols(self, sections: dict[str, Any]) -> None:
+        """Key types against GP Table 11-16, and the protocols an SD declares against its keys.
+
+        A key type the table reserves installs on a tolerant card and aborts
+        the profile on a strict one (a consumer eUICC answered '9484' at the
+        key's components). The protocol lists are compared with each other
+        and with the key sets: the reserved key version ranges are the ones
+        the decoded view names (``_decode_key_version_number``).
+        """
+        from .saip_asn1_decode import _decode_key_version_number
+        from .saip_security_domain_edit import KEY_TYPE_LABELS
+
+        for key_text in sections.keys():
+            if self._base_type_from_key(key_text) != "securityDomain":
+                continue
+            payload = sections.get(key_text, {})
+            key_lists = self._find_key_values(payload, "keyList")
+            key_list = key_lists[0] if len(key_lists) > 0 and isinstance(key_lists[0], list) else []
+            key_protocols: set[str] = set()
+            component_count = 0
+            flagged = 0
+            for key_index, entry in enumerate(key_list):
+                if isinstance(entry, dict) is False:
+                    continue
+                kvn_hex = self._coerce_hex_string(entry.get("keyVersionNumber")) or ""
+                kid_hex = self._coerce_hex_string(entry.get("keyIdentifier")) or ""
+                if len(kvn_hex) == 2:
+                    # {"hex": ...} values reach here unchecked; a malformed
+                    # one is another rule's finding.
+                    try:
+                        reading = _decode_key_version_number(bytes.fromhex(kvn_hex)) or {}
+                    except ValueError:
+                        reading = {}
+                    reserved_for = str(reading.get("reservedFor") or "")
+                    if reserved_for.startswith("SCP"):
+                        key_protocols.add(reserved_for)
+                components = entry.get("keyComponents")
+                if isinstance(components, list) is False:
+                    continue
+                for component_index, component in enumerate(components):
+                    if isinstance(component, dict) is False:
+                        continue
+                    type_hex = self._coerce_hex_string(component.get("keyType")) or ""
+                    if len(type_hex) < 2:
+                        continue
+                    try:
+                        key_type = int(type_hex[:2], 16)
+                    except ValueError:
+                        continue
+                    component_count += 1
+                    label = KEY_TYPE_LABELS.get(key_type)
+                    path = f"{key_text}.keyList[{key_index}].keyComponents[{component_index}].keyType"
+                    which = f"KVN {kvn_hex or '??'} KID {kid_hex or '??'}"
+                    if label is not None and label.startswith("Reserved"):
+                        flagged += 1
+                        self._add(
+                            code="YRL-SDM-010",
+                            severity="FAIL",
+                            spec="GlobalPlatform Card Specification v2.4 Table 11-16",
+                            path=path,
+                            message=(
+                                f"Key {which} has key type '{type_hex[:2]}', which Table 11-16 reserves for "
+                                "historical reasons; an eUICC may abort the installation at this key "
+                                "(algorithm not supported)."
+                            ),
+                            recommendation=(
+                                "Use a defined key type: '88' (AES), '85' (pre-shared key for TLS), "
+                                "'89' (SM4) or '80' (DES, deprecated)."
+                            ),
+                        )
+                    elif label is None and key_type >= 0x80:
+                        flagged += 1
+                        self._add(
+                            code="YRL-SDM-011",
+                            severity="WARN",
+                            spec="GlobalPlatform Card Specification v2.4 Table 11-16",
+                            path=path,
+                            message=f"Key {which} has key type '{type_hex[:2]}', which Table 11-16 does not define (RFU).",
+                            recommendation="Use a key type the table defines, or confirm the target eUICC accepts this one.",
+                        )
+            if component_count > 0 and flagged == 0:
+                self._add(
+                    code="YRL-SDM-OK-KEYTYPES",
+                    severity="PASS",
+                    spec="GlobalPlatform Card Specification v2.4 Table 11-16",
+                    path=f"{key_text}.keyList",
+                    message=f"All {component_count} key component(s) use a key type the table defines.",
+                    recommendation="",
+                )
+
+            install = self._sd_install_parameter_protocols(payload)
+            recognition = self._sd_recognition_data_protocols(payload)
+            if install is not None and recognition is not None and set(install) != set(recognition):
+                only_install = sorted(set(install) - set(recognition))
+                only_recognition = sorted(set(recognition) - set(install))
+                parts = []
+                if only_recognition:
+                    parts.append("only in Card Recognition Data: " + ", ".join(only_recognition))
+                if only_install:
+                    parts.append("only in the install parameters: " + ", ".join(only_install))
+                self._add(
+                    code="YRL-SDM-012",
+                    severity="WARN",
+                    spec="GlobalPlatform Card Specification v2.4 Annex H.2",
+                    path=key_text,
+                    message=(
+                        "The secure channel protocols in the install parameters (C9 tag '81') and in Card "
+                        "Recognition Data (tag '64') differ: " + "; ".join(parts) + "."
+                    ),
+                    recommendation="Declare the same protocols in both, or remove the one no longer supported.",
+                )
+            declared = sorted(set(install or []) | set(recognition or []))
+            without_keys = [name for name in declared if name.startswith("SCP") and name not in key_protocols]
+            if len(without_keys) > 0 and len(key_list) > 0:
+                self._add(
+                    code="YRL-SDM-013",
+                    severity="INFO",
+                    spec="GlobalPlatform Card Specification v2.4 Annex H.2",
+                    path=key_text,
+                    message=(
+                        "Declared without a key set in the protocol's key version range: "
+                        + ", ".join(without_keys) + "."
+                    ),
+                    recommendation="Expected when the keys are loaded later; otherwise remove the declaration or add the keys.",
                 )
 
     def _check_application_integrity(self, sections: dict[str, Any]) -> None:
@@ -5011,7 +5221,7 @@ class SaipProfileLinter:
     # Algorithm-ID → (allowed_key_bytes, op_field, op_bytes, name)
     # MILENAGE: 3GPP TS 35.206; TUAK: 3GPP TS 35.231.
     #
-    # TS 35.231 Annex F.1 defines TUAK K as 128 or 256 bits, so the linter
+    # TS 35.231 v19 §5.1 defines TUAK K as 128 or 256 bits, so the linter
     # accepts both 16-byte and 32-byte K material. TOPc tracks K width
     # (128-bit TUAK -> 16-byte TOPc, 256-bit TUAK -> 32-byte TOPc).
     _AKA_ALGO_SPECS: dict[int, tuple[tuple[int, ...], str, tuple[int, ...], str]] = {
@@ -5020,7 +5230,7 @@ class SaipProfileLinter:
         3: ((16,), "opc",  (16,), "USIM-TEST-XOR"),
     }
 
-    # Fixed-length SGP.22 §B.3 fields common to all algorithms.
+    # Fixed-length AlgoParameter fields (TCA SAIP v3.4.1 §8.4.2) common to all algorithms.
     _AKA_FIXED_FIELD_BYTES: dict[str, int] = {
         "algorithmOptions": 1,
         "authCounterMax":   3,
@@ -5036,9 +5246,10 @@ class SaipProfileLinter:
         Validates ``PE-AKAParameter`` / ``PE-AKAParameter2`` key material:
 
         - ``YRL-AKA-001``: K field (``key``) must be 16 B for MILENAGE /
-          XOR-test, 16 or 32 B for TUAK (3GPP TS 35.206 §8, TS 35.231 §8).
-        - ``YRL-AKA-002``: OP(c) / TOP(c) byte length must match algorithm.
-        - ``YRL-AKA-003``: Fixed-length SGP.22 §B.3 fields out of spec
+          XOR-test, 16 or 32 B for TUAK (3GPP TS 35.206 v19 §2.4, TS 35.231 v19 §5.1).
+        - ``YRL-AKA-002``: OP(c) / TOP(c) byte length must match algorithm
+          (3GPP TS 35.206 v19 §2.3, TS 35.231 v19 §5.3).
+        - ``YRL-AKA-003``: Fixed-length AlgoParameter fields (TCA SAIP v3.4.1 §8.4.2) out of spec
           (``algorithmOptions`` 1 B, ``authCounterMax`` 3 B, ``sqnDelta``
           6 B, ``sqnAgeLimit`` 6 B, ``rotationConstants`` 5 B).
         - ``YRL-AKA-004`` (WARN): unknown ``algorithmID`` -- cannot validate
@@ -5091,7 +5302,7 @@ class SaipProfileLinter:
             self._add(
                 code="YRL-AKA-004",
                 severity="WARN",
-                spec="SGP.22 §B.3",
+                spec="TCA SAIP v3.4.1 §8.4.2",
                 path=f"{section_key}.algoConfiguration.algorithmID",
                 message=(
                     f"AKA algorithmID={algo_id} is not a recognised value "
@@ -5121,7 +5332,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-AKA-001",
                     severity="FAIL",
-                    spec="3GPP TS 35.206 §8" if algo_id == 1 else "3GPP TS 35.231 §8",
+                    spec="3GPP TS 35.206 v19 §2.4" if algo_id == 1 else "3GPP TS 35.231 v19 §5.1",
                     path=f"{section_key}.algoConfiguration.key",
                     message=(
                         f"{algo_name} K field is {actual_key_bytes} B; allowed "
@@ -5143,7 +5354,7 @@ class SaipProfileLinter:
                 self._add(
                     code="YRL-AKA-002",
                     severity="FAIL",
-                    spec="3GPP TS 35.206 §8" if algo_id == 1 else "3GPP TS 35.231 §8",
+                    spec="3GPP TS 35.206 v19 §2.3" if algo_id == 1 else "3GPP TS 35.231 v19 §5.3",
                     path=f"{section_key}.algoConfiguration.{op_field}",
                     message=(
                         f"{algo_name} {op_field} field is {actual_op_bytes} B; "
@@ -5164,7 +5375,7 @@ class SaipProfileLinter:
                     self._add(
                         code="YRL-AKA-002",
                         severity="WARN",
-                        spec="3GPP TS 35.231 Annex F",
+                        spec="3GPP TS 35.231 v19 §5.3",
                         path=f"{section_key}.algoConfiguration.{op_field}",
                         message=(
                             f"TUAK TOPc is {actual_op_bytes} B but K is "
@@ -5194,11 +5405,11 @@ class SaipProfileLinter:
                     self._add(
                         code="YRL-AKA-003",
                         severity="WARN",
-                        spec="SGP.22 §B.3",
+                        spec="TCA SAIP v3.4.1 §8.4.2",
                         path=f"{section_key}.{field_name}",
                         message=(
                             f"{algo_name} {field_name} is {actual} B; "
-                            f"expected {expected_bytes} B (SGP.22 §B.3)."
+                            f"expected {expected_bytes} B (TCA SAIP v3.4.1 §8.4.2)."
                         ),
                         recommendation=f"Re-encode {field_name} as exactly {expected_bytes} bytes.",
                         evidence={
@@ -5324,7 +5535,7 @@ class SaipProfileLinter:
                     self._add(
                         code="YRL-CDMA-002",
                         severity="WARN",
-                        spec="3GPP2 C.S0023 / GSMA SAIP Annex D",
+                        spec="3GPP2 C.S0023 / TCA SAIP v3.4.1 §8.4.3",
                         path=f"{section_key}.{field_name}",
                         message=(
                             f"CDMA {field_name} is declared but empty; "
@@ -5396,9 +5607,9 @@ class SaipProfileLinter:
 
         - ``YRL-PIN-001``: packed retry byte (maxNumOfAttemps-retryNumLeft)
           must have max-attempts nibble in 1..15 and remaining-attempts nibble
-          in 0..max (SGP.22 §B.2, ETSI TS 102 222 §6.1).
-        - ``YRL-PIN-002``: pinValue must be exactly 8 bytes (SGP.22 §B.2).
-        - ``YRL-PIN-003``: pukValue must be exactly 8 bytes (SGP.22 §B.2).
+          in 0..max (TCA SAIP v3.4.1 §8.5.1 / §8.5.2, ETSI TS 102 222 §6.1).
+        - ``YRL-PIN-002``: pinValue must be exactly 8 bytes (TCA SAIP v3.4.1 §8.5.1).
+        - ``YRL-PIN-003``: pukValue must be exactly 8 bytes (TCA SAIP v3.4.1 §8.5.2).
         - ``YRL-PIN-004`` (WARN): retry byte's remaining count exceeds max
           count -- card will typically initialise remaining to max but a
           profile that ships remaining > max will cause runtime confusion.
@@ -5435,6 +5646,9 @@ class SaipProfileLinter:
 
         value_field = "pukValue" if is_puk else "pinValue"
         label = "PUK" if is_puk else "PIN"
+        # PUKConfiguration and PINConfiguration share the value size and the
+        # retry-byte packing.
+        spec_ref = "TCA SAIP v3.4.1 §8.5.2" if is_puk else "TCA SAIP v3.4.1 §8.5.1"
 
         for idx, entry in enumerate(entries):
             rec = entry
@@ -5501,7 +5715,7 @@ class SaipProfileLinter:
                         self._add(
                             code="YRL-PIN-001",
                             severity="FAIL",
-                            spec="SGP.22 §B.2",
+                            spec=spec_ref,
                             path=f"{path_base}.maxNumOfAttemps-retryNumLeft",
                             message=(
                                 f"{label} slot {idx}: max-attempts nibble is 0 "
@@ -5515,7 +5729,7 @@ class SaipProfileLinter:
                         self._add(
                             code="YRL-PIN-004",
                             severity="WARN",
-                            spec="SGP.22 §B.2",
+                            spec=spec_ref,
                             path=f"{path_base}.maxNumOfAttemps-retryNumLeft",
                             message=(
                                 f"{label} slot {idx}: remaining-attempts nibble ({remaining}) "
@@ -5548,7 +5762,7 @@ class SaipProfileLinter:
                             evidence={"packed_byte": hex(n), "max_att": max_att, "remaining": remaining},
                         )
 
-            # PIN / PUK value length -- must be exactly 8 bytes (SGP.22 §B.2)
+            # PIN / PUK value length -- must be exactly 8 bytes (TCA SAIP v3.4.1 §8.5.1 / §8.5.2)
             val_raw = rec.get(value_field)
             if val_raw is not None:
                 val_hex = None
@@ -5567,7 +5781,7 @@ class SaipProfileLinter:
                         self._add(
                             code=code,
                             severity="FAIL",
-                            spec="SGP.22 §B.2",
+                            spec=spec_ref,
                             path=f"{path_base}.{value_field}",
                             message=(
                                 f"{label} slot {idx}: {value_field} is {byte_len} B; "

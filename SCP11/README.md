@@ -57,9 +57,9 @@ flows, but is not selected implicitly by the eSIM management relay.
   endpoints.
 - Use `SCP11/local_access` when the task is direct `ISD-R` discovery,
   `PrepareDownload`, metadata upload, or ES10c profile state control.
-- Use `SCP11/eim_local` when the task is on the eIM side: `ADD-INITIAL-EIM`,
-  `ADD-EIM`, package queues, hotfolders, response logs, or handover
-  orchestration.
+- Use `SCP11/eim_local` when the task is on the eIM side: the operation queue
+  and its background ESipa service, `ADD-INITIAL-EIM`, hotfolders, response
+  logs, or handover orchestration.
 - Use `SCP11/relay` only when an older import path or script contract depends
   on that namespace.
 

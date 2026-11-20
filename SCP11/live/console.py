@@ -31,6 +31,7 @@ import traceback
 from contextlib import contextmanager, redirect_stdout
 from urllib.parse import urlparse
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 try:
@@ -43,7 +44,10 @@ try:
 except Exception:
     class SmartcardException(Exception):
         """Stand-in when pyscard is absent; nothing raises it then."""
+from yggdrasim_common import reader_locks
 from yggdrasim_common.apdu_chunking import MAX_SHORT_APDU_DATA, plan_chunked_apdus
+from yggdrasim_common.reader_locks import ReaderBusyError
+from yggdrasim_common.batch_outcome import RULE_STREAM, BatchOutcome
 from yggdrasim_common.command_log import (
     LOG_FLAG_HELP,
     log_flag_present,
@@ -55,7 +59,9 @@ from yggdrasim_common.process_debug import (
     is_global_debug_enabled,
     set_global_debug,
 )
+from yggdrasim_common.cancellation import cancel_event_for
 from yggdrasim_common.quit_control import quit_all
+from yggdrasim_common.runtime_paths import ensure_runtime_dir
 from yggdrasim_common.stk_terminal import drain_proactive_commands, terminal_profile_apdu
 from yggdrasim_common.euicc_issuer import (
     format_ecasd_issuer_display,
@@ -200,6 +206,11 @@ class _SCP03RelayTransportAdapter:
 # The list names exactly what this console renders; icon '94' alone would add
 # up to 1024 bytes per Profile that nothing here displays.
 PROFILE_INFO_TAG_LIST = bytes.fromhex("5A4F9F7090919295999F269F679F7B")
+EIM_LISTEN_USAGE = (
+    "EIM-LISTEN [port=<n>] [calls=<n>] [idle=<seconds>] [notifications=deliver|keep] "
+    "[host=<address> cert=<pem> key=<pem> client-ca=<pem>]"
+)
+EIM_LISTEN_CERT_USAGE = "EIM-LISTEN-CERT <host name or address>... [out=<directory>]"
 
 
 @dataclass
@@ -284,6 +295,10 @@ class CommandSpec:
     # The handler brings the card up itself, so the connect phase is not run
     # before it; a transport rebuild still is, under its session policy.
     runs_own_connect: bool = False
+    # The command runs until stopped (a continuous watch): another process that wants the
+    # reader meanwhile is refused at once instead of waiting for it
+    # (yggdrasim_common.reader_locks).
+    long_running: bool = False
 
 
 @dataclass
@@ -320,6 +335,8 @@ def _hex_to_ansi(hex_color: str) -> str:
 
 class SCP11Console:
     """Interactive SCP11 command shell with persistent card session."""
+    # How another process's refusal names this console's hold.
+    READER_HOLDER_LABEL = "eSIM Management console"
     HELP_SECTION_UTILITIES = "utilities"
     HELP_SECTION_LPAD = "lpad"
     HELP_SECTION_IPAD = "ipad"
@@ -371,6 +388,7 @@ class SCP11Console:
         self._latest_snapshot: Optional[CardSnapshot] = None
         self._cached_poll_target_fqdns: List[str] = []
         self._notification_sync_attempted = False
+        self._terminal_command_lines = 0
         # Tracks whether the most recent DOWNLOAD / EIM-DOWNLOAD flow
         # managed to reach any configured eIM server. ``None`` means the
         # flag is not applicable for the command that was just dispatched.
@@ -423,19 +441,45 @@ class SCP11Console:
         finally:
             self._deactivate_locked_help_pane()
 
-    def run_commands(self, cmd_line: str) -> None:
-        """Execute a semicolon-delimited list of operator commands non-interactively."""
+    def run_commands(self, cmd_line: str) -> bool:
+        """Execute a semicolon-delimited list of operator commands non-interactively.
+
+        Returns False when a command of the batch failed (a ``[-]`` line, a
+        ``[!]`` line other than a warning, an exception), so the entry point
+        can end with exit code 1.
+        """
         try:
             self._initialize_session()
         except Exception as error:
             raise RuntimeError(f"SCP11 session initialization failed: {error}") from error
+        outcome = BatchOutcome()
         try:
             for raw_command in self._split_batch_commands(cmd_line):
-                keep_running = self._run_command_line(raw_command, show_help_on_unknown=False)
+                with outcome.command(raw_command, **self._batch_judgement(raw_command)):
+                    keep_running = self._run_command_line(raw_command, show_help_on_unknown=False)
                 if keep_running is False:
                     break
         finally:
             self._deactivate_locked_help_pane()
+        return outcome.ok
+
+    def _batch_judgement(self, raw_command: str) -> dict[str, Any]:
+        """How a batch judges one command.
+
+        EIM-LISTEN has a verdict of its own: the [!] line of a refused caller
+        does not fail the listener. A command registered as long-running (it
+        runs until stopped) reports passing events with [!] and is judged by
+        the stream rule the GUI uses.
+        """
+        words = str(raw_command or "").split()
+        verb = words[0].upper() if words else ""
+        if verb == "EIM-LISTEN":
+            self._last_eim_listen_ok = None
+            return {"verdict": lambda: getattr(self, "_last_eim_listen_ok", None)}
+        spec = self._commands.get(verb) if isinstance(getattr(self, "_commands", None), dict) else None
+        if spec is not None and bool(getattr(spec, "long_running", False)):
+            return {"rule": RULE_STREAM}
+        return {}
 
     @staticmethod
     def _split_batch_commands(cmd_line: str) -> list[str]:
@@ -448,13 +492,20 @@ class SCP11Console:
         return commands
 
     def _run_command_line(self, raw_line: str, show_help_on_unknown: bool = True) -> bool:
-        return run_with_command_log(
-            raw_line,
-            lambda line: self._dispatch_command_line(line, show_help_on_unknown),
-            shell="eSIM Management",
-            refused=True,
-            debug=self._command_log_debug,
-        )
+        # Counted so a handler can tell a line typed at the shell (or given with
+        # --cmd) from a command another caller dispatches: only the first may
+        # name files for the host to open or write.
+        self._terminal_command_lines += 1
+        try:
+            return run_with_command_log(
+                raw_line,
+                lambda line: self._dispatch_command_line(line, show_help_on_unknown),
+                shell="eSIM Management",
+                refused=True,
+                debug=self._command_log_debug,
+            )
+        finally:
+            self._terminal_command_lines -= 1
 
     @contextmanager
     def _command_log_debug(self) -> Iterator[None]:
@@ -514,6 +565,18 @@ class SCP11Console:
         # matchingId). The transport rebuild in _enter_command_session
         # carries the raw-APDU setting over to the new channel.
         argument, command_debug = self._extract_command_debug_flag(argument)
+        try:
+            reader_hold = self._hold_reader_for_command(spec)
+        except ReaderBusyError as busy:
+            print(f"[!] {command_upper} not started: {busy}.")
+            return True
+        try:
+            return self._run_command_body(spec, command_upper, argument, command_debug)
+        finally:
+            if reader_hold is not None:
+                reader_hold.release()
+
+    def _run_command_body(self, spec: CommandSpec, command_upper: str, argument: str, command_debug: bool) -> bool:
         previous_global_debug: Optional[str] = None
         previous_transport_debug: Optional[bool] = None
         if command_debug:
@@ -625,6 +688,62 @@ class SCP11Console:
 
     def _can_rebuild_command_transport(self) -> bool:
         return callable(getattr(self.client, "_build_apdu_channel", None))
+
+    def _hold_reader_for_command(self, spec: CommandSpec) -> Optional[reader_locks.ReaderHold]:
+        """Hold the console's reader against other processes for one card command.
+
+        A card command rebuilds the transport, which resets the card, and
+        releases it at the end, which powers the card down; the GUI, the HIL
+        bridge or an MCP card session on the same reader would lose its card
+        under either. The hold spans the whole command, the transport resets
+        inside it included (yggdrasim_common.reader_locks). Raises
+        ReaderBusyError when another process keeps the reader.
+        """
+        if getattr(spec, "session_policy", SessionPolicy.SHARED) == SessionPolicy.SHARED:
+            return None
+        if self._can_rebuild_command_transport() is False:
+            return None
+        reader = self._local_reader_name()
+        if len(reader) == 0:
+            return None
+        verb = spec.name
+
+        def _say_waiting(other: Optional[reader_locks.HolderRecord]) -> None:
+            named = other.describe() if other is not None else "another process"
+            print(f"[*] {verb}: waiting for the reader, held by {named}.")
+
+        return reader_locks.acquire(
+            reader,
+            f"{verb} in the {self.READER_HOLDER_LABEL}",
+            long_running=bool(getattr(spec, "long_running", False)),
+            on_wait=_say_waiting,
+        )
+
+    def _local_reader_name(self) -> str:
+        """The PC/SC name of the reader the next transport opens; "" for none.
+
+        The simulated card and a Remote Lab reader are no local reader.
+        """
+        from yggdrasim_common.card_backend import is_simulated_card_backend
+
+        if is_simulated_card_backend():
+            return ""
+        cfg = getattr(getattr(self, "client", None), "cfg", None)
+        if cfg is None or len(str(getattr(cfg, "READER_NAME", "") or "").strip()) > 0:
+            return ""
+        try:
+            index = int(getattr(cfg, "READER_INDEX", 0))
+        except (TypeError, ValueError):
+            return ""
+        try:
+            from smartcard.System import readers as list_pcsc_readers
+
+            found = list(list_pcsc_readers() or [])
+        except Exception:  # noqa: BLE001 -- the transport build reports a PC/SC fault itself
+            return ""
+        if index < 0 or index >= len(found):
+            return ""
+        return str(found[index])
 
     @staticmethod
     def _command_runs_own_connect(command_name: str) -> bool:
@@ -1807,6 +1926,26 @@ class SCP11Console:
             visible_in_help=False,
             session_policy=SessionPolicy.SOFT_RESET,
         )
+        # SHARED: no card transport is held while the operator types; the
+        # handler opens one around the send, after the confirmation.
+        self._add_command(
+            "ADD-INITIAL-EIM",
+            "ADD-INITIAL-EIM",
+            "Wizard: build ES10b.AddInitialEim, then send eUICCMemoryReset + AddInitialEim",
+            self._cmd_add_initial_eim,
+            section=self.HELP_SECTION_IPAD,
+            session_policy=SessionPolicy.SHARED,
+        )
+        self._add_command(
+            "EIM-CERT-STORE",
+            "EIM-CERT-STORE [LIST|IMPORT <file> [name] [--overwrite]|RENAME <old> <new>|REMOVE <name>|"
+            "VALUES|EDIT <field> <old> <new>|FORGET <field> <value>|CONFIGS|CONFIG-RENAME <old> <new>|"
+            "CONFIG-DELETE <name>]",
+            "Certificates, saved values and configurations of the AddInitialEim builder",
+            self._cmd_eim_cert_store,
+            section=self.HELP_SECTION_IPAD,
+            session_policy=SessionPolicy.SHARED,
+        )
         self._add_command(
             "GET-ALL-DATA",
             "GET-ALL-DATA",
@@ -1844,6 +1983,24 @@ class SCP11Console:
             trigger_notification_sync=True,
             session_policy=SessionPolicy.HARD_RESET,
         )
+        self._add_command(
+            "EIM-LISTEN",
+            EIM_LISTEN_USAGE,
+            "IPAd eIM package injection: answer ESipa.TransferEimPackage until Ctrl-C (loopback HTTP, or HTTPS)",
+            self._cmd_eim_listen,
+            section=self.HELP_SECTION_IPAD,
+            session_policy=SessionPolicy.HARD_RESET,
+            runs_own_connect=True,
+            long_running=True,
+        )
+        self._add_command(
+            "EIM-LISTEN-CERT",
+            EIM_LISTEN_CERT_USAGE,
+            "Make the self-signed certificate EIM-LISTEN serves HTTPS with",
+            self._cmd_eim_listen_cert,
+            section=self.HELP_SECTION_IPAD,
+            session_policy=SessionPolicy.SHARED,
+        )
 
     def _add_command(
         self,
@@ -1857,6 +2014,7 @@ class SCP11Console:
         trigger_notification_sync: bool = False,
         session_policy: str = SessionPolicy.SHARED,
         runs_own_connect: bool = False,
+        long_running: bool = False,
     ) -> None:
         spec = CommandSpec(
             name=name,
@@ -1869,6 +2027,7 @@ class SCP11Console:
             trigger_notification_sync=trigger_notification_sync,
             session_policy=session_policy,
             runs_own_connect=runs_own_connect,
+            long_running=long_running,
         )
         self._commands[name] = spec
         self._primary_commands.append(name)
@@ -2275,6 +2434,270 @@ class SCP11Console:
             self._cache_poll_target_fqdns_from_eim_response(response)
         return True
 
+    def _cmd_add_initial_eim(self, argument: str) -> bool:
+        """Build AddInitialEim in a wizard, show the run, and send it once confirmed.
+
+        Every run sends eUICCMemoryReset (resetEimConfigData,
+        resetImmediateEnableConfig) first: SGP.32 v1.3 §5.9.4 refuses
+        AddInitialEim while any eIM Configuration Data is stored.
+        """
+        from SCP11.shared.eim_builder import (
+            EimBuilderError,
+            build_add_initial_eim,
+            offer_save_configuration,
+            run_configured_wizard,
+        )
+
+        if len(argument.strip()) > 0:
+            print("[!] Usage: ADD-INITIAL-EIM (the wizard asks for each EimConfigurationData member)")
+            return True
+        print(f"\n{self._style.bold}[+] AddInitialEim wizard (SGP.32 v1.3 §5.9.4){self._style.end}")
+        outcome = run_configured_wizard(input, print)
+        if outcome is None:
+            return True
+        try:
+            result = build_add_initial_eim(outcome.inputs)
+        except EimBuilderError as error:
+            print(f"{self._style.red}[!] AddInitialEim not built: {error}{self._style.end}")
+            return True
+        self._print_add_initial_eim_build(result)
+        offer_save_configuration(input, print, outcome.inputs, outcome.configuration)
+        print(
+            f"\n{self._style.yellow}[!] Warning: sending runs eUICCMemoryReset first: it removes every eIM "
+            f"Configuration Data on the card and resets immediate Profile enabling.{self._style.end}"
+        )
+        while True:
+            try:
+                answer = input(
+                    "  > Send eUICCMemoryReset, then AddInitialEim, to the card? "
+                    "[y = send, s = show the full APDU script, Enter = no]: "
+                ).strip().upper()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer in ("S", "SCRIPT"):
+                self._print_add_initial_eim_script(result)
+                continue
+            break
+        if answer not in ("Y", "YES"):
+            print("[-] Nothing was sent.")
+            return True
+        reason = "ADD-INITIAL-EIM"
+        rebuild = self._can_rebuild_command_transport()
+        if rebuild:
+            self._reset_card_transport_for_command(reason=reason)
+        try:
+            self._connect_card_for_command(reason=reason)
+            self._send_add_initial_eim(result.request)
+        finally:
+            if rebuild:
+                self._disconnect_card_transport_after_command(reason=reason)
+            self._session_dirty = True
+        return True
+
+    def _send_add_initial_eim_hex(self, argument: str) -> bool:
+        """Send a built AddInitialEimRequest given as hex, eUICCMemoryReset first.
+
+        The GUI send step (``scp11_live.add_initial_eim``) builds the request
+        from its form and runs this after the connect phase; the outcome is
+        left in ``_add_initial_eim_succeeded`` for the stream's final status.
+        """
+        from SCP11.shared.ber_tlv import read_single_ber_tlv
+
+        self._add_initial_eim_succeeded = False
+        try:
+            request = bytes.fromhex(str(argument or "").strip())
+            tag, _value, _raw = read_single_ber_tlv(request)
+        except ValueError as error:
+            print(f"{self._style.red}[!] Not an AddInitialEimRequest: {error}{self._style.end}")
+            return True
+        if tag != b"\xBF\x57":
+            print(f"{self._style.red}[!] Not an AddInitialEimRequest: tag {tag.hex().upper()}{self._style.end}")
+            return True
+        self._add_initial_eim_succeeded = self._send_add_initial_eim(request)
+        return True
+
+    def _print_add_initial_eim_build(self, result: Any) -> None:
+        print(f"\n{self._style.bold}[+] AddInitialEimRequest{self._style.end}")
+        for indent, label, value in result.summary_rows():
+            print(f"    | {'  ' * indent}{label:<26}: {value}")
+        for finding in result.findings:
+            color = self._style.yellow if finding.severity == "warning" else self._style.cyan
+            print(f"{color}[*] {finding.severity}: {finding.text}{self._style.end}")
+        print(f"\n{self._style.bold}[+] APDU sequence{self._style.end}")
+        for step in result.script:
+            shown = step.apdu_hex
+            if len(step.apdu) > 24:
+                shown = f"{step.apdu_hex[:20]}... ({len(step.apdu)} bytes)"
+            print(f"    | {step.label:<52} {shown}")
+
+    def _print_add_initial_eim_script(self, result: Any) -> None:
+        from SCP11.shared.eim_builder import SCRIPT_CHANNEL_NOTE
+
+        print(f"\n{self._style.bold}[+] APDU script{self._style.end}")
+        for step in result.script:
+            print(f"    # {step.label}")
+            print(f"    {step.apdu_hex}")
+        print(f"{self._style.cyan}[*] note: {SCRIPT_CHANNEL_NOTE}{self._style.end}")
+        single = result.request_apdu
+        print(f"\n{self._style.bold}[+] AddInitialEim as one APDU{self._style.end}")
+        print(f"    # {single.label}")
+        print(f"    {single.apdu_hex}")
+
+    def _send_add_initial_eim(self, request: bytes) -> bool:
+        """Send eUICCMemoryReset, then the AddInitialEimRequest; True when the card answers addInitialEimOk."""
+        from SCP11.shared.eim_configuration_data import (
+            decode_add_initial_eim_response,
+            decode_euicc_memory_reset_response,
+            encode_euicc_memory_reset_request,
+        )
+
+        reset_request = encode_euicc_memory_reset_request()
+        print(f"\n{self._style.cyan}[*] ES10b eUICCMemoryReset: {reset_request.hex().upper()}{self._style.end}")
+        try:
+            reset_response = self._send_store_data_with_logical_fallback(reset_request, "ES10b: eUICCMemoryReset")
+        except OSError as error:
+            print(f"{self._style.red}[!] eUICCMemoryReset failed ({error}); AddInitialEim was not sent.{self._style.end}")
+            return False
+        try:
+            reset = decode_euicc_memory_reset_response(reset_response)
+        except ValueError as error:
+            print(
+                f"{self._style.red}[!] The eUICCMemoryReset answer {reset_response.hex().upper() or '(empty)'} "
+                f"did not decode ({error}); AddInitialEim was not sent.{self._style.end}"
+            )
+            return False
+        for line in reset.describe():
+            print(f"    | {line}")
+        if reset.allows_add_initial_eim is False:
+            print(f"{self._style.red}[!] eUICCMemoryReset was refused; AddInitialEim was not sent.{self._style.end}")
+            return False
+        print(f"{self._style.cyan}[*] ES10b AddInitialEim: {len(request)} bytes{self._style.end}")
+        response = self._send_store_data_with_logical_fallback(request, "ES10b: AddInitialEim")
+        try:
+            decoded = decode_add_initial_eim_response(response)
+        except ValueError as error:
+            print(
+                f"{self._style.red}[!] The AddInitialEim answer {response.hex().upper() or '(empty)'} "
+                f"did not decode: {error}{self._style.end}"
+            )
+            return False
+        if decoded.ok:
+            entries = ", ".join(decoded.entries) or "no entry"
+            print(f"{self._style.green}[+] AddInitialEim: addInitialEimOk ({entries}){self._style.end}")
+            return True
+        print(
+            f"{self._style.red}[!] AddInitialEim: addInitialEimError {decoded.error_name} "
+            f"({decoded.error_code}){self._style.end}"
+        )
+        return False
+
+    def _cmd_eim_cert_store(self, argument: str) -> bool:
+        from SCP11.shared import eim_builder_store as store
+        from yggdrasim_common.secure_files import read_bounded_regular_file
+
+        usage = (
+            "[!] Usage: EIM-CERT-STORE [LIST|IMPORT <file> [name] [--overwrite]|RENAME <old> <new>|"
+            "REMOVE <name>|VALUES|EDIT <field> <old> <new>|FORGET <field> <value>|CONFIGS|"
+            "CONFIG-RENAME <old> <new>|CONFIG-DELETE <name>]"
+        )
+        try:
+            tokens = shlex.split(argument)
+        except ValueError as error:
+            print(f"[!] EIM-CERT-STORE: {error}")
+            return True
+        operation = tokens[0].upper() if tokens else "LIST"
+        rest = tokens[1:]
+        try:
+            if operation == "LIST" and not rest:
+                entries, problems = store.list_certificates()
+                print(f"\n{self._style.bold}[+] eIM certificate store: {store.certificates_dir()}{self._style.end}")
+                if not entries:
+                    print("    | (no certificate stored; EIM-CERT-STORE IMPORT <file>)")
+                for entry in entries:
+                    print(f"    | {entry.name:<28}: {entry.summary()}")
+                    print(f"    |   {'SubjectKeyIdentifier':<26}: {entry.ski_hex or '(absent)'}")
+                    if entry.san_registered_ids:
+                        print(f"    |   {'SAN registeredID':<26}: {', '.join(entry.san_registered_ids)}")
+                for problem in problems:
+                    print(f"{self._style.yellow}[*] {problem}{self._style.end}")
+                return True
+            if operation == "IMPORT" and 1 <= len(rest) <= 3:
+                overwrite = "--overwrite" in [token.lower() for token in rest]
+                positional = [token for token in rest if token.lower() != "--overwrite"]
+                if not 1 <= len(positional) <= 2:
+                    print(usage)
+                    return True
+                path = Path(positional[0]).expanduser()
+                try:
+                    raw = read_bounded_regular_file(path, store.MAX_SOURCE_BYTES)
+                except (OSError, ValueError) as error:
+                    print(f"[!] EIM-CERT-STORE: {path} could not be read: {error}")
+                    return True
+                name = positional[1] if len(positional) == 2 else ""
+                report = store.import_certificates(raw, name=name, overwrite=overwrite)
+                for entry in report.stored:
+                    print(f"{self._style.green}[+] Stored {entry.name}: {entry.summary()}{self._style.end}")
+                    if entry.name in report.same_as:
+                        print(f"    | same certificate as the stored {report.same_as[entry.name]}")
+                if report.private_keys_dropped:
+                    print(f"[*] {report.private_keys_dropped} private key block(s) in the file were not stored.")
+                return True
+            if operation == "RENAME" and len(rest) == 2:
+                renamed, updated = store.rename_certificate(rest[0], rest[1])
+                print(f"[+] Renamed {rest[0]} to {renamed}; the saved values follow.")
+                if updated:
+                    print(f"    | configurations updated: {', '.join(updated)}")
+                return True
+            if operation == "REMOVE" and len(rest) == 1:
+                removed = store.remove_certificate(rest[0])
+                print(f"[+] Removed {removed}.")
+                users = store.configurations_using_certificate(removed)
+                if users:
+                    print(
+                        f"{self._style.yellow}[*] Configurations still naming {removed}: {', '.join(users)}."
+                        f"{self._style.end}"
+                    )
+                return True
+            if operation == "EDIT" and len(rest) == 3:
+                if store.edit_value(rest[0], rest[1], rest[2]):
+                    print(f"[+] Changed {rest[0]} {rest[1]!r} to {rest[2]!r}.")
+                else:
+                    print(f"[!] {rest[0]} holds no saved value {rest[1]!r}.")
+                return True
+            if operation == "CONFIGS" and not rest:
+                from SCP11.shared.eim_builder import configuration_summary
+
+                configurations = store.load_configurations()
+                print(f"\n{self._style.bold}[+] Configurations: {store.configurations_path()}{self._style.end}")
+                if not configurations:
+                    print("    | (none saved; ADD-INITIAL-EIM offers to save one after a build)")
+                for name in sorted(configurations):
+                    print(f"    | {name:<28}: {configuration_summary(configurations[name])}")
+                return True
+            if operation == "CONFIG-RENAME" and len(rest) == 2:
+                print(f"[+] Renamed configuration {rest[0]} to {store.rename_configuration(rest[0], rest[1])}.")
+                return True
+            if operation == "CONFIG-DELETE" and len(rest) == 1:
+                print(f"[+] Deleted configuration {store.delete_configuration(rest[0])}.")
+                return True
+            if operation == "VALUES" and not rest:
+                values = store.load_values()
+                print(f"\n{self._style.bold}[+] Saved values: {store.values_path()}{self._style.end}")
+                for field_name in store.VALUE_FIELDS:
+                    print(f"    | {field_name:<16}: {', '.join(values[field_name]) or '(none)'}")
+                return True
+            if operation == "FORGET" and len(rest) == 2:
+                if store.forget_value(rest[0], rest[1]):
+                    print(f"[+] Forgot {rest[0]} {rest[1]!r}.")
+                else:
+                    print(f"[!] {rest[0]} holds no saved value {rest[1]!r}.")
+                return True
+        except store.EimBuilderStoreError as error:
+            print(f"{self._style.red}[!] EIM-CERT-STORE: {error}{self._style.end}")
+            return True
+        print(usage)
+        return True
+
     def _cmd_get_all_data(self, argument: str) -> bool:
         if len(argument.strip()) > 0:
             print("[!] Usage: GET-ALL-DATA")
@@ -2424,6 +2847,158 @@ class SCP11Console:
             # shlex round-trip on the common no-selector path.
             return text, None, ""
         return " ".join(kept), selected, ""
+
+    @staticmethod
+    def _parse_eim_listen_options(argument: str) -> Tuple[Dict[str, Any], str]:
+        """Read the options of EIM-LISTEN; returns them and '' or a problem text."""
+        from SCP11.live.transfer_provider import DEFAULT_PORT
+
+        options: Dict[str, Any] = {
+            "host": "127.0.0.1", "port": DEFAULT_PORT, "max_calls": None, "idle_seconds": None,
+            "keep_notifications": False, "cert": "", "key": "", "client_ca": "",
+        }
+        known = ("port", "calls", "idle", "notifications", "host", "cert", "key", "client-ca")
+        try:
+            tokens = shlex.split(str(argument or ""))
+        except ValueError as error:
+            return options, str(error)
+        for token in tokens:
+            key, separator, value = token.partition("=")
+            name = key.strip().lower()
+            try:
+                if separator != "=" or name not in known:
+                    return options, f"{token!r} is no option of EIM-LISTEN ({', '.join(known)})"
+                if name in ("host", "cert", "key", "client-ca"):
+                    if len(value.strip()) == 0:
+                        return options, f"{name}= needs a value"
+                    options[name.replace("-", "_")] = value.strip()
+                elif name == "notifications":
+                    choice = value.strip().lower()
+                    if choice not in ("deliver", "keep"):
+                        return options, "notifications is deliver or keep"
+                    options["keep_notifications"] = choice == "keep"
+                elif name == "port":
+                    options["port"] = int(value)
+                    if not 0 <= options["port"] <= 65535:
+                        return options, "port is 0 (any free port) to 65535"
+                elif name == "calls":
+                    options["max_calls"] = int(value)
+                    if options["max_calls"] < 1:
+                        return options, "calls is 1 or more"
+                else:
+                    options["idle_seconds"] = float(value)
+                    if not options["idle_seconds"] > 0:
+                        return options, "idle is a number of seconds above 0"
+            except ValueError:
+                return options, f"{token!r} does not carry a number"
+        return options, ""
+
+    def _eim_listen_tls_context(self, options: Dict[str, Any]) -> Tuple[Any, str]:
+        """The TLS context EIM-LISTEN was asked for, or None for plain HTTP; '' or a problem text."""
+        from SCP11.live.transfer_provider import listener_tls_context
+        from SCP11.shared.esipa_transfer import is_loopback
+
+        named = [name for name in ("cert", "key", "client_ca") if len(options[name]) > 0]
+        if len(named) == 0:
+            if not is_loopback(str(options["host"])):
+                return None, ("off the loopback EIM-LISTEN serves HTTPS only: give cert=, key= and client-ca= "
+                              "(EIM-LISTEN-CERT makes the first two)")
+            return None, ""
+        if len(named) != 3:
+            return None, "HTTPS takes cert=, key= and client-ca= together"
+        if self._terminal_command_lines <= 0:
+            # Any other caller (the GUI's action dispatch) would have the server host open files it names.
+            return None, "cert=, key= and client-ca= are read from a terminal command line only"
+        try:
+            context = listener_tls_context(
+                os.path.expanduser(options["cert"]),
+                os.path.expanduser(options["key"]),
+                os.path.expanduser(options["client_ca"]),
+            )
+        except ValueError as error:
+            return None, str(error)
+        return context, ""
+
+    def _cmd_eim_listen(self, argument: str) -> bool:
+        # Read by a caller that reports the run as a whole (the GUI's stream): True once the listener
+        # ran to its end, whatever single calls it refused on the way.
+        self._last_eim_listen_ok = False
+        options, problem = self._parse_eim_listen_options(argument)
+        tls_context = None
+        if len(problem) == 0:
+            tls_context, problem = self._eim_listen_tls_context(options)
+        if len(problem) > 0:
+            print(f"{self._style.red}[!] {problem}{self._style.end}")
+            print(f"{self._style.yellow}[!] Usage: {EIM_LISTEN_USAGE}{self._style.end}")
+            return True
+        if tls_context is None:
+            where = "on the loopback, plain HTTP"
+        else:
+            where = f"on {options['host']}, HTTPS with the eIM's client certificate"
+        print(
+            f"{self._style.cyan}[*] Taking injected eIM packages (ESipa.TransferEimPackage) {where}; "
+            f"Ctrl-C stops.{self._style.end}"
+        )
+        try:
+            self.orchestrator.run_eim_listen(
+                host=options["host"],
+                port=options["port"],
+                max_calls=options["max_calls"],
+                idle_seconds=options["idle_seconds"],
+                keep_notifications=options["keep_notifications"],
+                tls_context=tls_context,
+                # The stop flag of a caller that can ask for one (the GUI's Cancel); a terminal has Ctrl-C.
+                stop=cancel_event_for(self),
+            )
+            self._last_eim_listen_ok = True
+        except Exception as error:
+            print(f"{self._style.red}[!] EIM-LISTEN failed: {error}{self._style.end}")
+        return True
+
+    def _cmd_eim_listen_cert(self, argument: str) -> bool:
+        """Make the self-signed certificate an HTTPS EIM-LISTEN serves, as two files that are never replaced."""
+        from SCP11.shared import tls_identity
+
+        usage = f"{self._style.yellow}[!] Usage: {EIM_LISTEN_CERT_USAGE}{self._style.end}"
+        if self._terminal_command_lines <= 0:
+            print(f"{self._style.red}[!] EIM-LISTEN-CERT writes files: it is read from a terminal command line only."
+                  f"{self._style.end}")
+            return True
+        try:
+            tokens = shlex.split(str(argument or ""))
+        except ValueError as error:
+            print(f"{self._style.red}[!] {error}{self._style.end}")
+            print(usage)
+            return True
+        names: List[str] = []
+        out = ""
+        for token in tokens:
+            if token.lower().startswith("out=") and len(token) > 4:
+                out = token[4:]
+            elif "=" in token or token.startswith("-"):
+                print(f"{self._style.red}[!] {token!r} is neither a name, an address nor out=<directory>.{self._style.end}")
+                print(usage)
+                return True
+            else:
+                names.append(token)
+        if len(names) == 0:
+            print(usage)
+            return True
+        directory = Path(os.path.expanduser(out)) if len(out) > 0 else Path(ensure_runtime_dir("SCP11", "eim_listen"))
+        common_name = names[0] if len(names[0]) <= 64 else "YggdraSIM IPAd"
+        try:
+            certificate, key = tls_identity.issue_self_signed(common_name, names, role=tls_identity.ROLE_SERVER)
+            certificate_path, key_path = tls_identity.write_pair(directory, "eim-listen", certificate, key)
+            described = tls_identity.describe(certificate_path)
+        except tls_identity.TlsIdentityError as error:
+            print(f"{self._style.red}[!] {error}{self._style.end}")
+            return True
+        print(f"{self._style.green}[+] Listener certificate: {certificate_path}{self._style.end}")
+        print(f"    {described}")
+        print(f"{self._style.green}[+] Its private key (mode 0600): {key_path}{self._style.end}")
+        print(f"[*] EIM-LISTEN host=<address> cert={certificate_path} key={key_path} "
+              "client-ca=<the eIM's certificate or its CA>")
+        return True
 
     def _cmd_eim_download(self, argument: str) -> bool:
         remaining, entry_indices, selection_error = self._extract_eim_entry_selection(argument)
@@ -2717,6 +3292,9 @@ class SCP11Console:
                 continue
             eid_value = self._eid_from_get_euicc_data_response(response)
             if eid_value is not None:
+                from SCP11.eim_local.engine.detected import register_detected_eid
+
+                register_detected_eid(eid_value.hex().upper(), "the eSIM Management console")
                 return eid_value.hex().upper()
             errors.append(f"{log_name}: no EID in response {response.hex().upper() or '(empty)'}")
         if len(errors) > 0:
@@ -2819,8 +3397,9 @@ class SCP11Console:
             encoded_address = address_text.encode("utf-8")
             inner = _build_tlv(bytes.fromhex("80"), encoded_address)
             payload = _build_tlv(bytes.fromhex("BF3F"), inner)
-            apdu = self._build_store_data_apdu(payload)
-            response = self.apdu_channel.send(apdu, "SET: Default SM-DP+ Address")
+            # ES10 runs on the ISD-R's logical channel; a basic-channel STORE DATA reaches the
+            # application selected there and a card answers '6D00'.
+            response = self._send_store_data_with_logical_fallback(payload, "SET: Default SM-DP+ Address")
             print(
                 f"{self._style.green}[+] Default SM-DP+ APDU response: "
                 f"{response.hex().upper()}{self._style.end}"
@@ -4443,8 +5022,9 @@ class SCP11Console:
             aid = self.cfg.AID_ISD_R
             select_apdu = bytes([0x00, 0xA4, 0x04, 0x00, len(aid)]) + aid
             self.apdu_channel.send(select_apdu, f"{log_name} [STK MODE SELECT ISD-R]")
-            # TERMINAL PROFILE opens a card session (TS 102 223 §5.4), so
-            # it goes out only when the reset above actually started one;
+            # TERMINAL PROFILE belongs to the UICC initialization procedure
+            # (TS 102 223 v18.3 §5.1), so it goes out only when the reset
+            # above actually started a card session;
             # mid-session it would restart the toolkit negotiation the STK
             # bring-up already completed. The toolchain's one profile claims
             # every facility, so the proactive commands a toolkit card

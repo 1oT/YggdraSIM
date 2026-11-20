@@ -4592,6 +4592,66 @@
       },
     }));
     ribbon.appendChild(helpGrp.group);
+    saipRibbonApplyTabs(ribbon);
+  }
+
+  // One command group at a time behind a tab per group, so every key keeps
+  // its full legend in one row. The chosen tab survives the re-render each
+  // package change triggers (commandState.saipWorkbench.ribbonTab).
+  function saipRibbonApplyTabs(ribbon) {
+    var groups = Array.prototype.slice.call(
+      ribbon.querySelectorAll(":scope > .saip-ribbon-group")
+    );
+    if (groups.length < 2) return;
+    var wb = commandState.saipWorkbench;
+    var labels = groups.map(function (group) {
+      var labelEl = group.querySelector(".saip-ribbon-group-label");
+      return labelEl ? labelEl.textContent : "";
+    });
+    var active = labels.indexOf(wb.ribbonTab);
+    if (active < 0) active = 0;
+    ribbon.classList.add("saip-ribbon--tabbed");
+    var tabs = document.createElement("div");
+    tabs.className = "saip-ribbon-tabs";
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "SAIP command groups");
+    var tabEls = [];
+    function select(index, focus) {
+      wb.ribbonTab = labels[index];
+      tabEls.forEach(function (tab, i) {
+        var on = i === index;
+        tab.setAttribute("aria-selected", on ? "true" : "false");
+        tab.tabIndex = on ? 0 : -1;
+        tab.classList.toggle("is-active", on);
+        groups[i].hidden = !on;
+      });
+      if (focus) tabEls[index].focus();
+    }
+    groups.forEach(function (group, index) {
+      group.id = "saip-ribbon-panel-" + index;
+      group.setAttribute("role", "tabpanel");
+      var tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "saip-ribbon-tab";
+      tab.id = "saip-ribbon-tab-" + index;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-controls", group.id);
+      tab.textContent = labels[index];
+      group.setAttribute("aria-labelledby", tab.id);
+      tab.addEventListener("click", function () {
+        select(index, false);
+      });
+      tab.addEventListener("keydown", function (event) {
+        var step = event.key === "ArrowRight" ? 1 : (event.key === "ArrowLeft" ? -1 : 0);
+        if (!step) return;
+        event.preventDefault();
+        select((index + step + groups.length) % groups.length, true);
+      });
+      tabs.appendChild(tab);
+      tabEls.push(tab);
+    });
+    ribbon.insertBefore(tabs, ribbon.firstChild);
+    select(active, false);
   }
 
   // ``saipFocusOpenForm`` / ``saipFocusSaveForm`` retired: the
@@ -5031,6 +5091,11 @@
     var wb = commandState.saipWorkbench;
     var collapsed = Boolean(wb.packageDrawerCollapsed);
     drawer.classList.toggle("saip-drawer--collapsed", collapsed);
+    // The drawer is this module's index pane: status-line key 2 reads its
+    // state and drives its own toggle (trailing.js paneKeysBootstrap).
+    drawer.setAttribute("data-module-pane", "index");
+    drawer.setAttribute("data-module-pane-label", "Packages");
+    drawer.setAttribute("data-module-pane-state", collapsed ? "strip" : "open");
     var layout = drawer.closest(".saip-layout");
     if (layout) {
       layout.classList.toggle("saip-layout--drawer-collapsed", collapsed);
@@ -5048,6 +5113,7 @@
     toggle.textContent = collapsed ? "»" : "«";
     toggle.title = collapsed ? "Expand Open packages" : "Collapse Open packages";
     toggle.setAttribute("aria-label", toggle.title);
+    toggle.setAttribute("data-module-pane-toggle", "");
     toggle.addEventListener("click", function () {
       wb.packageDrawerCollapsed = !collapsed;
       renderSaipDrawer(drawer, peList, detail, validation);
@@ -5805,6 +5871,9 @@
     leftChip.className = "saip-pane-chip";
     leftChip.textContent = leftCount;
     leftHead.appendChild(leftLabel);
+    if (top !== "file_system") {
+      leftHead.appendChild(saipBuildPeDensityToggle(peList));
+    }
     leftHead.appendChild(leftChip);
     leftPane.appendChild(leftHead);
     leftPane.appendChild(peList);
@@ -6856,6 +6925,7 @@
 
     var list = document.createElement("ul");
     list.className = "saip-pe-cards";
+    list.classList.toggle("saip-pe-cards--compact", saipPeListCompact());
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "Profile elements");
     list.addEventListener("dragleave", function () {
@@ -6900,6 +6970,40 @@
       list.appendChild(card);
     });
     scroll.appendChild(list);
+  }
+
+  // Element list density: the cards, or one line per element (glyph, name,
+  // FS / APP and lint chips, index) so a 17-element package fits a screen.
+  // Kept per browser; the class switches in place, nothing re-renders.
+  var SAIP_PE_DENSITY_KEY = "yggdrasim:saip-pe-density";
+
+  function saipPeListCompact() {
+    try {
+      return window.localStorage.getItem(SAIP_PE_DENSITY_KEY) === "compact";
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function saipBuildPeDensityToggle(peList) {
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "saip-pane-tool";
+    toggle.textContent = "Compact";
+    toggle.title = "One line per profile element";
+    toggle.setAttribute("aria-pressed", saipPeListCompact() ? "true" : "false");
+    toggle.addEventListener("click", function () {
+      var compact = !saipPeListCompact();
+      try {
+        window.localStorage.setItem(SAIP_PE_DENSITY_KEY, compact ? "compact" : "cards");
+      } catch (_err) {
+        // Private mode: the choice lasts until the next render.
+      }
+      toggle.setAttribute("aria-pressed", compact ? "true" : "false");
+      var list = peList && peList.querySelector(".saip-pe-cards");
+      if (list) list.classList.toggle("saip-pe-cards--compact", compact);
+    });
+    return toggle;
   }
 
   function saipSelectPeRow(row, pkg, list, peList, detail, validation) {
@@ -17881,6 +17985,7 @@
             + String(String(comp.key_data_hex || "").length / 2) + " B";
         });
         text.textContent = "KVN " + saipFormatHexByte(key.key_version)
+          + (key.key_version_protocol ? " (" + String(key.key_version_protocol) + ")" : "")
           + " · KID " + saipFormatHexByte(key.key_identifier)
           + " · usage " + (key.usage_qualifier_hex || "--")
           + " · access " + (key.key_access_hex || "00")
@@ -19935,6 +20040,7 @@
         input.type = "text";
         input.maxLength = 6;
         input.className = "saip-form-input saip-form-hex";
+        input.setAttribute("aria-label", "TAR value " + (idx + 1));
         input.disabled = !editable;
         input.value = tar;
         input.addEventListener("input", function () {

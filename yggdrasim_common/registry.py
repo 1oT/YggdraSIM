@@ -40,7 +40,7 @@ SUBSYSTEMS: dict[str, str] = {
     "Tools.SuciTool": "SUCI-related helper shell.",
     "gui_server": "Optional universal GUI layer: FastAPI API + pywebview desktop window + headless lab server.",
     "tests": "pytest modules under tests/ (not registered as symbols; discover by filename).",
-    "pysim": "Optional on-disk pySim checkout (upstream osmocom, gitignored). Clone https://gitlab.com/osmocom/pysim.git when the SAIP ASN.1 compile / SCP11-local flows are needed; prefer Tools.ProfilePackage for SAIP glue.",
+    "pysim": "Optional on-disk pySim checkout (gitignored), a clone of the pinned https://github.com/hampushellsberg-dev/pysim.git fork for work on pySim itself; the installed pySim (a base dependency) serves the SAIP ASN.1 compile and SCP11-local flows. Prefer Tools.ProfilePackage for SAIP glue.",
 }
 
 # Runnable packages (python -m ... after editable install, or from repo root).

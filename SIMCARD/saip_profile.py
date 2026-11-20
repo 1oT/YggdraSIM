@@ -707,7 +707,8 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
     "ef-mmsicp": {"name": "EF.MMSICP", "fid": "6FD0", "structure": "transparent", "sfi": None},
     "ef-mmsup": {"name": "EF.MMSUP", "fid": "6FD1", "structure": "linear-fixed", "sfi": None},
     "ef-mmsucp": {"name": "EF.MMSUCP", "fid": "6FD2", "structure": "transparent", "sfi": None},
-    # DF.TELECOM / DF.GRAPHICS (TS 31.102 §4.6.1, SAIP §3.4.4).
+    # DF.TELECOM / DF.GRAPHICS (TS 31.102 v19.5 §4.6.1 DFGRAPHICS;
+    # TCA SAIP v3.4.1 §8.3.4.3 DF TELECOM PE, template in §9.4).
     # EF.IIDF and EF.ICON are assigned ranges rather than single ids
     # (4F40..4F7F and 4F80..4FBF), so neither carries a canonical FID.
     # 4F01 in this DF is EF.LAUNCH-SCWS.
@@ -840,7 +841,8 @@ _FILE_SPECS: dict[str, dict[str, Any]] = {
         "structure": "transparent",
         "sfi": None,
     },
-    # PE-EAP additional EFs (SAIP §3.4.13).
+    # PE-EAP additional EFs (TCA SAIP v3.4.1 §8.3.4.7 EAP Related Files
+    # and Directories; template FIDs 4F04 / 4F20 / 4F21 / 4F22 in §9.8).
     "ef-ps": {"name": "EF.PS", "fid": "", "structure": "transparent", "sfi": None},
     "ef-curid": {"name": "EF.CURID", "fid": "", "structure": "transparent", "sfi": None},
     "ef-reid": {"name": "EF.REID", "fid": "", "structure": "transparent", "sfi": None},
@@ -1035,6 +1037,37 @@ def known_profile_element_types() -> frozenset[str]:
             "ssim-eaptls",
         }
     )
+
+
+# SAIP V3.4.1 ProfileElement is a CHOICE of an AUTOMATIC TAGS module (p.16): the ProfileHeader
+# alternative is [0] and PE-End, the eleventh, is [10]; both are SEQUENCEs.
+_PE_HEADER_TAG = b"\xA0"
+_PE_END_TAG = b"\xAA"
+
+
+def check_profile_package_framing(upp_bytes: bytes) -> None:
+    """Refuse a Profile Package that is not a run of TLVs from one ProfileHeader to one PE-End.
+
+    SAIP V3.4.1 §8.2 (p.23): the header PE "shall be used once and shall be the first PE";
+    §8.10 (p.65): PE-End "shall be used as the last element". Only the framing is checked:
+    whether a PE decodes depends on the SAIP module the loaded pySim compiles. Raises
+    ValueError naming the first fault.
+    """
+    raw = bytes(upp_bytes or b"")
+    if len(raw) == 0:
+        raise ValueError("The Profile Package is empty.")
+    tags: list[bytes] = []
+    offset = 0
+    while offset < len(raw):
+        try:
+            tag, _, _, offset = read_tlv(raw, offset)
+        except ValueError as error:
+            raise ValueError(f"Profile Element {len(tags) + 1} is not a complete TLV: {error}") from error
+        tags.append(tag)
+    if tags[0] != _PE_HEADER_TAG or tags.count(_PE_HEADER_TAG) != 1:
+        raise ValueError("The Profile Package does not open with its one ProfileHeader.")
+    if tags[-1] != _PE_END_TAG or tags.count(_PE_END_TAG) != 1:
+        raise ValueError("The Profile Package does not close with its one PE-End.")
 
 
 def decode_profile_image(
@@ -1275,10 +1308,11 @@ def _consume_profile_element(
         spec_fid = str(spec.get("root_fid", "") or "")
         bpp_aid_bytes = root_descriptor.get("dfName")
         bpp_fid_bytes = root_descriptor.get("fileID")
-        # SAIP TCA Profile Interoperability §3 mandates ``dfName`` for
-        # ADF descriptors. Honouring it here lets the runtime FCP/EF.DIR
-        # builders emit the AID actually present in the BPP rather than
-        # falling back to YggdraSIM's hard-coded test constants.
+        # TCA SAIP v3.4.1 §8.3.5 (minimum Fcp parameters table) makes
+        # ``dfName`` mandatory for an ADF. Honouring it here lets the
+        # runtime FCP/EF.DIR builders emit the AID actually present in
+        # the BPP rather than falling back to YggdraSIM's hard-coded test
+        # constants.
         resolved_aid = (
             bytes(bpp_aid_bytes).hex().upper()
             if isinstance(bpp_aid_bytes, (bytes, bytearray, memoryview)) and len(bpp_aid_bytes) > 0
@@ -1323,7 +1357,8 @@ def _consume_profile_element(
         structure = str(file_spec.get("structure", "transparent") or "transparent")
         # FCP-decoder layer: route descriptor parsing through pySim's
         # File.from_fileDescriptor so record_len / efFileSize / lcsi /
-        # ARR / fillPattern stay aligned with TS 102 222 + SAIP §5.1.
+        # ARR / fillPattern stay aligned with TS 102 222 and the ``Fcp``
+        # type of TCA SAIP v3.4.1 §8.3.2.
         attrs = decode_fcp_attributes(ef_descriptor)
         record_length = attrs.record_length
         ef_size = attrs.transparent_size if structure == "transparent" else 0
@@ -1333,8 +1368,10 @@ def _consume_profile_element(
         data = b""
         if structure in ("linear-fixed", "cyclic"):
             if record_length > 0 and len(payload) >= record_length:
-                # SAIP §5.1 packs records back-to-back inside ``ef-*``;
-                # use the descriptor-supplied length to slice them out
+                # TCA SAIP v3.4.1 §8.3.5 addresses record files as one
+                # binary image ("fillFileOffset" spans records), so the
+                # records sit back-to-back inside ``ef-*``; use the
+                # descriptor-supplied length to slice them out
                 # so READ RECORD returns the exact bytes from the BPP.
                 count = len(payload) // record_length
                 records = [
@@ -1390,7 +1427,8 @@ def _consume_profile_header(image: SimProfileImage, decoded: dict[str, Any]) -> 
     iot_options = decoded.get("iotOptions")
     if isinstance(iot_options, dict):
         image.header_iot_pix = _coerce_octet_string(iot_options.get("pix"))
-    # TCA Profile Interoperability §3.4.2 connectivityParameters.
+    # TCA SAIP v3.4.1 §8.2.1 Profile header definition,
+    # connectivityParameters.
     # The SAIP header carries an optional TLV stream describing the
     # MNO bearer (BIP / RAM-HTTP). The bytes are kept verbatim so
     # SGP.32 ES10b.GetConnectivityParameters can return them
@@ -1643,14 +1681,15 @@ def _decode_fcp_link_path(descriptor: Any) -> tuple[str, ...]:
     """Decode ``Fcp.linkPath`` (``[PRIVATE 7]`` OCTET STRING, SIZE
     0..8) from a SAIP file descriptor dict.
 
-    SAIP / TCA Profile Interoperability v2.3.1 §8.3.5: the OCTET
+    TCA SAIP v3.4.1 §8.3.2 (``Fcp`` type): the OCTET
     STRING is a concatenation of 2-byte FIDs walking from the MF
     (or the temporary ADF FID when the path is rooted in an ADF)
     down to the file the link points at. An empty OCTET STRING
     denotes "turn this template link file into an independent
-    file" (§8.3.5 explicit note). We return the path as a tuple of
-    upper-case hex FIDs so consumers can index into a path -> node
-    dict without rebuilding hex strings on every lookup.
+    file" (the ``linkPath`` comment in §8.3.2; also §8.3.3 Note 3).
+    We return the path as a tuple of upper-case hex FIDs so consumers
+    can index into a path -> node dict without rebuilding hex strings
+    on every lookup.
 
     Returns an empty tuple when the descriptor is missing or
     malformed; the calling consumer treats that as "no link".
@@ -1681,9 +1720,10 @@ def _decode_fcp_link_path(descriptor: Any) -> tuple[str, ...]:
 
 
 def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.6.1 -- materialise a ``pinCodes`` PE into ``image.pin_codes``.
+    """TCA SAIP v3.4.1 §8.5.1 -- materialise a Pin Code PE (``pinCodes``)
+    into ``image.pin_codes``.
 
-    Both ``pinconfig`` and ``pinmappings`` choices are tolerated; only the
+    Both ``pinconfig`` and ``filePath`` choices are tolerated; only the
     former carries actual key material so anything else is dropped silently.
     The retry counter is stored as the high-nibble (max attempts) and
     low-nibble (remaining) of the SAIP ``maxNumOfAttemps-retryNumLeft``
@@ -1704,10 +1744,10 @@ def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
     choice_name = str(pin_codes_value[0] or "").strip()
     choice_value = pin_codes_value[1]
     if choice_name != "pinconfig":
-        # ``pinmappings`` simply re-binds an existing PIN to another DF
-        # and does not provision new key material. Honouring it requires
-        # the receiving DF to be in ``image.nodes`` already; defer until
-        # the consumer is wired up by a future increment.
+        # ``filePath`` shares the PINs of another DF/ADF (TCA SAIP v3.4.1
+        # §8.5.1) and provisions no key material. Honouring it requires
+        # the referenced DF to be in ``image.nodes`` already; the
+        # simulator does not honour it.
         return
     if isinstance(choice_value, list) is False:
         return
@@ -1756,12 +1796,13 @@ def _consume_pin_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
 
 
 def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.6.2 -- materialise a ``pukCodes`` PE.
+    """TCA SAIP v3.4.1 §8.5.2 -- materialise a PUK Code PE (``pukCodes``).
 
     The PUK retry counter is encoded as the SAIP ``maxNumOfAttemps-
-    retryNumLeft`` byte; per TS 102 221 §9.5.4 the unblock counter
-    range is [0, 10] so the high/low nibbles each map to a single
-    decimal digit -- 0xAA decodes to "10/10 attempts remaining".
+    retryNumLeft`` byte; per TS 102 221 v18.4 §11.1.13.1.1 (PIN
+    unblocking) the unblock counter range is [0, 10] so the high/low
+    nibbles each map to a single decimal digit -- 0xAA decodes to
+    "10/10 attempts remaining".
 
     The decoded dict is routed through pySim's ``ProfileElementPuk``
     wrapper for forward-compat with upstream validation.
@@ -1795,9 +1836,10 @@ def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
             max_attempts = 10
         if retries_remaining == 0:
             retries_remaining = max_attempts
-        # TS 102 221 §9.5.4 caps the PUK counter at 10 attempts; SAIP
-        # therefore stores 0xAA = "10/10". Normalise so the runtime
-        # ``naa.unblock_chv`` path doesn't see an out-of-range value.
+        # TS 102 221 v18.4 §11.1.13.1.1 (PIN unblocking) caps the PUK
+        # counter at 10 attempts; SAIP therefore stores 0xAA = "10/10".
+        # Normalise so the runtime ``naa.unblock_chv`` path doesn't
+        # see an out-of-range value.
         max_attempts = min(max_attempts, 10)
         retries_remaining = min(retries_remaining, max_attempts)
         image.puk_codes.append(
@@ -1811,12 +1853,14 @@ def _consume_puk_codes(image: SimProfileImage, decoded: dict[str, Any]) -> None:
 
 
 def _consume_security_domain(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.5 -- materialise a ``securityDomain`` PE.
+    """TCA SAIP v3.4.1 §8.6.1 -- materialise a Security Domain PE
+    (``securityDomain``).
 
     ``instance`` carries the GP §11.4 application registry tuple
     (instance/class/load-package AID, privileges, lifecycle, install
-    parameters). ``keyList`` carries SCP02/SCP03 keys (KeyType +
-    KeyData + KeyVersionNumber) plus a derived MAC length per GP
+    parameters). ``keyList`` (§8.6.3 Key Personalisation) carries
+    SCP02/SCP03 keys (KeyType + KeyData + KeyVersionNumber) plus a
+    derived MAC length per GP
     Card Spec v2.3.1 Amendment D §7.5.
 
     Key parsing routes through pySim's ``ProfileElementSD`` wrapper
@@ -1969,7 +2013,7 @@ def _consume_security_domain(image: SimProfileImage, decoded: dict[str, Any]) ->
 
 
 def _consume_rfm(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.7 -- materialise an ``rfm`` PE.
+    """TCA SAIP v3.4.1 §8.8 -- materialise an RFM Parameters PE (``rfm``).
 
     Each PE binds one OTA RFM applet (instance AID + TAR list +
     minimum security level + optional ADF restriction). ETSI TS 102
@@ -2034,7 +2078,8 @@ _PYSIM_GFM_FILE_TYPE_TO_STRUCTURE: dict[str, str] = {
 
 
 def _consume_generic_file_management(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.4 -- materialise a ``genericFileManagement`` PE.
+    """TCA SAIP v3.4.1 §8.3.5 -- materialise a Generic File management PE
+    (``genericFileManagement``).
 
     Routes the PE through pySim's typed ``File`` / GFM
     walker (see ``pysim_gfm_walk``). pySim handles the FCP decode,
@@ -2108,10 +2153,12 @@ def _materialize_gfm_via_pysim(
         ef_size = int(entry.file_size or 0)
         record_length = int(entry.rec_len or 0)
         payload = entry.body
-        # TS 102 222 §6.3.2.2.2 / TCA §3.5.4: erased flash is 0xFF.
-        # pySim's ``file_content_from_tuples`` only fills explicit
-        # ranges, so any tail still uncovered after the GFM stream is
-        # padded here.
+        # Bytes the GFM stream leaves unset keep the file's initial
+        # content: the Fcp fill / repeat pattern (TS 102 222 v17.1
+        # §6.3.2.2.2, tags 'C1' / 'C2') or, without one, 'FF...FF'
+        # (TCA SAIP v3.4.1 §9.1). pySim's ``file_content_from_tuples``
+        # only fills explicit ranges, so any tail still uncovered after
+        # the GFM stream is padded here with 0xFF.
         if ef_size > 0 and len(payload) < ef_size:
             payload = payload + b"\xFF" * (ef_size - len(payload))
         elif ef_size > 0 and len(payload) > ef_size:
@@ -2263,7 +2310,8 @@ def _consume_generic_file_management_local(
                     else 0x05
                 )
                 file_descriptor_byte = _file_descriptor_first_byte(value)
-                # ETSI TS 102 221 §11.1.1.4.3 / TS 102 222 §6.5.6: bits
+                # ETSI TS 102 221 v18.4 §11.1.1.4.3 File Descriptor
+                # (Table 11.5) / TS 102 222 v17.1 §6.3.2.2.1: bits
                 # b6..b5 of the file descriptor byte form the file
                 # category. ``11`` = DF/ADF, ``00`` = working EF,
                 # ``01`` = internal EF. SAIP omits ``dfName`` for plain
@@ -2438,8 +2486,10 @@ def _build_fid_to_path_map(image: SimProfileImage) -> dict[str, tuple[str, ...]]
     """Indexes every materialised node by FID so GFM ``filePath``
     directives can resolve the target parent without walking the tree.
 
-    SAIP §5.4 ``filePath`` carries a 2-byte FID; the simulator uses
-    fully-qualified path tuples, so we precompute the mapping at the
+    A TCA SAIP v3.4.1 §8.3.5 ``filePath`` is a concatenation of 2-byte
+    FIDs ("select by path from MF"; length zero selects the MF); the
+    simulator uses fully-qualified path tuples, so we precompute the
+    FID-to-path mapping at the
     start of each GFM walk. New DFs created by the GFM commands are
     added to this map on the fly.
     """
@@ -2480,8 +2530,9 @@ def _resolve_df_label_for_fid(fid_hex: str, aid_hex: str) -> str:
 
     AID-based mapping wins so PKCS#15 / USIM / ISIM / CSIM ADFs land in
     the well-known place even when the issuer reuses non-canonical FIDs.
-    Falls back to ETSI TS 31.102 §4.1 / TS 31.103 §4.1 / TS 31.101 §6.4
-    fixed FIDs (``7F10`` = DF.TELECOM, ``7F20`` = DF.GSM, ``7F21`` =
+    Falls back to the fixed FIDs of ETSI TS 31.102 §4.1 /
+    TS 31.103 §4.1 and the TS 102 221 v18.4 §8.6 reservation of
+    file IDs (``7F10`` = DF.TELECOM, ``7F20`` = DF.GSM, ``7F21`` =
     DF.DCS-1800, etc.) before resorting to a deterministic
     ``DF.{FID}`` form so any unknown DF still gets a stable, unique
     component within the image.
@@ -2590,7 +2641,8 @@ def _ef_size_from_gfm_descriptor(fcp: dict[str, Any]) -> int:
 
 
 def _consume_aka_parameter(image: SimProfileImage, decoded: dict[str, Any]) -> None:
-    """SAIP §5.8 -- materialise an ``akaParameter`` PE.
+    """TCA SAIP v3.4.1 §8.4.2 -- materialise an AKA Parameters PE
+    (``akaParameter``).
 
     Routes the decoded dict through pySim's ``ProfileElementAKA``
     wrapper. The wrapper's ``_post_decode`` runs
@@ -2709,12 +2761,15 @@ def _materialize_file_payload(value: Any) -> bytes | None:
 def _materialize_ef_value(value: Any) -> tuple[bytes, dict[str, Any]] | None:
     """Extract the EF payload and its associated ``fileDescriptor`` dict.
 
-    SAIP §5.1 stores EF contents as a ``CHOICE`` SEQUENCE that interleaves
-    a ``fileDescriptor`` element with one or more ``fillFileContent`` /
-    ``fillFileOffset`` directives. The directives describe a contiguous
-    image of the file written from offset 0; ``fillFileOffset`` jumps the
-    write cursor forward by N bytes, leaving the gap padded with 0xFF
-    (TCA Profile Interoperability §3.5.4 -- erased flash state).
+    TCA SAIP v3.4.1 §8.3.2 defines ``File`` as a ``SEQUENCE OF CHOICE``
+    that interleaves a ``fileDescriptor`` (``Fcp``) with one or more
+    ``fillFileContent`` / ``fillFileOffset`` directives (``doNotCreate``
+    suppresses the file). The directives describe a contiguous image of
+    the file written from offset 0; ``fillFileOffset`` moves the write
+    cursor forward by N bytes (§8.3.5). The gap is padded with 0xFF here;
+    §8.3.3 has it keep the file's default content (the template or
+    ``Fcp`` fill / repeat pattern, 'FF...FF' only where the template
+    defines none, §9.1).
     """
     if isinstance(value, (bytes, bytearray, memoryview)):
         return bytes(value), {}

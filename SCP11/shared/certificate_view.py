@@ -31,6 +31,13 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from SCP11.shared.ber_tlv import read_ber_tlv, read_single_ber_tlv
 from SCP11.shared.rsp_roles import ID_RSP, RSP_ROLE_OIDS
+from yggdrasim_common.x509_tables import (
+    ACCESS_METHODS,
+    ANY_POLICY,
+    EXTENDED_KEY_USAGES,
+    KEY_USAGE_BITS,
+    STANDARD_EXTENSIONS,
+)
 
 # SGP.22 v3.1 §2.4a.1.0: id-rsp-extensions ::= {id-rsp-cert-objects 2}, id-rsp-cert-objects
 # ::= {id-rsp 2}, id-rsp-extension-permitted-eins ::= {id-rsp-extensions 0}; its extnValue is
@@ -41,58 +48,18 @@ _ROLE_NAMES = {oid: f"id-rspRole-{role}" for role, oid in RSP_ROLE_OIDS.items()}
 # SGP.22 v3.1 §4.5.2.1.0.2 Table 11: the subject serialNumber of an eUICC certificate is the EID.
 _EUICC_ROLES = frozenset({RSP_ROLE_OIDS["euicc"], RSP_ROLE_OIDS["euicc-v2"]})
 
-# RFC 5280 Appendix A: id-ce ::= {2 5 29}, id-pkix ::= {1 3 6 1 5 5 7}, id-pe ::= {id-pkix 1},
-# id-kp ::= {id-pkix 3}, id-ad ::= {id-pkix 48}.
-_ID_CE = "2.5.29"
-_ID_PKIX = "1.3.6.1.5.5.7"
-
-# Extension names as RFC 5280 §4.2.1.1 - §4.2.1.15 and §4.2.2.1 head them.
-_EXTENSION_NAMES = {
-    _ID_CE + ".14": "Subject Key Identifier",
-    _ID_CE + ".15": "Key Usage",
-    _ID_CE + ".17": "Subject Alternative Name",
-    _ID_CE + ".18": "Issuer Alternative Name",
-    _ID_CE + ".19": "Basic Constraints",
-    _ID_CE + ".30": "Name Constraints",
-    _ID_CE + ".31": "CRL Distribution Points",
-    _ID_CE + ".32": "Certificate Policies",
-    _ID_CE + ".33": "Policy Mappings",
-    _ID_CE + ".35": "Authority Key Identifier",
-    _ID_CE + ".36": "Policy Constraints",
-    _ID_CE + ".37": "Extended Key Usage",
-    _ID_CE + ".46": "Freshest CRL",
-    _ID_CE + ".54": "Inhibit anyPolicy",
-    _ID_PKIX + ".1.1": "Authority Information Access",
-    ID_RSP_EXTENSION_PERMITTED_EINS: "Permitted EINs",
-}
-# KeyUsage bit names, RFC 5280 §4.2.1.3, against the cryptography attribute that holds each.
-_KEY_USAGE_BITS = (
-    ("digital_signature", "digitalSignature"),
-    ("content_commitment", "nonRepudiation"),
-    ("key_encipherment", "keyEncipherment"),
-    ("data_encipherment", "dataEncipherment"),
-    ("key_agreement", "keyAgreement"),
-    ("key_cert_sign", "keyCertSign"),
-    ("crl_sign", "cRLSign"),
-)
+# The RFC 5280 tables have one home (``yggdrasim_common.x509_tables``); the views here show their
+# clause headings, and add the GSMA extension.
+_EXTENSION_NAMES = {info.oid: info.heading for info in STANDARD_EXTENSIONS}
+_EXTENSION_NAMES[ID_RSP_EXTENSION_PERMITTED_EINS] = "Permitted EINs"
+# KeyUsage bit names, RFC 5280 §4.2.1.3, against the cryptography attribute that holds each. The
+# last two bits of the table are read apart, under keyAgreement only.
+_KEY_USAGE_BITS = tuple((bit.attribute, bit.name) for bit in KEY_USAGE_BITS[:7])
 # RFC 5280 §4.2.1.12.
-_EXTENDED_KEY_USAGES = {
-    _ID_CE + ".37.0": "anyExtendedKeyUsage",
-    _ID_PKIX + ".3.1": "id-kp-serverAuth",
-    _ID_PKIX + ".3.2": "id-kp-clientAuth",
-    _ID_PKIX + ".3.3": "id-kp-codeSigning",
-    _ID_PKIX + ".3.4": "id-kp-emailProtection",
-    _ID_PKIX + ".3.8": "id-kp-timeStamping",
-    _ID_PKIX + ".3.9": "id-kp-OCSPSigning",
-}
+_EXTENDED_KEY_USAGES = EXTENDED_KEY_USAGES
 # RFC 5280 §4.2.2.1.
-_ACCESS_METHODS = {
-    _ID_PKIX + ".48.1": "id-ad-ocsp",
-    _ID_PKIX + ".48.2": "id-ad-caIssuers",
-    _ID_PKIX + ".48.3": "id-ad-timeStamping",
-    _ID_PKIX + ".48.5": "id-ad-caRepository",
-}
-_ANY_POLICY = _ID_CE + ".32.0"
+_ACCESS_METHODS = ACCESS_METHODS
+_ANY_POLICY = ANY_POLICY
 _ATTRIBUTE_NAMES = {
     "2.5.4.3": "CN",
     "2.5.4.4": "SN",

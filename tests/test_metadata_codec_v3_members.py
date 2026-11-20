@@ -3,11 +3,12 @@
 
 """SGP.22 v3.1 §5.5.3 StoreMetadataRequest members, and the BIT STRING they ride on.
 
-These tests fail closed against an unpatched pySim: ``asn1tools`` drops a
-payload key the compiled schema does not define without raising, so a reverted
-``pysim/`` would otherwise encode profiles with the fields quietly missing.
-The schema extension lives in
-``upstream_patches/osmocom-pysim-rsp-v3-metadata/``.
+A request carrying them is encoded with pySim's SGP.22 v3.1 module
+(``rsp.asn1_v3()``, ``upstream_patches/osmocom-pysim-rsp-v3-module/``); pySim's
+``rsp.asn`` stays at v2. These tests fail closed against a pySim without that
+module: ``asn1tools`` drops a payload key the compiled schema does not define
+without raising, so such a pySim would otherwise encode profiles with the
+fields quietly missing.
 """
 
 from __future__ import annotations
@@ -23,13 +24,12 @@ from SCP11.local_access.metadata_codec import (
     build_store_metadata_request_payload,
     encode_store_metadata_request,
 )
-from SCP11.shared.pysim_support import decode_rsp_type, rsp_type_members
+from SCP11.shared.pysim_support import decode_rsp_type, encode_rsp_type, rsp_type_members
 
-# The ten members the schema extension adds (SGP.22 v3.1 §5.5.3). Upstream
-# pySim defines StoreMetadataRequest at v2 and carries none of them, so a
-# stock install cannot reach the wire for any of them and the encoder refuses
-# rather than dropping them -- which SchemaGapFailsClosedTests pins, on every
-# tree, by stubbing the member set.
+# The ten members SGP.22 v3.1 §5.5.3 adds. pySim's v2 module does not define
+# them; its v3.1 module does. Without them the encoder refuses rather than
+# dropping them -- which SchemaGapFailsClosedTests pins, on every tree, by
+# stubbing the member set.
 _V3_MEMBERS = frozenset(
     {
         "rpmConfiguration",
@@ -44,50 +44,28 @@ _V3_MEMBERS = frozenset(
         "serviceSpecificDataNotStoredInEuicc",
     }
 )
-_SCHEMA_CARRIES_V3 = _V3_MEMBERS <= rsp_type_members("StoreMetadataRequest")
+_SCHEMA_CARRIES_V3 = _V3_MEMBERS <= rsp_type_members("StoreMetadataRequest", v3=True)
 
 
-class SchemaSupplementTests(unittest.TestCase):
-    """``SCP11.rsp_v3_schema`` declares what upstream pySim omits."""
+class PinnedSchemaTests(unittest.TestCase):
+    """The pinned pySim's SGP.22 v3.1 module defines what its v2 module omits."""
 
     def test_compiled_schema_carries_every_v3_member(self) -> None:
-        # Not a precondition: YggdraSIM supplies these itself, so a schema
-        # without them means the supplement stopped applying -- most likely
-        # because upstream reformatted the anchor line. The reachability
-        # tests below skip in that case; this one names the cause.
-        missing = sorted(_V3_MEMBERS - rsp_type_members("StoreMetadataRequest"))
+        # YggdraSIM no longer declares these itself, so a module without them
+        # means a pySim other than the pin is in use. The reachability tests
+        # below skip in that case; this one names the cause.
+        missing = sorted(_V3_MEMBERS - rsp_type_members("StoreMetadataRequest", v3=True))
         self.assertEqual(
             missing,
             [],
-            "SCP11.rsp_v3_schema did not declare "
+            "The pySim in use has no SGP.22 v3.1 module declaring "
             + ", ".join(missing)
-            + "; see upstream_patches/osmocom-pysim-rsp-v3-metadata/",
+            + "; install the pySim pyproject.toml pins (hampushellsberg-dev/pysim, "
+            "see upstream_patches/osmocom-pysim-rsp-v3-module/)",
         )
 
-    def test_supplement_is_skipped_once_upstream_declares_them(self) -> None:
-        # Self-retiring: applied to a schema that already has the members,
-        # the anchor is absent and the text comes back untouched.
-        from SCP11.rsp_v3_schema import apply_v3_metadata_supplement
-
-        already_current = "StoreMetadataRequest ::= SEQUENCE {\n    iccid [0] Iccid\n}\n"
-        self.assertEqual(
-            apply_v3_metadata_supplement(already_current), already_current
-        )
-
-    def test_supplement_patches_store_metadata_not_a_namesake(self) -> None:
-        # The anchor line occurs in three types. A first-match replace
-        # patches the wrong one and yields a nine-member schema silently.
-        from SCP11.rsp_v3_schema import apply_v3_metadata_supplement
-
-        tail = "    profilePolicyRules [25] PprIds OPTIONAL -- Tag '99'\n}"
-        schema = (
-            "ProfileInfo ::= SEQUENCE {\n" + tail + "\n\n"
-            "StoreMetadataRequest ::= SEQUENCE {\n" + tail + "\n"
-        )
-        patched = apply_v3_metadata_supplement(schema)
-        profile_info, store_metadata = patched.split("StoreMetadataRequest ::=")
-        self.assertNotIn("estimatedProfileSize", profile_info)
-        self.assertIn("estimatedProfileSize", store_metadata)
+    def test_the_v31_members_select_the_v31_module(self) -> None:
+        self.assertEqual(metadata_codec.V31_STORE_METADATA_MEMBERS, _V3_MEMBERS)
 
 _PROFILE = {
     "iccid": "8988201234567890123",
@@ -106,7 +84,7 @@ def _document(v3: dict | None = None) -> dict:
 
 def _round_trip(v3: dict) -> dict:
     return decode_rsp_type(
-        "StoreMetadataRequest", encode_store_metadata_request(_document(v3))
+        "StoreMetadataRequest", encode_store_metadata_request(_document(v3)), v3=True
     )
 
 
@@ -154,8 +132,8 @@ class BitStringWidthTests(unittest.TestCase):
 
 @unittest.skipUnless(
     _SCHEMA_CARRIES_V3,
-    "The pySim in use defines StoreMetadataRequest at SGP.22 v2. Apply "
-    "upstream_patches/osmocom-pysim-rsp-v3-metadata/ to exercise these.",
+    "The pySim in use defines StoreMetadataRequest at SGP.22 v2. Install the "
+    "pySim pyproject.toml pins (hampushellsberg-dev/pysim) to exercise these.",
 )
 class V3MemberReachabilityTests(unittest.TestCase):
     """Each v3 member reaches the wire under the tag §5.5.3 assigns it."""
@@ -165,6 +143,34 @@ class V3MemberReachabilityTests(unittest.TestCase):
             encode_store_metadata_request(_document()),
             encode_store_metadata_request(_document({})),
         )
+
+    def test_a_request_without_v3_members_is_encoded_with_the_v2_module(self) -> None:
+        payload = build_store_metadata_request_payload(_document())
+        self.assertEqual(
+            encode_store_metadata_request(_document()),
+            encode_rsp_type("StoreMetadataRequest", payload),
+        )
+
+    def test_a_request_with_v3_members_is_encoded_with_the_v31_module(self) -> None:
+        document = _document({"estimated_profile_size": 65536})
+        payload = build_store_metadata_request_payload(document)
+        del payload["profileClass"]
+        self.assertEqual(
+            encode_store_metadata_request(document),
+            encode_rsp_type("StoreMetadataRequest", payload, v3=True),
+        )
+
+    def test_the_default_profile_class_is_left_out_under_v31(self) -> None:
+        # SGP.22 v3.1 §5.5.3: profileClass DEFAULT operational; X.690 §11.5 leaves
+        # a component equal to its default out of the DER encoding.
+        v3_block = {"estimated_profile_size": 65536}
+        self.assertIn("950102", encode_store_metadata_request(_document()).hex())
+        self.assertNotIn("9501", encode_store_metadata_request(_document(v3_block)).hex())
+        # absent on the wire, the decoder supplies the DEFAULT
+        self.assertEqual(_round_trip(v3_block)["profileClass"], "operational")
+        test_profile = _document(v3_block)
+        test_profile["profile"]["profile_class"] = "test"
+        self.assertIn("950100", encode_store_metadata_request(test_profile).hex())
 
     def test_hri_server_address(self) -> None:
         decoded = _round_trip({"hri_server_address": "hri.example.test"})
@@ -397,7 +403,7 @@ class SchemaGapFailsClosedTests(unittest.TestCase):
                 )
         message = str(raised.exception)
         self.assertIn("estimatedProfileSize", message)
-        self.assertIn("osmocom-pysim-rsp-v3-metadata", message)
+        self.assertIn("osmocom-pysim-rsp-v3-module", message)
 
     def test_unknown_member_set_defers_to_the_encoder(self) -> None:
         # An empty set means "could not introspect", not "defines nothing" --

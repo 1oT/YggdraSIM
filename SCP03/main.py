@@ -101,22 +101,24 @@ def entry(reader_name: str = ""):
         print(f"\n[SCP03] Fatal Error: {e}")
 
 
-def entry_cmd(cmd_line: str, yaml_out: str = None, reader_name: str = ""):
+def entry_cmd(cmd_line: str, yaml_out: str = None, reader_name: str = "") -> bool:
     """
     Non-interactive entry: run semicolon-separated commands and optionally write output to YAML.
     Example: entry_cmd("AUTH-SD; LIST", "report.yaml")
+    Returns False when a command of the batch failed.
     """
     try:
         app = _build_dispatcher(reader_name=reader_name)
-        app.run_commands(cmd_line, yaml_out=yaml_out)
+        return app.run_commands(cmd_line, yaml_out=yaml_out) is not False
     except KeyboardInterrupt:
         print("\n[SCP03] Interrupted.")
+        return False
     except Exception as e:
         print(f"\n[SCP03] Fatal Error: {e}")
         raise
 
 
-def entry_stdin(yaml_out: str = None, reader_name: str = ""):
+def entry_stdin(yaml_out: str = None, reader_name: str = "") -> bool:
     """Start an interactive SCP03 shell session reading commands from stdin."""
     command_lines = []
     for raw_line in sys.stdin.read().splitlines():
@@ -126,7 +128,7 @@ def entry_stdin(yaml_out: str = None, reader_name: str = ""):
         if command_text.startswith("#"):
             continue
         command_lines.append(command_text)
-    entry_cmd("; ".join(command_lines), yaml_out=yaml_out, reader_name=reader_name)
+    return entry_cmd("; ".join(command_lines), yaml_out=yaml_out, reader_name=reader_name)
 
 
 def run_standalone():
@@ -159,11 +161,14 @@ def run_standalone():
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
     reader_name = str(getattr(args, "reader", "") or "")
+    # A batch in which a command failed ends with exit code 1.
     if args.cmd:
-        entry_cmd(args.cmd, yaml_out=args.out, reader_name=reader_name)
+        if not entry_cmd(args.cmd, yaml_out=args.out, reader_name=reader_name):
+            raise SystemExit(1)
         return
     if args.stdin:
-        entry_stdin(yaml_out=args.out, reader_name=reader_name)
+        if not entry_stdin(yaml_out=args.out, reader_name=reader_name):
+            raise SystemExit(1)
         return
     entry(reader_name=reader_name)
 

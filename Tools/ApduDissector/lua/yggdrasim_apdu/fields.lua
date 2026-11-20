@@ -42,7 +42,12 @@ local function value_string(mapping)
     return built
 end
 
-M.ins_names = value_string(tables.INS_NAMES)
+-- The tables key a command by identifier (READ_BINARY); a column on
+-- yapdu.ins shows the name as the specifications print it.
+M.ins_names = {}
+for instruction, name in pairs(tables.INS_NAMES) do
+    M.ins_names[instruction] = (name:gsub("_", " "))
+end
 M.status_words = value_string(tables.STATUS_WORDS)
 M.risk_names = value_string(tables.RISK_CLASS_NAMES)
 
@@ -94,7 +99,7 @@ M.split_candidate = ProtoField.string(PREFIX .. ".split.candidate", "Candidate")
 
 -- ---------------------------------------------------------------- command
 M.command = ProtoField.bytes(PREFIX .. ".command", "Command APDU")
-M.cla = ProtoField.uint8(PREFIX .. ".cla", "CLA", base.HEX)
+M.cla = ProtoField.uint8(PREFIX .. ".cla", "Class", base.HEX)
 -- Bit 8 alone separates the two classes (ISO/IEC 7816-4 clause 5.4.1),
 -- so it is rendered as the bit field it is. The channel, the
 -- secure-messaging level and the chaining flag cannot follow: their bits
@@ -115,14 +120,14 @@ M.cla_secure_messaging = ProtoField.uint8(
 )
 M.cla_chaining = ProtoField.bool(PREFIX .. ".cla.chaining", "Command chaining")
 
-M.ins = ProtoField.uint8(PREFIX .. ".ins", "INS", base.HEX, M.ins_names)
+M.ins = ProtoField.uint8(PREFIX .. ".ins", "Instruction", base.HEX, M.ins_names)
 M.command_name = ProtoField.string(PREFIX .. ".command_name", "Command")
 M.command_source = ProtoField.string(PREFIX .. ".command_source", "Defined by")
 
-M.p1 = ProtoField.uint8(PREFIX .. ".p1", "P1", base.HEX)
-M.p2 = ProtoField.uint8(PREFIX .. ".p2", "P2", base.HEX)
-M.lc = ProtoField.uint32(PREFIX .. ".lc", "Lc", base.DEC)
-M.le = ProtoField.uint32(PREFIX .. ".le", "Le", base.DEC)
+M.p1 = ProtoField.uint8(PREFIX .. ".p1", "Parameter 1", base.HEX)
+M.p2 = ProtoField.uint8(PREFIX .. ".p2", "Parameter 2", base.HEX)
+M.lc = ProtoField.uint32(PREFIX .. ".lc", "Length of Command Data (Lc)", base.DEC)
+M.le = ProtoField.uint32(PREFIX .. ".le", "Length of Expected Response Data (Le)", base.DEC)
 M.data = ProtoField.bytes(PREFIX .. ".data", "Command data")
 M.case = ProtoField.string(PREFIX .. ".case", "ISO 7816-4 case")
 M.extended_length = ProtoField.bool(
@@ -134,7 +139,7 @@ M.risk = ProtoField.uint8(PREFIX .. ".risk", "Risk", base.DEC, M.risk_names)
 -- --------------------------------------------------------------- response
 M.response = ProtoField.bytes(PREFIX .. ".response", "Response APDU")
 M.response_data = ProtoField.bytes(PREFIX .. ".response_data", "Response data")
-M.sw = ProtoField.uint16(PREFIX .. ".sw", "Status word", base.HEX, M.status_words)
+M.sw = ProtoField.uint16(PREFIX .. ".sw", "Status Word", base.HEX, M.status_words)
 M.sw1 = ProtoField.uint8(PREFIX .. ".sw1", "SW1", base.HEX)
 M.sw2 = ProtoField.uint8(PREFIX .. ".sw2", "SW2", base.HEX)
 M.sw_meaning = ProtoField.string(PREFIX .. ".sw_meaning", "Status")

@@ -146,7 +146,7 @@
 .about-guides-card:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent-soft);
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
 }
 
 .about-guides-card:disabled {
@@ -339,7 +339,7 @@
 
 .cc-doc-modal-body code {
   background: var(--code-bg);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -431,7 +431,7 @@
 .cc-doc-modal-body table.cc-doc-table code {
   background: var(--code-bg);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 

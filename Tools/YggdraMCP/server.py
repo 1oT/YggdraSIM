@@ -484,11 +484,14 @@ SPEC_SECTIONS: dict[str, dict[str, str]] = {
 
 # A clause heading: number (or annex letter plus number) and a title. A table
 # row or a contents line keeps a run of spaces inside its "title"; a real
-# heading does not.
+# heading does not. A title may open with digits only when a letter follows
+# them ("5GS mobile identity", TS 24.501 v19.7 §9.11.3.4; "3GPP ..."), so a
+# table row such as "8.1  3 octets" stays out.
 _HEADING_RE = re.compile(
-    r"^\s*(?:#+\s*)?((?:\d+|[A-H](?=\.\d))(?:\.\d+)*)\.?\s+([A-Za-z(][^\n]{0,118})$"
+    r"^\s*(?:#+\s*)?((?:\d+|[A-H](?=\.\d))(?:\.\d+)*)\.?\s+((?:[A-Za-z(]|\d+[A-Za-z])[^\n]{0,118})$"
 )
 _LEADER_RE = re.compile(r"\.{4,}|\s{3,}|(?:\s\.){3,}|\u2026")
+_HEX_RUN_RE = re.compile(r"0x[0-9A-Fa-f]|[0-9A-Fa-f]{2}\s+[0-9A-Fa-f]{2}\b")
 _TRAILING_PAGE_RE = re.compile(r"\s\d{1,4}$")
 _SLUG_VERSION_RE = re.compile(r"[vV](\d+(?:\.\d+)*)(p)?")
 
@@ -610,6 +613,12 @@ def _library_headings(slug: str) -> list[tuple[str, str, str]]:
             if _LEADER_RE.search(title) or title.endswith((";", ",", ".")):
                 continue
             if number[0].isdigit() and int(number.split(".")[0]) > 60:
+                continue
+            # A digit-led title is a heading only under a dotted clause number:
+            # at top level it is a value row of a coding table ("1  5GS
+            # encryption algorithm ... supported"), and a run of hex bytes
+            # ("8A 01 05", "0x0004") is a dump.
+            if title[0].isdigit() and ("." not in number or _HEX_RUN_RE.match(title)):
                 continue
             headings.append((number, title, page_path.name))
     return headings
@@ -872,6 +881,11 @@ def aide_registry_lookup(query: str) -> str:
 # ---------------------------------------------------------------------------
 
 _PCSC_TRANSMIT_TIMEOUT_MS = 5000
+# How long a card tool waits for another process's short hold on its
+# reader; a holder that runs until stopped (a continuous console command,
+# the HIL bridge) is not
+# waited for (yggdrasim_common.reader_locks).
+_MCP_READER_WAIT_S = 5.0
 
 
 def _load_pcsc() -> tuple[Any, Any, Any]:
@@ -1005,16 +1019,24 @@ async def pcsc_transmit(
     except ValueError:
         return json.dumps({"error": "Invalid hex APDU."})
 
-    # Connect
+    # The exclusive connect resets nothing, but the disconnect after the
+    # APDU powers the card down under a terminal console, the HIL bridge or the GUI.
+    locks = _reader_locks_module()
     try:
-        connection = selected.createConnection()
-        if exclusive_wrapper is not None:
-            connection = exclusive_wrapper(connection)
-        connection.connect(mode=share_exclusive)
-    except Exception as exc:
-        return json.dumps({"error": f"Failed to connect to '{selected}': {exc}"})
-
-    return _transmit_on_connection(connection, selected, hex_apdu, apdu_bytes, timeout_ms)
+        reader_hold = locks.acquire(str(selected), "MCP pcsc_transmit", wait_s=_MCP_READER_WAIT_S)
+    except locks.ReaderBusyError as busy:
+        return json.dumps({"error": str(busy)})
+    try:
+        try:
+            connection = selected.createConnection()
+            if exclusive_wrapper is not None:
+                connection = exclusive_wrapper(connection)
+            connection.connect(mode=share_exclusive)
+        except Exception as exc:
+            return json.dumps({"error": f"Failed to connect to '{selected}': {exc}"})
+        return _transmit_on_connection(connection, selected, hex_apdu, apdu_bytes, timeout_ms)
+    finally:
+        reader_hold.release()
 
 
 def _remote_reader_binding(reader_name: str):
@@ -1254,9 +1276,20 @@ def context_decode(text: str, domain: str = "auto") -> str:
     the selected file names READ BINARY content and '61 xx' chains the
     following GET RESPONSE onto its command.
 
-    text: one hex string, or one exchange per line (markers >, <, ->, <-,
-    C:, R: and sw=XXXX are understood).
-    domain: auto, apdu, response, es10, gp, uicc, cat, tlv or sw.
+    text: one hex string, or several rows: one command per row as in a
+    script file ('#' starts a comment), or exchanges (markers >, <, ->, <-,
+    C:, R: and sw=XXXX are understood; without a marker a row that is a
+    known command starts a new exchange and any other row answers the one
+    above). AT+CSIM, +CRSM, +CGLA and +CRLA lines are read as exchanges;
+    text that is not hex is tried as PEM, a JSON body with base64 members,
+    base64, an EID, ICCID or IMSI in digits, an ATR and TLS records.
+    domain: auto, apdu (every row is a command), response (every row is an
+    answer), es10, gp, uicc, cat, tlv, sw or ef (the file identifier on
+    the first line, the file content below it).
+
+    An answer over 60000 characters comes back as the text view of as many
+    whole exchanges as fit, with their count; send the rows in parts for
+    the rest.
     """
     try:
         from Tools.Asn1TlvDecode.context import decode_context_text
@@ -1264,11 +1297,53 @@ def context_decode(text: str, domain: str = "auto") -> str:
     except ImportError as exc:
         return json.dumps({"error": f"Context decoder unavailable: {exc}"})
     try:
-        return json.dumps(decode_context_text(text, hint=domain), indent=2)
+        return _context_answer(decode_context_text(text, hint=domain, max_exchanges=_CONTEXT_ANSWER_EXCHANGES))
     except DecodeError as exc:
         return json.dumps({"error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": f"Decode failed: {exc}"})
+
+
+# A script of a few hundred rows decodes to several hundred thousand characters.
+_CONTEXT_ANSWER_LIMIT = 60000
+# More exchanges than fit in that many characters of text are not decoded at all.
+_CONTEXT_ANSWER_EXCHANGES = 400
+
+
+def _context_answer(result: dict[str, Any]) -> str:
+    """The context decoder's answer as JSON, or for a long one its text view cut at whole exchanges."""
+    full = json.dumps(result, indent=2)
+    if len(full) <= _CONTEXT_ANSWER_LIMIT:
+        return full
+    notation = str(result.get("notation") or "")
+    answer: dict[str, Any] = {
+        key: result[key]
+        for key in ("format", "hint", "inputKind", "exchangeCount", "inputExchanges", "domains", "inputNotes")
+        if key in result
+    }
+    total = int(result.get("inputExchanges") or result.get("exchangeCount") or 0)
+    if total > 1:
+        # Each exchange opens with "#<number> " at the left margin.
+        blocks = re.split(r"(?m)^(?=#\d+ )", notation)
+        kept: list[str] = []
+        size = 0
+        for block in blocks:
+            if not block.startswith("#"):
+                continue
+            if size + len(block) > _CONTEXT_ANSWER_LIMIT and kept:
+                break
+            kept.append(block)
+            size += len(block)
+        answer["shownExchanges"] = len(kept)
+        answer["truncated"] = (
+            f"The whole answer is {len(full)} characters. This is the text view of exchanges 1 to {len(kept)} of {total}; "
+            "send the remaining rows on their own for the rest, and one exchange alone for its structured reading."
+        )
+        answer["notation"] = "".join(kept).rstrip("\n")
+    else:
+        answer["truncated"] = f"The whole answer is {len(full)} characters; this is the head of its text view."
+        answer["notation"] = notation[:_CONTEXT_ANSWER_LIMIT]
+    return json.dumps(answer, indent=2)
 _SGP32_DECODERS = {
     "euicc_info1": "decode_euicc_info1_summary",
     "notifications": "decode_notifications_response",
@@ -1826,8 +1901,8 @@ _CARD_REACHING_VERBS = frozenset({"SEND", "SENDRAW", "OTA"})
 _COMMAND_FILE_VERBS = frozenset({"RUN", "SCRIPT", "RAW"})
 
 #: Refused in every shell: a tool argument reaches the model provider, so a
-#: verb taking key material would put a Ki in a transcript.
-_SECRET_ARGUMENT_VERBS = frozenset({"DERIVE-OPC"})
+#: verb taking key material would put a Ki (or a TUAK K) in a transcript.
+_SECRET_ARGUMENT_VERBS = frozenset({"DERIVE-OPC", "DERIVE-TOPC"})
 
 
 @dataclass(frozen=True)
@@ -1865,12 +1940,25 @@ _SCP11_LIVE_SHELL = _ShellSpec(
         "ENABLE-PROFILE", "REMOVE-NOTIFICATION", "SET-ES9", "SET-ES9-CA",
         "SET-ES9-TLS", "SET-POL", "SET-SMDP", "STORE-METADATA",
         "VERIFY-SCP11",
+        # Dispatches its own IMPORT / REMOVE / FORGET subcommands, which the
+        # leading-verb gate cannot see; they write the builder store only.
+        "EIM-CERT-STORE",
     }),
     destructive=frozenset({
         # Each of these installs a profile, wipes session state, or runs
         # a flow whose steps are chosen by the remote side.
         "DELETE-PROFILE", "DOWNLOAD", "DOWNLOAD-AC", "DOWNLOAD-PROFILE",
         "EIM-DOWNLOAD", "FLOW", "RESET",
+        # Runs on the card whatever eIM Package a caller sends while it
+        # listens: on the loopback, or over HTTPS on an address it names.
+        "EIM-LISTEN",
+        # Writes a certificate and a private key to the host.
+        "EIM-LISTEN-CERT",
+    }),
+    interactive=frozenset({
+        # A wizard prompts for each EimConfigurationData member and for the
+        # send, which runs eUICCMemoryReset first; a batch has no terminal.
+        "ADD-INITIAL-EIM",
     }),
 )
 
@@ -2003,14 +2091,21 @@ _SHELLS: dict[str, _ShellSpec] = {
             "METADATA-LINT", "PATHS", "PROFILE", "Q", "QA", "RESP-LOG",
             "RESP-LOG-FILTER", "RESPONSE-LOG", "SCAN", "STATUS", "EXIT",
             "QUIT",
+            # The operation queue (SCP11/eim_local/engine_shell.py).
+            "OPS", "OP", "TRAFFIC",
         }),
         write=frozenset({
             "ADD-EIM", "ADD-INITIAL-EIM", "COUNTER", "DISABLE",
             "DISABLE-PROFILE", "EIM-ACK", "EIM-ACKNOWLEDGE", "ENABLE",
             "ENABLE-PROFILE", "ERROR-CODE-SET", "HANDOVER-SET",
             "HOTFOLDER-AGGREGATE", "HOTFOLDER-EXPORT", "IPAD-DISCOVER",
-            "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM", "NOTIF-HYGIENE",
+            "ISDR-ADD-INITIAL-EIM", "NOTIF-HYGIENE",
             "RECORD", "STORE-METADATA", "UPDATE-METADATA",
+            # Queue and engine-store changes; SERVE starts a loopback process.
+            "QUEUE", "EDIT", "MOVE", "CANCEL", "COPY", "EXPORT", "RESULT", "PACKAGE-IMPORT",
+            "EUICC", "IDENTITY", "SERVE", "EIM-SETTINGS", "SMDP-PROFILE",
+            # The local SM-DS: Event Records in the engine store; ADDRESS restarts the loopback service.
+            "SMDS",
         }),
         destructive=frozenset({
             # Issuing a package executes whatever that JSON carries, which
@@ -2019,20 +2114,28 @@ _SHELLS: dict[str, _ShellSpec] = {
             "DELETE", "DELETE-EIM", "DELETE-PROFILE", "EIM-PACKAGE-CLEAR",
             "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "EUICC-MEMORY-RESET",
             "HOTFOLDER-CAMPAIGN", "HOTFOLDER-CLEAR", "HOTFOLDER-FETCH",
-            "ISDR-DELETE-EIM",
             "ISDR-EUICC-MEMORY-RESET", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
             "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "METADATA-CLEAR",
             "POLL-CAMPAIGN", "PROFILE-CLEAR", "RESP-LOG-CLEAR",
+            # ASSOCIATE resets the card's eIM configuration; DELIVER runs
+            # whatever the queue holds on the card; TLS-SETUP --apply and
+            # USE --associate run ASSOCIATE. INJECT hands the queue to an
+            # IPA that runs it on its card; INJECT-CERT writes the eIM's
+            # client certificate and its private key to the store.
+            # NOTIFICATIONS SEND posts Notifications to the SM-DP+ hosts
+            # they name, which cannot be taken back.
+            "ASSOCIATE", "DELIVER", "INJECT", "INJECT-CERT", "NOTIFICATIONS", "TLS-SETUP",
         }),
         card_verbs=frozenset({
+            "ASSOCIATE", "DELIVER", "EUICC", "INJECT", "TLS-SETUP",
             "ADD-EIM", "ADD-INITIAL-EIM", "DELETE-EIM", "DELETE-PROFILE",
             "DISABLE", "DISABLE-PROFILE", "DISCOVER", "EIM-ACK",
             "EIM-ACKNOWLEDGE", "EIM-CERTS", "EIM-DISCOVER",
             "EIM-PACKAGE-ISSUE", "EIM-PACKAGE-ISSUE-ALL", "ENABLE",
             "ENABLE-PROFILE", "EUICC-MEMORY-RESET", "GET-EIM-CONFIG",
             "HOTFOLDER-CAMPAIGN", "HOTFOLDER-FETCH", "INFO", "IPAD-DISCOVER",
-            "ISDR-ADD-EIM", "ISDR-ADD-INITIAL-EIM",
-            "ISDR-DELETE-EIM", "ISDR-EUICC-MEMORY-RESET",
+            "ISDR-ADD-INITIAL-EIM",
+            "ISDR-EUICC-MEMORY-RESET",
             "ISDR-GET-EIM-CONFIG", "ISDR-LOAD-PACKAGE", "ISDR-PACKAGE",
             "LOAD-EIM-PACKAGE", "LOAD-PROFILE", "NOTIF-HYGIENE",
             "POLL-CAMPAIGN", "SCAN", "STORE-METADATA", "UPDATE-METADATA",
@@ -2576,6 +2679,19 @@ def _card_backend_module() -> Any:
     return card_backend
 
 
+def _reader_locks_module() -> Any:
+    from yggdrasim_common import reader_locks
+
+    return reader_locks
+
+
+def _release_session_reader(entry: dict[str, Any]) -> None:
+    """Give a closed session's reader back to other processes."""
+    hold = entry.get("reader_hold")
+    if hold is not None:
+        hold.release()
+
+
 def _expire_idle_sessions() -> list[str]:
     """Close sessions nobody has touched, and report which ones went."""
 
@@ -2591,6 +2707,8 @@ def _expire_idle_sessions() -> list[str]:
             entry["connection"].disconnect()
         except Exception:  # noqa: BLE001 -- a dead handle is already closed
             pass
+        finally:
+            _release_session_reader(entry)
     return expired
 
 
@@ -2807,18 +2925,36 @@ def card_session_open(
     elif protocol_text:
         return json.dumps({"error": f"Unknown protocol {protocol!r}. Use T=0, T=1, or ''."})
 
+    import time
+    import uuid
+
+    session_id = f"card-{uuid.uuid4().hex[:12]}"
+    # A session keeps the card powered across calls; another process on a
+    # local reader would reset it between two of them. The simulated card
+    # and a Remote Lab reader are no local reader.
+    reader_hold = None
+    if not simulated and remote_binding is None:
+        locks = _reader_locks_module()
+        try:
+            reader_hold = locks.acquire(
+                resolved_name,
+                f"MCP card session {session_id}",
+                long_running=True,
+                wait_s=_MCP_READER_WAIT_S,
+            )
+        except locks.ReaderBusyError as busy:
+            return json.dumps({"error": str(busy)})
+
     try:
         open_kwargs = {"reader_index": index, "protocol": wanted_protocol}
         if remote_binding is not None:
             open_kwargs["reader_name"] = remote_binding.name
         connection = module.create_card_connection(**open_kwargs)
     except Exception as exc:  # noqa: BLE001
+        if reader_hold is not None:
+            reader_hold.release()
         return json.dumps({"error": f"Could not open a card session: {exc}"})
 
-    import time
-    import uuid
-
-    session_id = f"card-{uuid.uuid4().hex[:12]}"
     atr = _atr_hex(connection)
     _CARD_SESSIONS[session_id] = {
         "connection": connection,
@@ -2828,6 +2964,7 @@ def card_session_open(
         "transmits": 0,
         "simulated": simulated,
         "touched": time.monotonic(),
+        "reader_hold": reader_hold,
     }
     return json.dumps({
         "session_id": session_id,
@@ -2918,6 +3055,8 @@ def card_session_close(session_id: str = "") -> str:
             closed.append(sid)
         except Exception as exc:  # noqa: BLE001
             failed[sid] = str(exc)
+        finally:
+            _release_session_reader(entry)
     payload: dict[str, Any] = {"closed": closed, "still_open": sorted(_CARD_SESSIONS)}
     if failed:
         # The handle is gone from the registry either way; say so plainly.

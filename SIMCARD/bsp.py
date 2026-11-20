@@ -129,6 +129,10 @@ class BspInstance:
         tag_len = 1
         len_len = len(encode_length(MAX_SEGMENT_SIZE))
         self.max_payload_size = MAX_SEGMENT_SIZE - tag_len - len_len - self.m_algo.mac_length
+        # SGP.22 v3.1 §2.5.3 Protected Profile Package, NOTE: the '80' padding takes at
+        # least one byte of the ciphertext, so an encrypted segment carries 1007 bytes.
+        block = self.c_algo.blocksize
+        self.max_encrypted_payload_size = self.max_payload_size // block * block - 1
 
     @classmethod
     def from_kdf(
@@ -158,8 +162,8 @@ class BspInstance:
         chunks: list[bytes] = []
         remainder = bytes(plaintext)
         while len(remainder) > 0:
-            chunk = remainder[: self.max_payload_size]
-            remainder = remainder[self.max_payload_size :]
+            chunk = remainder[: self.max_encrypted_payload_size]
+            remainder = remainder[self.max_encrypted_payload_size :]
             chunks.append(self.encrypt_and_mac_one(tag, chunk))
         return chunks
 

@@ -129,7 +129,7 @@
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--remote-lab-status-color);
 }
 

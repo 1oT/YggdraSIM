@@ -39,7 +39,8 @@ Domains (suffix is numeric or mnemonic):
        shape: AID outside ISO 7816-5 5..16 byte range, version not 2 bytes,
        missing aid/version, duplicate AID (-005 FAIL/WARN, TCA SAIP v3.4.1 §8.2.1);
        SAIP (major, minor) version not in TCA-published set + iotOptions on
-       SAIP < 3.3 (-006 FAIL/WARN, TCA SAIP v3.4.1 §8.2.1 / Annex F);
+       SAIP < 3.3 (-006 FAIL/WARN, TCA SAIP v3.4.1 §8.2.1; versions in
+       TCA SAIP v3.4.1 §14 (Annex F));
        eUICC-Mandatory-GFSTEList OID component invalid / non-dotted /
        duplicate (-007 FAIL/WARN, TCA SAIP v3.4.1 §8.2.1 / ITU-T X.660); profileType
        empty or > 100 UTF-8 bytes (-008 WARN/FAIL, TCA SAIP v3.4.1 §8.2.1)
@@ -103,24 +104,26 @@ Domains (suffix is numeric or mnemonic):
   ARR  EF.ARR reference checks: rule-index vs record count (-001 WARN),
        unresolvable EF.ARR reference (-002 INFO) (TS 102 221 §11.1.1)
   AKA  AKA parameter field-length checks: K byte length (-001 FAIL --
-       MILENAGE 16 B, TUAK 16 or 32 B per TS 35.231 Annex F),
+       MILENAGE 16 B, TUAK 16 or 32 B per TS 35.231 v19 §5.1),
        OP(c)/TOP(c) byte length (-002 FAIL, mismatched TUAK K/TOPc width
-       WARN), fixed SGP.22 §B.3 fields (algorithmOptions / authCounterMax /
-       sqnDelta / sqnAgeLimit / rotationConstants) out of spec (-003 WARN),
-       unknown algorithmID (-004 WARN); mappingSource AID must resolve to
+       WARN), fixed TCA SAIP v3.4.1 §8.4.2 fields (algorithmOptions /
+       authCounterMax / sqnDelta / sqnAgeLimit / rotationConstants) out of
+       spec (-003 WARN), unknown algorithmID (-004 WARN); mappingSource
+       AID must resolve to
        a NAA defined earlier in the profile (-005 WARN, TCA PP TS
        PE-AKAParameter / ISO 7816-5 §8.5)
   CDMA PE-CDMAParameter material sanity: A-Key (authenticationKey) 8 B and
        SSD 16 B (-001 FAIL, 3GPP2 C.S0023 §3.4); HRPD / Simple-IP /
-       Mobile-IP authentication-data declared but empty (-002 WARN, GSMA
-       SAIP Annex D)
+       Mobile-IP authentication-data declared but empty (-002 WARN,
+       TCA SAIP v3.4.1 §8.4.3)
   SSIM PE-SSIM-EAPTLSParameters mandatory cert / key fields missing
        (-001 FAIL) or declared but empty (-002 FAIL) (TCA PP TS
        PE-SSIM-EAPTLSParameters / RFC 9190 / RFC 9048)
   PIN  PIN / PUK byte-level encoding: packed retry-byte nibbles (-001 max=0,
        -004 remaining>max, -006 remaining=0 ships blocked), pinValue/pukValue
-       length exactly 8 bytes (-002/-003) (SGP.22 §B.2); PIN unblocking
-       reference must resolve to a PE-PUKCodes keyReference (-005 FAIL,
+       length exactly 8 bytes (-002/-003)
+       (TCA SAIP v3.4.1 §8.5.1 / §8.5.2); PIN unblocking reference must
+       resolve to a PE-PUKCodes keyReference (-005 FAIL,
        TCA PP TS PIN-007); keyReference outside ETSI TS 102 221 §9.5 Table
        9.3 ranges -- global 0x01..0x08, local 0x81..0x88 (-007 FAIL)
   UCR  USIM decoded shape expectations

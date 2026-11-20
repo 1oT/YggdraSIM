@@ -245,7 +245,7 @@ def main() -> int:
         return 1
     res, ck, ik, kc = parsed
     step("Card responded with DB || L||RES || L||CK || L||IK || L||Kc",
-         "TS 31.102 §7.1.2.1.1 successful UMTS AKA")
+         "TS 31.102 v19.5 §7.1.2.1 3G security context, successful UMTS AKA")
     hexline("RES  ", res)
     hexline("CK   ", ck)
     hexline("IK   ", ik)
@@ -279,7 +279,7 @@ def main() -> int:
     print(f"  {C_GREEN}✓{C_RESET} Cold reset → ATR served, MF + ADF.USIM bound on logical channel 0.")
     print(f"  {C_GREEN}✓{C_RESET} GET CHALLENGE refreshed the card's RAND buffer.")
     print(f"  {C_GREEN}✓{C_RESET} AUTHENTICATE matched the network-supplied MAC-A.")
-    print(f"  {C_GREEN}✓{C_RESET} The card emitted RES, CK, IK, Kc per TS 31.102 §7.1.2.1.1.")
+    print(f"  {C_GREEN}✓{C_RESET} The card emitted RES, CK, IK, Kc per TS 31.102 v19.5 §7.1.2.1.")
     print(f"  {C_GREEN}✓{C_RESET} Stale AUTN triggered a clean AUTS resync response.")
     print()
     print(f"  {C_DIM}Engine workspace: {workdir}{C_RESET}")

@@ -322,11 +322,11 @@ def test_lint_rejects_captured_body_without_hex() -> None:
     assert any("request_payload.value_hex must be non-empty" in error for error in errors)
 
 
-def test_execution_coverage_registers_the_type_as_model_only() -> None:
+def test_execution_coverage_sends_the_type_to_the_operation_queue() -> None:
     coverage = _blank_session().execution_coverage_matrix()["ipa_euicc_data_request"]
 
-    assert coverage["mode"] == "model_only"
-    assert coverage["execution_path"] == "pending_operation_register"
+    assert coverage["mode"] == "queue"
+    assert coverage["execution_path"] == "package_import"
 
 
 @pytest.mark.skipif(

@@ -200,6 +200,9 @@ def _load_profile_directory(directory_path: str) -> tuple[int, SimProfileEntry] 
         ),
         auth_config=manifest_auth_config,
         fallback_attribute=bool(manifest.get("fallback_attribute", False)),
+        fallback_allowed=(
+            None if manifest.get("fallback_allowed") is None else bool(manifest.get("fallback_allowed"))
+        ),
         rollback_armed=bool(manifest.get("rollback_armed", False)),
         ecall_indication=bool(manifest.get("ecall_indication", False)),
         connectivity_params_http=_coerce_hex_bytes(manifest.get("connectivity_params_http_hex", "")),
@@ -371,6 +374,7 @@ def _serialize_profile_manifest(profile: SimProfileEntry, *, order_index: int) -
         "profile_source": _normalize_profile_source(profile.profile_source, has_upp=len(bytes(profile.upp_bytes or b"")) > 0),
         "auth": _serialize_profile_auth(profile.auth_config),
         "fallback_attribute": bool(profile.fallback_attribute),
+        "fallback_allowed": None if profile.fallback_allowed is None else bool(profile.fallback_allowed),
         "rollback_armed": bool(profile.rollback_armed),
         "ecall_indication": bool(profile.ecall_indication),
         "connectivity_params_http_hex": bytes(profile.connectivity_params_http or b"").hex().upper(),

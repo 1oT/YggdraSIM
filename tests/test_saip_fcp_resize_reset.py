@@ -69,14 +69,7 @@ class _StubPes:
 class GfmResizeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        from Tools.ProfilePackage.saip_pysim_compat import (
-            install_erased_state_file_fill,
-            install_record_aware_fill_pattern,
-        )
-
         saip_module._ensure_pysim_importable()
-        install_erased_state_file_fill()
-        install_record_aware_fill_pattern()
 
     def _handle(self, transaction: list[tuple[str, Any]]) -> dict[str, Any]:
         return {

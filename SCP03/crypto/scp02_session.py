@@ -14,6 +14,9 @@ class Scp02SessionAdapter:
     def __init__(self, enc: bytes, mac: bytes, dek: bytes, kvn: int) -> None:
         if GpCardKeyset is None or SCP02 is None:
             raise RuntimeError("SCP02 support requires the pySim GlobalPlatform library.")
+        from yggdrasim_common.pysim_log_gate import install_pysim_secure_channel_log_gate
+
+        install_pysim_secure_channel_log_gate()
         self._enc = bytes(enc)
         self._mac = bytes(mac)
         self._dek = bytes(dek)

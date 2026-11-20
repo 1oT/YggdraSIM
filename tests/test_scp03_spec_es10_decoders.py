@@ -171,6 +171,23 @@ class GetEuiccDataRequestTests(unittest.TestCase):
         self.assertEqual(sw1, 0x90)
         self.assertEqual(manager._extract_eid_hex(data), TEST_EID_HEX)
 
+    def test_a_printed_eid_is_registered_with_the_local_eim(self) -> None:
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from SCP11.eim_local.engine.service import LocalEim
+
+        manager = _CaptureManager(_tlv("BF3E", _tlv("5A", bytes.fromhex(TEST_EID_HEX))))
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(
+            os.environ, {"YGGDRASIM_LOCAL_EIM_STORE": store}
+        ):
+            with redirect_stdout(io.StringIO()):
+                manager.get_eid()
+            record = LocalEim(Path(store)).record(TEST_EID_HEX)
+        self.assertEqual(record.label, "detected by the SCP03 admin shell")
+
     def test_answer_without_eid_is_never_printed_as_the_eid(self) -> None:
         manager = _ScriptedEidManager(
             {

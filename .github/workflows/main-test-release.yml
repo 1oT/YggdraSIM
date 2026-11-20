@@ -637,7 +637,7 @@ jobs:
     name: macOS arm64 unsigned and unnotarized test
     if: github.ref == 'refs/heads/main'
     needs: bootstrap
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write
 

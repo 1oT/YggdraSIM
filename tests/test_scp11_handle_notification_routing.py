@@ -157,6 +157,22 @@ class Es9ClientHandleNotificationRoutingTests(unittest.TestCase):
             "http://internal.example.test",
         )
 
+    def test_resolver_keeps_the_configured_port_for_the_configured_sm_dp(self) -> None:
+        # notificationAddress is an FQDN and names no port (SGP.22 v3.1 §5.7.9, p.331).
+        es9_module = importlib.import_module("SCP11.live.es9_client")
+        client = es9_module.Es9LikeClient(base_url="https://rsp.example.test:8443/")
+
+        for address in ("rsp.example.test", "RSP.example.test"):
+            with self.subTest(address=address):
+                self.assertEqual(
+                    client._resolve_handle_notification_base_url(address),
+                    "https://rsp.example.test:8443",
+                )
+        self.assertEqual(
+            client._resolve_handle_notification_base_url("other.example.test"),
+            "https://other.example.test",
+        )
+
     def test_resolver_treats_whitespace_only_address_as_empty(self) -> None:
         client, _ = self._build_recording_client("SCP11.live.es9_client")
         self.assertEqual(

@@ -294,7 +294,8 @@ class AddPeRenumberTests(unittest.TestCase):
             ctx=None, session_id=self._sid, pe_type="akaParameter", insert_at=1,
         )
         # After renumber, the inserted PE should carry a positive
-        # identification (1-based per TCA SAIP §A.3).
+        # identification: the renumber counts from 1, while
+        # TCA SAIP v3.4.1 §8.1.3 PE Header only asks for a unique UInt15.
         self.assertIsNotNone(result["identification"])
         self.assertGreater(result["identification"], 0)
 

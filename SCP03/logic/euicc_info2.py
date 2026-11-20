@@ -243,6 +243,31 @@ def unwrap_euicc_info2_payload(data: bytes) -> bytes:
     return data
 
 
+def declared_iot_versions(response: bytes) -> Tuple[Tuple[int, int, int], ...]:
+    """The SGP.32 versions an eUICC declares in EUICCInfo2; empty when it declares none.
+
+    SGP.32 v1.3 section 5.9.2: ``iotSpecificInfo [20]`` carries ``iotVersion [0]
+    SEQUENCE OF VersionType``, and a VersionType is three octets, major, minor
+    and revision (SGP.22 v3.1 section 2.4a.1.0). An entry of another length is
+    left out, and a response that does not parse declares nothing.
+    """
+    try:
+        root = parse_tlv_simple(unwrap_euicc_info2_payload(bytes(response or b"")))
+        iot_value = _first_bytes(root.get(0xB4))
+        if iot_value is None:
+            return ()
+        versions_value = _first_bytes(parse_tlv_simple(iot_value).get(0xA0))
+        if versions_value is None:
+            return ()
+        return tuple(
+            (value[0], value[1], value[2])
+            for tag, value, _constructed in parse_tlv_nodes(versions_value)
+            if tag == 0x04 and len(value) == 3
+        )
+    except (ValueError, TypeError):
+        return ()
+
+
 def resolve_euicc_info2_tag_name(tag: int, parent_tag: Optional[int]) -> Optional[str]:
     """Return the name of a tag within the EUICCInfo2 ('BF22') response (SGP.22 v3.1 §5.7.8)."""
     if parent_tag == 0xBF22:
@@ -384,10 +409,15 @@ def build_euicc_info2_validation_lines(response: bytes) -> List[Tuple[int, str, 
     iot_value = _first_bytes(root_map.get(0xB4))
     if iot_value is not None:
         iot_map = parse_tlv_simple(iot_value)
-        if _first_bytes(iot_map.get(0xA0)) is None:
+        # SGP.32 v1.3 section 5.9.2 GetEUICCInfo: iotVersion carries at least one
+        # version; ecallSupported, fallbackSupported and
+        # fallbackAllowedUpdateSupported are OPTIONAL NULLs whose absence says
+        # the eUICC lacks the mechanism, so none of them is a finding.
+        iot_versions = _first_bytes(iot_map.get(0xA0))
+        if iot_versions is None:
             warnings.append("IoT Specific Info is present, but IoT Version List is missing.")
-        if 0x81 not in iot_map:
-            warnings.append("IoT Specific Info is present, but eCall Supported flag is missing.")
+        elif len(iot_versions) == 0:
+            warnings.append("IoT Version List is empty; SGP.32 asks for at least one version.")
 
     status = "PASS"
     if len(warnings) > 0:

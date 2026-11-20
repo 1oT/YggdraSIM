@@ -162,6 +162,13 @@ function M.base_class(cla)
     return nil
 end
 
+--- The generated tables key a command by identifier (READ_BINARY); a
+--- reader gets the name the specifications and Wireshark's gsm_sim
+--- print (READ BINARY).
+local function spaced(name)
+    return (name:gsub("_", " "))
+end
+
 --- Resolve the command name, mirroring _lookup_apdu_command in
 --- Tools/Asn1TlvDecode/main.py: class-qualified first, then the class
 --- with its channel bits cleared, then with the whole low nibble
@@ -183,14 +190,14 @@ function M.command_name(cla, ins)
         local key = (candidates[index] * 256) + ins
         local qualified = tables.CLA_INS_NAMES[key]
         if qualified ~= nil then
-            return qualified, tables.CLA_INS_SOURCE[key]
+            return spaced(qualified), tables.CLA_INS_SOURCE[key]
         end
     end
     local bare = tables.INS_NAMES[ins]
     if bare ~= nil then
-        return bare, tables.INS_SOURCE[ins]
+        return spaced(bare), tables.INS_SOURCE[ins]
     end
-    return string.format("INS_%02X", ins), ""
+    return string.format("INS %02X", ins), ""
 end
 
 --- Risk class for an instruction.

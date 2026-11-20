@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yggdrasim"
-version = "2.2.0"
+version = "2.3.0"
 description = "YggdraSIM secure-element, eUICC, OTA, and SAIP toolkit."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -77,7 +77,7 @@ dependencies = [
     "pyserial",
     "pytlv",
     "asn1crypto",
-    "asn1tools @ git+https://github.com/hampushellsberg-dev/asn1tools-loop-fix.git@46b7dc2fed57f086c5aed6b22f5a34d76f9ecc21",
+    "asn1tools @ git+https://github.com/hampushellsberg-dev/asn1tools-loop-fix.git@2a06a6dc92856d5bc0757acd5f0701cf050099dc",
     "jsonpath-ng",
     "construct>=2.10.70",
     "bidict",
@@ -98,9 +98,12 @@ dependencies = [
     # remain YggdraSIM-specific -- see tests/test_scp03_pysim_parity.py
     # and tests/test_scp80_pysim_parity.py for the pinned divergences.
     # Upstream does not publish wheels to PyPI, so we install the git
-    # tree directly. The ``saip`` extra below adds the optional,
-    # hardened spreadsheet stack used by drop-in SAIP extensions.
-    "pySim @ git+https://github.com/osmocom/pysim.git@c50f4b4a0222a964710ce3124a66fe13c804be65",
+    # tree directly: hampushellsberg-dev/pysim, which is osmocom pySim
+    # master with the fixes in upstream_patches/osmocom-pysim-* on top,
+    # one commit each, until osmocom merges them. The ``saip`` extra below
+    # adds the optional, hardened spreadsheet stack used by drop-in SAIP
+    # extensions.
+    "pySim @ git+https://github.com/hampushellsberg-dev/pysim.git@3322531ecb506956dbbb13bb9122152fac7db47e",
 ]
 
 [project.optional-dependencies]
@@ -220,6 +223,7 @@ yggdrasim-scp11-eim-local = "yggdrasim_common.console_scripts:scp11_eim_local"
 yggdrasim-hil-bridge = "yggdrasim_common.console_scripts:hil_bridge"
 yggdrasim-hil-supervisor = "yggdrasim_common.console_scripts:hil_bridge_supervisor"
 yggdrasim-hil-reset = "yggdrasim_common.console_scripts:hil_bridge_reset"
+yggdrasim-hil-modem-diag = "yggdrasim_common.console_scripts:hil_bridge_modem_diag"
 yggdrasim-card-bridge = "yggdrasim_common.console_scripts:card_bridge"
 yggdrasim-lab-agent = "yggdrasim_common.console_scripts:lab_agent"
 yggdrasim-lab = "yggdrasim_common.console_scripts:lab_client"
@@ -283,7 +287,6 @@ include-package-data = true
     "seeds/fids.txt",
     "seeds/keys.ini",
 ]
-"SCP80" = ["ota_config.ini"]
 "SCP11.local_access" = [
     "profile/metadata/default_profile_metadata.json",
     "profile/test_profile.txt",
@@ -335,6 +338,15 @@ include-package-data = true
     "static/app.js",
     "static/index.html",
     "static/theme-init.js",
+    "static/vendor/plex-mono/IBMPlexMono-Regular-Latin1.woff2",
+    "static/vendor/plex-mono/IBMPlexMono-SemiBold-Latin1.woff2",
+    "static/vendor/plex-mono/NOTICE.md",
+    "static/vendor/plex-mono/license.txt",
+    "static/vendor/plex-sans-condensed/IBMPlexSansCondensed-Medium-Latin1.woff2",
+    "static/vendor/plex-sans-condensed/IBMPlexSansCondensed-Regular-Latin1.woff2",
+    "static/vendor/plex-sans-condensed/IBMPlexSansCondensed-SemiBold-Latin1.woff2",
+    "static/vendor/plex-sans-condensed/NOTICE.md",
+    "static/vendor/plex-sans-condensed/license.txt",
     "static/vendor/xterm/NOTICE.md",
     "static/vendor/xterm/addon-fit.js",
     "static/vendor/xterm/xterm.css",
@@ -417,6 +429,7 @@ include = [
     "SCP80",
     "SCP11",
     "SCP11.eim_local",
+    "SCP11.eim_local.engine",
     "SCP11.live",
     "SCP11.local_access",
     "SCP11.relay",
@@ -441,22 +454,4 @@ include = [
     "yggdrasim_common.gui_server.actions",
     "yggdrasim_common.gui_server.routes",
     "yggdrasim_common.remote_lab",
-]
-
-[tool.uv]
-# pySim lists smpp.twisted3 in install_requires although only its
-# pySim-smpp2sim.py script and contrib/smpp-ota-tool.py use it, and every
-# release of that library pins Twisted~=23.10.0, which carries
-# CVE-2026-42304, CVE-2024-41810 and CVE-2024-41671. Nothing in YggdraSIM
-# or in the pySim modules it imports reaches smpp.twisted; the SMPP PDU
-# codec the local-access session uses is the separate smpp.pdu package,
-# which stays. The marker below can never be true, so the resolver drops
-# the requirement and Twisted leaves uv.lock, the synced environments and
-# the bundles. A pip install from the sdist ignores this section and keeps
-# pySim's declaration. tests/test_dependency_overrides.py pins the effect
-# and retires the override once pySim stops declaring the dependency;
-# upstream_patches/osmocom-pysim-smpp-twisted-optional/ carries the
-# proposed upstream change.
-override-dependencies = [
-    "smpp-twisted3 ; python_version < '0'",
 ]
