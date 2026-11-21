@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Tests for SIMCARD/bsp.py — BSP key derivation and BspInstance crypto.
+"""Tests for SIMCARD/bsp.py -- BSP key derivation and BspInstance crypto.
 
 Covers: bsp_key_derivation, BspInstance.demac_and_decrypt_one,
         BspInstance.demac_and_decrypt, BspInstance.demac_only_one,

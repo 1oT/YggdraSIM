@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``saip_arr_record_picker``."""
 
 from __future__ import annotations
@@ -21,11 +20,17 @@ class ReferenceCodecTests(unittest.TestCase):
         self.assertEqual(decoded["file_id"], "2F06")
         self.assertEqual(decoded["record_index"], 1)
 
-    def test_short_reference_decodes_sfi_and_rec(self) -> None:
+    def test_short_reference_is_record_number_only(self) -> None:
+        # SAIP §8.3: a 1-byte reference is the EF.ARR record number; the
+        # EF.ARR itself ('2F06' / '6F06') follows from the file's position.
         decoded = A.decode_arr_reference("0B")
         self.assertEqual(decoded["kind"], "short")
-        self.assertEqual(decoded["short_efid"], 1)
-        self.assertEqual(decoded["record_index"], 3)
+        self.assertIsNone(decoded["file_id"])
+        self.assertEqual(decoded["record_index"], 11)
+
+    def test_short_reference_rejects_record_zero(self) -> None:
+        with self.assertRaises(ValueError):
+            A.decode_arr_reference("00")
 
     def test_invalid_record_index(self) -> None:
         with self.assertRaises(ValueError):

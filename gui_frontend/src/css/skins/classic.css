@@ -1,0 +1,172 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Skin: Classic ---------------------------------------------------------
+ *
+ * The look the GUI had before Bench: system sans, rounded panels and pill
+ * badges, card shadows, the theme's accent gradients and page tint, and the
+ * glass top bar. Same token set as `bench.css`; see that file for what a
+ * skin may declare. */
+html[data-skin="classic"] {
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --font-head: var(--font-sans);
+  --font-size-base: 14px;
+  --line-height-base: 1.5;
+  --heading-weight: 600;
+  --heading-track: 0.01em;
+  --legend-size: 10px;
+  --legend-weight: 700;
+  --legend-track: 0.08em;
+  --group-case: uppercase;
+  --group-size: 11px;
+  --group-track: 0.08em;
+
+  /* Shape */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+  --radius-dot: 50%;
+
+  /* Motion */
+  --transition-fast: 140ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-mid: 220ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --transition-slow: 340ms cubic-bezier(0.25, 0.8, 0.4, 1);
+  --ease-out-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --hover-shift: 2px;
+
+  /* Separation */
+  --page-tint: var(--theme-tint);
+  --surface-shadow: var(--shadow-card);
+  --surface-shadow-hover: var(--shadow-card-hover);
+  --overlay-shadow: var(--shadow-card-hover);
+  --glow: var(--accent-glow);
+  --accent-fill: var(--gradient-accent);
+  --brand-fill: var(--gradient-brand);
+
+  /* Chrome */
+  --bar-h: 52px;
+  --bar-bg: var(--topbar-bg);
+  --bar-blur: saturate(180%) blur(14px);
+  --bar-rule: var(--border);
+  --bar-underline: linear-gradient(90deg, transparent 0%, var(--accent-soft) 50%, transparent 100%);
+  --bar-gap: 18px;
+  --bar-pad: 0 20px;
+  --chrome-pill-bg: var(--bg-elev-2);
+  --chrome-pill-border: var(--border);
+  --chrome-pill-h: 30px;
+  --nav-bg: var(--bg-elev);
+  --nav-rule: var(--border);
+  --nav-item-h: 38px;
+  --nav-item-size: 13px;
+  --dock-bg: var(--bg-elev);
+  --dock-tabs-bg: var(--bg);
+  --dock-rule: var(--border);
+  --status-h: 28px;
+  --status-bg: var(--bg-elev);
+  --status-font: var(--font-sans);
+  --main-pad: 28px 36px 44px;
+
+  /* Extra chrome tokens */
+  --glow-size: 10px;
+  --brand-hover-transform: rotate(-6deg) scale(1.05);
+  --nav-item-pad: 9px 12px 9px 16px;
+  --title-rule: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+  --nav-count-bg: var(--accent-soft);
+  --nav-count-fg: var(--accent);
+  --nav-count-font: var(--font-sans);
+  --nav-count-on-bg: var(--accent-soft);
+  --nav-count-on-fg: var(--accent);
+
+  --dock-tab-on-bg: var(--bg-elev);
+
+  /* Components */
+  --radius-ms: 8px;
+  --surface-glow: var(--shadow-glow-accent);
+  --hover-lift: -1px;
+  --btn-h: 34px;
+  --btn-pad: 7px 14px;
+  --title-size: 26px;
+  --title-weight: 700;
+  --title-track: -0.015em;
+
+  --rail-w: 62px;
+
+  --card-stripe: linear-gradient(90deg, transparent 0%, var(--accent) 40%, var(--accent-strong) 60%, transparent 100%);
+
+  --spot-tint: 9%;
+
+  /* Module workbench */
+  --module-areas: "actions main side";
+  --module-areas-mid: "actions main side";
+  --module-col-actions: minmax(340px, 0.92fr);
+  --module-col-main: minmax(420px, 1.08fr);
+  --module-col-side: 0px;
+  --module-rows-mid: minmax(0, 1fr);
+  --module-col-actions-strip: minmax(340px, 0.92fr);
+  --module-col-side-strip: 0px;
+  --module-pane-display: flex;
+  --module-inspector-display: contents;
+  --module-pane-head-display: none;
+  --module-legacy-label-display: block;
+  --module-side-pad: 0;
+  --module-side-rule: transparent;
+  --module-side-bg: transparent;
+  --strip-writing: horizontal-tb;
+  --actlist-flow: row wrap;
+  --actlist-gap: 5px;
+  --actlist-tabs-direction: row;
+  --actlist-tab-justify: flex-start;
+  --actlist-item-justify: center;
+  --actlist-item-width: auto;
+  --actlist-item-min-w: 64px;
+  --actlist-item-pad: var(--key-pad);
+  --actlist-item-h: var(--key-h);
+  --actlist-item-bg: var(--key-bg);
+  --actlist-item-border: var(--key-border);
+  --actlist-label-size: var(--key-label-size);
+  --actlist-label-max: var(--key-label-max);
+  --actlist-label-wrap: nowrap;
+  --actlist-on-bg: var(--accent-soft);
+  --actlist-on-fg: var(--accent);
+  --actlist-on-border: color-mix(in oklab, var(--accent), transparent 42%);
+
+  --module-col-actions-none: minmax(340px, 0.92fr);
+
+  --module-col-side-wide: 0px;
+
+  --chip-case: lowercase;
+
+  /* Selection */
+  --nav-current-bg: var(--accent-soft);
+  --nav-current-fg: var(--fg);
+  --nav-current-mark: 1;
+  --seg-on-bg: var(--accent-soft);
+  --seg-on-fg: var(--fg);
+  --seg-on-border: color-mix(in oklab, var(--accent) 48%, var(--border));
+
+  /* Keys */
+  --key-direction: column;
+  --key-gap: 3px;
+  --key-pad: 5px 7px 4px;
+  --key-h: auto;
+  --key-bg: transparent;
+  --key-border: transparent;
+  --key-label-size: 10px;
+  --key-label-weight: 600;
+  --key-label-max: 82px;
+  --key-tile-h: 52px;
+  --key-justify: flex-start;
+  --key-danger-fg: var(--fg);
+  --key-danger-bg: transparent;
+  --key-icon-display: inline-flex;
+}

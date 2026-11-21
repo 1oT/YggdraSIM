@@ -75,7 +75,7 @@ subsystem page that contains the full surface.
 
     [Open recipe](write-a-profile-policy-pack.md)
 
--   :material-access-point-network: __Remote APDU Streaming__
+-   :material-access-point-network: __Card Bridge over SSH__
 
     ---
 

@@ -455,20 +455,6 @@ def render_asn1_value_profile(
     return "\n\n".join(assignments) + ("\n" if assignments else "")
 
 
-def export_asn1_value_profile(
-    pes: Any,
-    *,
-    workspace_root: Path | None = None,
-    inline_placeholder_records: Iterable[InlinePlaceholderRecord] | None = None,
-) -> str:
-    """Compatibility-named wrapper for :func:`render_asn1_value_profile`."""
-    return render_asn1_value_profile(
-        pes,
-        workspace_root=workspace_root,
-        inline_placeholder_records=inline_placeholder_records,
-    )
-
-
 def render_asn1_value(
     value: Any,
     schema_node: Any,

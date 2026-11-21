@@ -105,7 +105,15 @@ Shell control:
 - `EXIT`
 - `QA`
 
+Tab completion covers every command and alias, the `--json` / `--yaml` /
+`--debug` flags, the `RECORD` verbs, file paths, and the profile identifiers
+of the last decoded profile list.
+
 ## Common workflows
+
+The command that reaches the card first in a card session is preceded by
+`TERMINAL CAPABILITY` (see *Session rules*); the step lists below start after
+it.
 
 ### Discovery
 
@@ -122,13 +130,15 @@ CERTS
 1. `SELECT ISD-R`
 2. `GetProfilesInfo`
 3. `GetEuiccConfiguredData`
-4. `GetEID` through `ECASD`, then reselect `ISD-R`
-5. `GetEuiccInfo1`
-6. `GetEuiccInfo2`
-7. `GetRAT`
-8. `RetrieveNotificationsList`
-9. `GetEimConfigurationData`
-10. `GetCerts`
+4. `GetEID` on the `ISD-R`
+5. the issuer number through `ECASD` (`GET DATA` tag `42`), then reselect
+   `ISD-R`; a card that refuses it leaves the issuer empty
+6. `GetEuiccInfo1`
+7. `GetEuiccInfo2`
+8. `GetRAT`
+9. `RetrieveNotificationsList`
+10. `GetEimConfigurationData`
+11. `GetCerts`
 
 ### Local profile load
 
@@ -148,9 +158,24 @@ LOAD-PROFILE
 4. `GetEuiccChallenge`
 5. `AuthenticateServer`
 6. `PrepareDownload`
-7. profile or BPP resolution
-8. payload load
-9. `CancelSession`
+7. `GetEID`, for a profile the shell binds itself: the session keys are
+   derived from the EID (SGP.22 v3.1 section 2.6.4.2)
+8. profile or BPP resolution
+9. payload load
+10. `CancelSession`
+11. `EnableProfile` for the installed profile
+
+The last step answers the SGP.22 v3.1 section 3.1.3 step 8 question ("enable
+the profile after installation?") without asking: once the Profile
+Installation Result reports `successResult`, the shell selects `ISD-R` again
+and sends `EnableProfile` for the ICCID the result carries (the ISD-P AID when
+the notification metadata has no ICCID). The eUICC disables the previously
+enabled profile itself and refuses with `disallowedByPolicy` when that profile
+carries PPR1; no explicit `DisableProfile` is sent first, so a refusal leaves
+the old profile in place. A refused or failed enable is reported after the
+load banner and does not turn the successful install into a failed load.
+`AUTO_ENABLE_AFTER_LOAD = False` in `LocalAccessConfig` restores the
+download-only behaviour; the Local eIM shell keeps it off.
 
 ### Metadata upload
 
@@ -188,11 +213,14 @@ Accepted identifiers:
 
 Current behavior:
 
+- `LOAD-PROFILE` enables the profile it installed (`AUTO_ENABLE_AFTER_LOAD`,
+  on by default), so no `ENABLE-PROFILE` follows a local load
 - `ENABLE-PROFILE` auto-disables the currently enabled profile before enabling
   the target
 - `DISABLE-PROFILE` no-ops cleanly when the target is already disabled
-- `DELETE-PROFILE` is allowed directly even when the target is currently
-  enabled
+- `DELETE-PROFILE` disables an enabled target first (SGP.22 v3.1 section
+  5.7.18 has the eUICC reject a delete while the profile is enabled), then
+  deletes it; a refused disable aborts the delete
 
 ## Certificate model
 
@@ -256,6 +284,17 @@ Resolution rules:
 
 ## Session rules
 
+- every card session opens with `TERMINAL CAPABILITY` declaring IPAd support
+  (tag `84`, GSMA SGP.32 v1.3 section 3.8.2), sent once before the first
+  application selection and again after a card reset; an SGP.32 eUICC
+  enables the ES10 functions only behind it and answers `69 85` to every
+  ES10 command without it
+- a card that refuses `TERMINAL CAPABILITY` is noted and the command goes on
+- the EID is read with ES10 `GetEID` on the `ISD-R` (GSMA SGP.22 v3.1 section
+  5.7.20, SGP.32 v1.3 section 5.9.19), which stays on the `ISD-R` inside an
+  open session; `GET DATA` tag `5A` on the `ECASD` (SGP.02 v4.2 section 2.2.2)
+  is tried only after the card refused the first, and a card that gives no
+  EID either way is reported with both answers
 - the local session opener does not use `matchingId`
 - `AuthenticateServer`, `PrepareDownload`, and the final BPP must share one
   coherent transaction context

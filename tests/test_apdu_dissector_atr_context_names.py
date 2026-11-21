@@ -78,8 +78,10 @@ class AnswerToReset(unittest.TestCase):
         self.assertIn("Card capabilities", text)
 
     def test_the_checksum_verifies(self) -> None:
+        """Boolean fields render as True/False, the way the sibling
+        assertions in this suite already expect."""
         rows = decode_fields(self.capture, ["yapdu.atr.tck_valid"])
-        self.assertIn("1", [row[0] for row in rows if row and row[0]])
+        self.assertIn("True", [row[0] for row in rows if row and row[0]])
 
 
 class ContextTagsOutsideEuiccInfo(unittest.TestCase):
@@ -105,7 +107,12 @@ class ContextTagsOutsideEuiccInfo(unittest.TestCase):
 
 
 class ContextTagsInsideEuiccInfo(unittest.TestCase):
-    """The same 'A9' inside a BF22 keeps its EUICCInfo meaning."""
+    """The same 'A9' inside a BF20 or a BF22 keeps its EUICCInfo meaning.
+
+    Both parents matter. EUICCInfo1 and EUICCInfo2 each declare the
+    euiccCiPKId lists, and a GetEuiccInfo1 response is what an LPA reads
+    before it has an EUICCInfo2 to read at all.
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -116,7 +123,11 @@ class ContextTagsInsideEuiccInfo(unittest.TestCase):
                 Exchange(
                     bytes.fromhex("80CABF2200"),
                     bytes.fromhex("bf2208a906040401020304") + b"\x90\x00",
-                )
+                ),
+                Exchange(
+                    bytes.fromhex("80CABF2000"),
+                    bytes.fromhex("bf2008a906040401020304") + b"\x90\x00",
+                ),
             ],
         )
         require_working_tshark(cls.capture)
@@ -124,6 +135,10 @@ class ContextTagsInsideEuiccInfo(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls._directory.cleanup()
+
+    def test_a9_names_the_euicc_ci_pkid_list_in_euicc_info1(self) -> None:
+        text = decode_text(self.capture, display_filter="frame.number==2")
+        self.assertIn("euiccCiPKIdListForVerification (0xA9)", text)
 
     def test_a9_names_the_euicc_ci_pkid_list(self) -> None:
         self.assertIn(

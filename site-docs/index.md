@@ -141,7 +141,7 @@ exercised without switching projects.
 | `SIMCARD/` | Simulated UICC / eUICC backend (ETSI / GP / SCP03 / SCP80 / Toolkit / 5G AKA / AKMA / SUCI / `GET IDENTITY`) | [SIMCARD Simulator](subsystems/simcard-simulator.md) |
 | `Tools/ProfilePackage/` | SAIP shell, lint engine, transcode TUI | [Profile Package](subsystems/profile-package.md) |
 | `Tools/HilBridge/` | SIMtrace2-backed HIL bridge, RemSIM lifecycle, GSMTAP, remote-card input, AT+CSIM/CRSM transcoder | [HIL Bridge](subsystems/hil-bridge.md) |
-| `Tools/CardBridge/` | Loopback HTTP bridge that streams a PC/SC reader to another host over SSH | [Remote APDU Streaming](how-to/remote-apdu-streaming.md) |
+| `Tools/CardBridge/` | Loopback HTTP bridge that streams a PC/SC reader to another host over SSH | [Card Bridge over SSH](how-to/remote-apdu-streaming.md) |
 | `Tools/ApduFuzz/` | Opt-in eUICC APDU mutation fuzzer (allow-listed, hard-gated) | [APDU Fuzzer](subsystems/apdu-fuzzer.md) |
 | `Tools/EumDiag/` | EUM / SM-DP+ session-key injection + Wireshark Lua dissector | [EUM Diagnostics](subsystems/eum-diagnostics.md) |
 | `Tools/SuciTool/` | SUCI key management shell | [SUCI Tool](subsystems/suci-tool.md) |

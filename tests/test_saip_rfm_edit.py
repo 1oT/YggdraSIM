@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Unit tests for ``saip_rfm_edit``."""
 
 from __future__ import annotations
@@ -159,6 +158,97 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(summary["tar_list"], ["B00001", "B00002"])
         self.assertEqual(summary["minimum_security_level"], 0x12)
         self.assertEqual(summary["adf_access"]["adf_aid_hex"], "A0000000871002")
+
+
+def _document_with_adfs() -> dict:
+    usim_aid = bytes.fromhex("A0000000871002FF34FF0789312E30FF")
+    isim_aid = bytes.fromhex("A0000000871004FF34FF0789312E30FF")
+    return {
+        "sections": {
+            "header": {},
+            "usim": {"adf-usim": [("fileDescriptor", {"dfName": usim_aid})]},
+            "isim": {"adf-isim": [("fileDescriptor", {"dfName": isim_aid})]},
+            "opt-usim": {"adf-usim": []},
+            "rfm": _empty_rfm(),
+        }
+    }
+
+
+class AdfCatalogueTests(unittest.TestCase):
+
+    def test_list_adf_bindings_names_each_naa_adf(self) -> None:
+        rows = rfm_edit.list_adf_bindings(_document_with_adfs())
+        self.assertEqual(
+            [(row["adf"], row["pe_index"], row["section_key"]) for row in rows],
+            [("ADF.USIM", 1, "usim"), ("ADF.ISIM", 2, "isim")],
+        )
+        self.assertEqual(rows[0]["aid_hex"], "A0000000871002FF34FF0789312E30FF")
+
+    def test_list_adf_bindings_skips_malformed_sections(self) -> None:
+        doc = {
+            "sections": {
+                "usim": {"adf-usim": [("fileDescriptor", {})]},
+                "csim": {"adf-csim": "x"},
+                "iot": {"adf-usim": [["fileDescriptor", {"dfName": "A0000000871002"}]]},
+            }
+        }
+        rows = rfm_edit.list_adf_bindings(doc)
+        self.assertEqual([(row["adf"], row["aid_hex"]) for row in rows], [("ADF.USIM", "A0000000871002")])
+        self.assertEqual(rfm_edit.list_adf_bindings({}), [])
+
+    def test_match_adf_binding_ignores_case_and_spaces(self) -> None:
+        rows = rfm_edit.list_adf_bindings(_document_with_adfs())
+        hit = rfm_edit.match_adf_binding("a0 00 00 00 87 10 04 ff 34 ff 07 89 31 2e 30 ff", rows)
+        self.assertEqual(hit["adf"], "ADF.ISIM")
+        self.assertIsNone(rfm_edit.match_adf_binding("A000000151", rows))
+        self.assertIsNone(rfm_edit.match_adf_binding("", rows))
+
+    def test_resolve_adf_reference_by_name_and_by_aid(self) -> None:
+        rows = rfm_edit.list_adf_bindings(_document_with_adfs())
+        self.assertEqual(
+            rfm_edit.resolve_adf_reference("usim", rows), "A0000000871002FF34FF0789312E30FF",
+        )
+        self.assertEqual(
+            rfm_edit.resolve_adf_reference("ADF.ISIM", rows), "A0000000871004FF34FF0789312E30FF",
+        )
+        self.assertEqual(rfm_edit.resolve_adf_reference("a0 00 00 01 51 53 50", rows), "A0000001515350")
+
+    def test_resolve_adf_reference_refuses_missing_adf_and_bad_aid(self) -> None:
+        rows = rfm_edit.list_adf_bindings(_document_with_adfs())
+        with self.assertRaises(ValueError):
+            rfm_edit.resolve_adf_reference("CSIM", rows)
+        with self.assertRaises(ValueError):
+            rfm_edit.resolve_adf_reference("A000", rows)
+        with self.assertRaises(ValueError):
+            rfm_edit.resolve_adf_reference("", rows)
+
+
+class AdfBindingDefaultsTests(unittest.TestCase):
+
+    def test_empty_domains_inherit_the_uicc_domains(self) -> None:
+        rfm = _empty_rfm()
+        rfm["uiccAccessDomain"] = bytes.fromhex("02030104")
+        rfm["uiccAdminAccessDomain"] = bytes.fromhex("00")
+        rfm_edit.set_adf_access(rfm, adf_aid_hex="A0000000871002")
+        self.assertEqual(rfm["adfRFMAccess"]["adfAccessDomain"], bytes.fromhex("02030104"))
+        self.assertEqual(rfm["adfRFMAccess"]["adfAdminAccessDomain"], bytes.fromhex("00"))
+
+    def test_explicit_domains_win(self) -> None:
+        rfm = _empty_rfm()
+        rfm["uiccAccessDomain"] = bytes.fromhex("02030104")
+        rfm_edit.set_adf_access(rfm, adf_aid_hex="A0000000871002", adf_access_domain_hex="FF")
+        self.assertEqual(rfm["adfRFMAccess"]["adfAccessDomain"], bytes.fromhex("FF"))
+        self.assertEqual(rfm["adfRFMAccess"]["adfAdminAccessDomain"], b"")
+
+    def test_summary_names_the_default_directory(self) -> None:
+        rfm = _empty_rfm()
+        self.assertEqual(rfm_edit.rfm_summary(rfm)["default_directory"], "MF")
+        rows = rfm_edit.list_adf_bindings(_document_with_adfs())
+        rfm_edit.set_adf_access(rfm, adf_aid_hex="A0000000871002FF34FF0789312E30FF")
+        summary = rfm_edit.rfm_summary(rfm, bindings=rows)
+        self.assertEqual(summary["default_directory"], "ADF")
+        self.assertEqual(summary["adf_access"]["adf_name"], "ADF.USIM")
+        self.assertEqual(rfm_edit.rfm_summary(rfm)["adf_access"]["adf_name"], "")
 
 
 if __name__ == "__main__":

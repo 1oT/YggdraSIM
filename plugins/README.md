@@ -27,11 +27,11 @@ then dropped into the writable runtime tree for packaged builds.
 The plugin manager loads every `.py` file (or package directory) it finds under
 the active runtime root's `plugins/` only after an explicit opt-in:
 
-1. `YGGDRASIM_ALLOW_PLUGINS=1` — explicit opt-in. Imports plugin code
+1. `YGGDRASIM_ALLOW_PLUGINS=1` -- explicit opt-in. Imports plugin code
    from the active runtime root.
-2. `YGGDRASIM_DISALLOW_PLUGINS=1` — hard-lock. Refuses every plugin
+2. `YGGDRASIM_DISALLOW_PLUGINS=1` -- hard-lock. Refuses every plugin
    even when `YGGDRASIM_ALLOW_PLUGINS=1` is also set.
-3. unset, false, or unrecognised `YGGDRASIM_ALLOW_PLUGINS` values —
+3. unset, false, or unrecognised `YGGDRASIM_ALLOW_PLUGINS` values --
    default refusal. No plugin code is imported.
 
 On first successful load the manager emits a one-line stderr note listing the
@@ -75,7 +75,20 @@ capabilities and offers extension hooks to the core.
 The current runtime integration expects a capability provider to expose some or
 all of the following callables:
 
-- `extend_target(target)`
+- `extend_target(target)`, called with each object the core opens to plugins;
+  the provider inspects the target's class and installs what fits, or does
+  nothing. The core hands over the GUI `ActionRegistry`, the SCP11 live and
+  test consoles (`SCP11Console`), the eIM-local shell (`EimLocalShell`), the
+  SCP03 admin shell (`ShellDispatcher`; a verb added to `shell.commands`
+  after its registry was built receives its whole argument line) and the
+  launcher menu (`LauncherMenu.add_entry(key, label, run)` from
+  `yggdrasim_common/launcher_menu.py`; the built-in keys are reserved and the
+  entries are listed under "Plugins"), and the GUI's plugin console registry
+  (`PluginConsoleRegistry.add_console(console)` from
+  `yggdrasim_common/gui_server/plugin_console_registry.py`; the console's
+  manifest and methods, including the run form a console declares to start
+  runs from ticked items, are described under *Plugin consoles* in
+  `site-docs/internals/plugin-contract.md`).
 - `handle_command(surface, command_name, target, argument)`
 - `register(mcp)` for the `mcp_extensions` capability, which adds tools,
   resources, and prompts to the MCP server
@@ -131,11 +144,9 @@ def register_plugins(manager):
 
 ## Not every plugin is a capability provider
 
-A plugin may exist purely as internal tooling and register nothing. The
-pre-release sanitizer is the worked example: it holds the identifier rules
-this tree is scrubbed against, which cannot ship for the reason the rules
-themselves describe, and it deliberately exposes no MCP tool. Deciding
-whether a tree is publishable is a maintainer's call, not an agent's.
+A plugin may exist purely as internal tooling and register nothing: a
+maintainer's script that is run by hand and offers no surface to the GUI,
+the shells or the MCP server.
 
 Such a plugin needs no `register_plugins`; the loader skips it without
 complaint.

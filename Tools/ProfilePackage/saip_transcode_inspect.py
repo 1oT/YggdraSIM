@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 TRANSCODE-TUI left inspector: decode the JSON selection or whole profile.
 """
@@ -143,11 +142,15 @@ def _implicit_template_defaults_report(
     arr_summary = None
     arr_record = getattr(file_template, "arr", None)
     if isinstance(arr_record, int):
-        from Tools.ProfilePackage.saip_asn1_decode import describe_arr_record_from_section
+        from Tools.ProfilePackage.saip_asn1_decode import (
+            arr_scope_for_file_kind,
+            describe_arr_record_from_section,
+        )
 
         arr_summary = describe_arr_record_from_section(
             section,
             record_number=arr_record,
+            scope=arr_scope_for_file_kind(file_type.lower()),
         )
 
     defaults = _template_default_field_descriptions(
@@ -256,7 +259,7 @@ def build_transcode_inspector_text(
         try:
             loaded = json.loads(stripped)
         except json.JSONDecodeError as exc:
-            return f"JSON parse error — cannot run profile decode:\n{exc}"
+            return f"JSON parse error -- cannot run profile decode:\n{exc}"
         if isinstance(loaded, dict) is False:
             return "Root must be a JSON object for profile-wide decode."
         return build_profile_asn1_report(loaded)
@@ -277,7 +280,7 @@ def build_transcode_inspector_text(
     try:
         loaded_document = json.loads(stripped)
     except json.JSONDecodeError as exc:
-        return f"JSON parse error — cannot inspect selection:\n{exc}"
+        return f"JSON parse error -- cannot inspect selection:\n{exc}"
 
     sub: Any
     if subtree_override is not None:
@@ -293,7 +296,7 @@ def build_transcode_inspector_text(
                 f"Span [{s}:{e}) is not valid JSON ({exc}).\n"
                 f"PE context (heuristic): {pe_key}\n"
                 + frag[:800]
-                + ("\n…" if len(frag) > 800 else "")
+                + ("\n..." if len(frag) > 800 else "")
             )
 
     header = f"PE: {humanize_saip_display_name(pe_key)}\n"
@@ -393,12 +396,18 @@ def _resolve_arr_rule_summary_line(
     resolved = _resolve_file_template_with_arr(template_id, focus_key_hint)
     if resolved is None:
         return ""
-    _file_template, arr_record = resolved
-    from Tools.ProfilePackage.saip_asn1_decode import describe_arr_record_from_section
+    file_template, arr_record = resolved
+    from Tools.ProfilePackage.saip_asn1_decode import (
+        arr_scope_for_file_kind,
+        describe_arr_record_from_section,
+    )
 
     arr_summary = describe_arr_record_from_section(
         section,
         record_number=arr_record,
+        scope=arr_scope_for_file_kind(
+            str(getattr(file_template, "file_type", "") or "").lower()
+        ),
     )
     if isinstance(arr_summary, str) is False:
         return ""

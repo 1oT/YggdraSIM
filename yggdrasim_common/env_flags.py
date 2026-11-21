@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Single-source-of-truth registry for YGGDRASIM_* runtime flags.
 
 The suite honours a family of ``YGGDRASIM_*`` environment variables that
@@ -27,7 +26,7 @@ The persistence file lives under ``runtime_path("state",
 "env_overrides.json")`` to match the card-backend persistence pattern.
 A second file under ``~/.yggdrasim/env_overrides.json`` is read only as
 a fallback for flags that cannot meaningfully live inside the runtime
-root (specifically ``YGGDRASIM_RUNTIME_ROOT`` itself — selecting it
+root (specifically ``YGGDRASIM_RUNTIME_ROOT`` itself -- selecting it
 would create a chicken-and-egg with the path resolver). The per-flag
 ``persist_scope`` controls which file each override is written to.
 """
@@ -59,6 +58,7 @@ CATEGORY_DEBUG: Final[str] = "Debug"
 CATEGORY_HIL_BRIDGE: Final[str] = "HIL bridge"
 CATEGORY_TOOLS: Final[str] = "External tool locators"
 CATEGORY_SESSION: Final[str] = "Session recording"
+CATEGORY_APPEARANCE: Final[str] = "Appearance"
 CATEGORY_GUI: Final[str] = "Universal GUI"
 
 
@@ -74,6 +74,7 @@ CATEGORY_ORDER: Final[tuple[str, ...]] = (
     CATEGORY_HIL_BRIDGE,
     CATEGORY_TOOLS,
     CATEGORY_SESSION,
+    CATEGORY_APPEARANCE,
     CATEGORY_GUI,
 )
 
@@ -139,7 +140,9 @@ class EnvFlag:
         ``APPLIES_RUNTIME`` or ``APPLIES_STARTUP``.
     sensitive:
         Security-sensitive flags (insecure TLS, demo keys, disabling
-        quirks gate, disallow plugins) prompt for confirmation.
+        quirks gate, disallow plugins, a command the process runs)
+        prompt for confirmation: the launcher menu before it asks for
+        the value, the GUI page between Set and the write.
     persist_scope:
         ``PERSIST_FILE`` → state/env_overrides.json in runtime root.
         ``PERSIST_HOME`` → ~/.yggdrasim/env_overrides.json, used for
@@ -147,7 +150,11 @@ class EnvFlag:
         ``YGGDRASIM_RUNTIME_ROOT`` itself).
         ``PERSIST_SESSION`` → never persisted; session-only.
     notes:
-        Extra free-form text, usually about caveats.
+        Extra free-form text, usually about caveats. Both editors print
+        it in the confirmation of a sensitive flag.
+    secret:
+        The value is a credential, so the GUI page masks the field it
+        is typed into.
     """
 
     name: str
@@ -163,6 +170,33 @@ class EnvFlag:
     sensitive: bool = False
     persist_scope: str = PERSIST_FILE
     notes: str = ""
+    secret: bool = False
+
+
+def _cli_theme_choices() -> tuple[str, ...]:
+    """Return the selectable CLI palettes.
+
+    Imported lazily-ish at module scope: :mod:`yggdrasim_common.cli_theme`
+    reads this module only from inside a function, so the dependency runs
+    one way and the choice list cannot drift from the palette registry.
+    """
+    from yggdrasim_common.cli_theme import theme_choices
+
+    return theme_choices()
+
+
+# Flags read by a process that never loads the persisted overrides: setting
+# one on an editor reaches that process only through its own environment.
+_MCP_PROCESS_NOTE: Final[str] = (
+    "Read by the MCP server (yggdrasim-mcp), which does not read the persisted "
+    "overrides: set it in the environment its MCP client starts it with. Setting "
+    "it here changes this process only."
+)
+_YGGDRACORE_PROCESS_NOTE: Final[str] = (
+    "Read by the 5G core launcher (yggdrasim-yggdracore), which does not read the "
+    "persisted overrides: export it in the shell that starts the launcher. Setting "
+    "it here changes this process only."
+)
 
 
 FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
@@ -226,7 +260,23 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "local PC/SC channel. Leave unset for normal local operation."
         ),
         kind=KIND_STRING,
-        default_hint="unset (no relay) — local PC/SC or simulator",
+        default_hint="unset (no relay) -- local PC/SC or simulator",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_CARD_RELAY_TOKEN_FILE",
+        category=CATEGORY_CARD_BACKEND,
+        summary="Path to the remote card relay's bearer-token file",
+        description=(
+            "Path to a file (mode 0600) holding the bearer token for the\n"
+            "card relay named by YGGDRASIM_CARD_RELAY_URL, on one line.\n"
+            "Read on every relay call. YGGDRASIM_CARD_RELAY_TOKEN (the\n"
+            "token itself, not registered here so that the Configuration\n"
+            "page never shows it) wins over it. The Remote Lab launcher\n"
+            "prints the export line for the token file it writes."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset -> the relay marker's token, else no token",
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
@@ -307,7 +357,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         description=(
             "Hard gate for executing arbitrary Python quirks files in\n"
             "SIMCARD/quirks.py. Must be truthy (1/true/yes/on) before the\n"
-            "simulator will import a quirks override — this keeps us\n"
+            "simulator will import a quirks override -- this keeps us\n"
             "from silently executing attacker-controlled code."
         ),
         kind=KIND_BOOL_TOGGLE,
@@ -629,6 +679,75 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_HIL_MODEM_DIAG",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Mirror the modem's own SIM log into the HIL GSMTAP stream",
+        description=(
+            "DIAG tty of the modem, or 'auto' for USB interface 0 of a\n"
+            "modem the Linux option or qcserial driver serves, looked up\n"
+            "again on every reconnect. When set, the HIL supervisor also\n"
+            "runs yggdrasim-hil-modem-diag, which sends the modem's view\n"
+            "of each SIM exchange on GSMTAP antenna 1 beside the bridge's\n"
+            "antenna-0 frames. It is a separate child on its own backoff:\n"
+            "a missing modem or a failing mirror never affects the bridge.\n"
+            "Empty or 'off' leaves it out."
+        ),
+        kind=KIND_STRING,
+        default_hint="off",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_WIRESHARK_PROFILE",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Wireshark profile the HIL session opens with",
+        description=(
+            "Passed to Wireshark with -C when a HIL session starts it.\n"
+            "YggdraSIM adds its filter buttons (SIM side, Modem side,\n"
+            "Modem notes, Modem cuts, Exchanges, STK, TLS alerts) and\n"
+            "coloring rules to that profile as two files marked as\n"
+            "managed; a file without the marker is left alone. 'off'\n"
+            "starts Wireshark on its last-used profile, as before."
+        ),
+        kind=KIND_STRING,
+        default_hint="YggdraSIM-HIL",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Time column format of the Wireshark a HIL session opens",
+        description=(
+            "Passed to Wireshark with -t when a HIL session starts it.\n"
+            "The default 'u' shows the UTC time of day each frame was\n"
+            "captured instead of seconds since the first frame. Any -t\n"
+            "value works: 'ud' adds the date, 'a' and 'ad' are local\n"
+            "time, 'r' is Wireshark's relative default, and '.N' sets N\n"
+            "decimals ('u.6'). Wireshark stores the format in the profile\n"
+            "when it exits, so a View menu choice lasts until the next\n"
+            "launch. 'off' leaves the format the profile last used; a\n"
+            "value Wireshark does not accept counts as 'off'."
+        ),
+        kind=KIND_STRING,
+        default_hint="u",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_HIL_APDU_TIMEOUT_MS",
+        category=CATEGORY_HIL_BRIDGE,
+        summary="Longest wait for the card to answer one APDU",
+        description=(
+            "Milliseconds the HIL bridge (and the Card Bridge) waits on\n"
+            "PC/SC for one APDU. An eUICC can hold a command for seconds\n"
+            "while the SIMtrace2 board keeps the modem waiting with NULL\n"
+            "procedure bytes; a timeout tears the bridge session down and\n"
+            "the modem sees a reset, so keep it well above the card's\n"
+            "slowest step. Minimum 100."
+        ),
+        kind=KIND_INT,
+        default_hint="30000",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
         name="YGGDRASIM_HIL_UHUBCTL_LOCATION",
         category=CATEGORY_HIL_BRIDGE,
         summary="Hub location for the port-power SIMtrace2 reset",
@@ -693,6 +812,11 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         kind=KIND_STRING,
         default_hint="shutil.which('saip-tool')",
         applies=APPLIES_RUNTIME,
+        sensitive=True,
+        notes=(
+            "The SAIP shell runs the command this names, with the rights of the "
+            "YggdraSIM process. Name only a program you trust."
+        ),
     ),
     EnvFlag(
         name="YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS",
@@ -720,17 +844,165 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
     EnvFlag(
+        name="YGGDRASIM_SAIP_UNIVERSAL_TOKENS",
+        category=CATEGORY_TOOLS,
+        summary="Universal placeholder test-value list for SAIP templates",
+        description=(
+            "Path of the operator-wide 'name,hex' list that supplies test\n"
+            "bytes for every placeholder literal ({iccid:ICCID:10:nibble_swap},\n"
+            "{scp80_kic1:BINARY:16}, ...) while a template is still being\n"
+            "authored. A template may bind a profile-specific list from\n"
+            "YGGDRASIM_SAIP_TOKEN_LISTS on top of it. Applied on demand from\n"
+            "the SAIP token editor, saip.apply_universal_tokens, or the\n"
+            "shell's APPLY-UNIVERSAL-TOKENS / MATERIALIZE-TEMPLATE --universal.\n"
+            "The file lives outside the repository and is never tracked."
+        ),
+        kind=KIND_PATH,
+        default_hint="~/.yggdrasim/saip_universal_tokens.csv",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_SAIP_TOKEN_LISTS",
+        category=CATEGORY_TOOLS,
+        summary="Library of profile-specific placeholder test-value lists",
+        description=(
+            "Directory holding the named 'name,hex' lists a SAIP template can\n"
+            "bind on top of the universal list (one <name>.csv per list).\n"
+            "A bound list answers a placeholder before the universal one, so\n"
+            "it only needs the values that differ. Managed from the SAIP\n"
+            "Tokens ribbon (Test-value lists), saip.universal_tokens, and\n"
+            "the shell's TOKEN-LISTS verbs. Never tracked."
+        ),
+        kind=KIND_PATH,
+        default_hint="~/.yggdrasim/saip_token_lists/",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_SAIP_PE_LIBRARY",
+        category=CATEGORY_TOOLS,
+        summary="Library of saved profile elements for the SAIP workbench",
+        description=(
+            "Directory holding the profile elements saved from the SAIP\n"
+            "workbench (one <name>.pe.json per entry, the PE document\n"
+            "saip.export_pe writes). Save PE adds an entry; the PE library\n"
+            "dialog loads one into the open package or deletes it\n"
+            "(saip.save_pe, saip.list_pe_library, saip.load_pe,\n"
+            "saip.delete_saved_pe). A saved template PE keeps its placeholder\n"
+            "literals and registers them in the package it is loaded into.\n"
+            "Never tracked."
+        ),
+        kind=KIND_PATH,
+        default_hint="~/.yggdrasim/saip_pe_library/",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_EIM_BUILDER_STORE",
+        category=CATEGORY_TOOLS,
+        summary="Store of the AddInitialEim builder: certificates and typed values",
+        description=(
+            "Directory holding the eIM and TLS certificates the AddInitialEim\n"
+            "builder reuses (certificates/<name>.pem, never a private key), the\n"
+            "values typed into it (values.json: eimId, eimFqdn, euiccCiPKId and\n"
+            "the certificate names last used) and its named configurations\n"
+            "(configurations.json). Managed from\n"
+            "Offline Tools (tool.eim_builder.*, the send included), read by\n"
+            "the eSIM Management send (scp11_live.add_initial_eim) and the\n"
+            "eSIM Live verbs ADD-INITIAL-EIM and EIM-CERT-STORE. Never tracked."
+        ),
+        kind=KIND_PATH,
+        default_hint="~/.yggdrasim/eim_builder/",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_LOCAL_EIM_STORE",
+        category=CATEGORY_TOOLS,
+        summary="Store of the Local eIM: identity, keys, eUICC records and the operation queue",
+        description=(
+            "Directory holding the Local eIM's identity (identity.json),\n"
+            "its private keys (keys/, mode 0600), the SQLite store of eUICC\n"
+            "records, tasks and operations (local_eim.sqlite3), the local\n"
+            "SM-DP+ Matching ID map (smdp_profiles.json) and, while the\n"
+            "background service runs, server.json and server.log. The shell\n"
+            "verbs QUEUE, OPS, EUICC, SERVE and the Local eIM actions all\n"
+            "read it; another process finds the running service through it.\n"
+            "Never tracked."
+        ),
+        kind=KIND_PATH,
+        default_hint="~/.yggdrasim/local_eim/",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_LOCAL_EIM_HISTORY_CAP",
+        category=CATEGORY_TOOLS,
+        summary="Finished Local eIM operations kept before the oldest are pruned",
+        description=(
+            "Number of finished operations (Success, Partial success, Error,\n"
+            "Canceled) the Local eIM store keeps; past it the oldest are\n"
+            "deleted after each submit. Queued and served operations are\n"
+            "never pruned. Minimum 100."
+        ),
+        kind=KIND_INT,
+        default_hint="10000",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_IPA_INDIRECT_DOWNLOAD",
+        category=CATEGORY_RUNTIME,
+        summary="IPA: run an Activation Code or contactSmds trigger through the eIM",
+        description=(
+            "The eSIM Management IPA takes a ProfileDownloadTriggerRequest\n"
+            "without profileDownloadData as an indirect download through the\n"
+            "eIM (SGP.32 v1.3 section 3.2.3.2), since it declares\n"
+            "eimDownloadDataHandling. A trigger carrying an Activation Code\n"
+            "runs directly against the SM-DP+ unless this is set: then it\n"
+            "goes through the eIM as well, which SGP.32 v1.3 section 2.11.1.3\n"
+            "leaves to an IPA supporting both. A contactSmds trigger follows\n"
+            "the same switch: unset, the IPA retrieves the Event Records\n"
+            "itself over ES11 (section 3.9.2.1); set, the eIM retrieves them\n"
+            "(section 3.9.2.2)."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset -> an Activation Code or contactSmds trigger is run directly",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_SAIP_UNIVERSAL_DEFAULTS",
+        category=CATEGORY_TOOLS,
+        summary="Seed opened templates from the universal test-value list",
+        description=(
+            "When a SAIP template with inline placeholders is opened, every\n"
+            "occurrence without a stored value takes the bytes the universal\n"
+            "token list declares for its literal, so a test profile can be\n"
+            "exported at once. Stored values (typed, or from the template's\n"
+            "sidecar / JSON block) always win. Set to 0/false/no/off to open\n"
+            "templates unresolved and apply the list on demand."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → templates are seeded from the list",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
         name="YGGDRASIM_SUCI_TOOL",
         category=CATEGORY_TOOLS,
         summary="Explicit suci-keytool binary or command",
         description=(
-            "Explicit command used to invoke pySim's suci-keytool.\n"
-            "Accepts either an absolute path or a full command line\n"
-            "like 'python -m suci_keytool'."
+            "Explicit command used to invoke pySim's suci-keytool, the one\n"
+            "place where that command is set. Accepts an absolute path or a\n"
+            "full command line. The script needs pyosmocom and pycryptodomex,\n"
+            "which a system Python may lack, so name the interpreter YggdraSIM\n"
+            "runs under before it:\n"
+            "'/path/to/venv/bin/python /path/to/pysim/contrib/suci-keytool.py'.\n"
+            "The SUCI keys tools of Offline Tools show the command in use over\n"
+            "their tabs."
         ),
         kind=KIND_STRING,
-        default_hint="shutil.which('suci-keytool')",
+        default_hint="suci-keytool.py or suci-keytool on PATH",
         applies=APPLIES_RUNTIME,
+        sensitive=True,
+        notes=(
+            "The SUCI key tools run the command this names, with the rights of the "
+            "YggdraSIM process. Name only a program you trust."
+        ),
     ),
     EnvFlag(
         name="YGGDRASIM_SUCI_TIMEOUT",
@@ -756,6 +1028,163 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         default_hint="unset → no session key material available",
         applies=APPLIES_RUNTIME,
     ),
+    EnvFlag(
+        name="YGGDRASIM_MCP_ACCESS",
+        category=CATEGORY_TOOLS,
+        summary="MCP server access level: read or write",
+        description=(
+            "What the MCP server's tools may do. read (the default) allows\n"
+            "lookups, decoders and reads; write also lets a tool change\n"
+            "files, cards and configuration. Reaching a card at all takes\n"
+            "YGGDRASIM_MCP_ALLOW_CARD besides."
+        ),
+        kind=KIND_CHOICE,
+        choices=("read", "write"),
+        default_hint="read",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes=_MCP_PROCESS_NOTE + " write lets an MCP client change files, cards and configuration.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_MCP_ALLOW_CARD",
+        category=CATEGORY_TOOLS,
+        summary="Let MCP tools reach a card or a card relay",
+        description=(
+            "Enables the MCP tools that reach hardware: PC/SC readers,\n"
+            "card sessions and a card relay. Off by default, because an\n"
+            "MCP client is usually an agent. A tool that changes the card\n"
+            "also needs YGGDRASIM_MCP_ACCESS=write."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset -> card tools refuse",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes=_MCP_PROCESS_NOTE + " On, an MCP client can send APDUs to the card in a reader.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_MCP_ALLOW_SCRIPT_FILES",
+        category=CATEGORY_TOOLS,
+        summary="Let MCP shell batches run command files",
+        description=(
+            "Permits the shell verbs that execute a file of commands\n"
+            "through the MCP shell tool. Off by default: the verb\n"
+            "classifier cannot see inside such a file, so nothing in it\n"
+            "is checked against the access level."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset -> script-file verbs refuse",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes=_MCP_PROCESS_NOTE + " On, a command file runs unchecked.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL",
+        category=CATEGORY_TOOLS,
+        summary="Log level of pySim, osmocom and construct in the MCP server",
+        description=(
+            "Python logging level the MCP server sets on the pySim,\n"
+            "osmocom and construct loggers when it starts."
+        ),
+        kind=KIND_CHOICE,
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        default_hint="WARNING",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_SESSION,
+        notes=_MCP_PROCESS_NOTE,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_MODE",
+        category=CATEGORY_TOOLS,
+        summary="YggdraCore stub AUSF: off or stub",
+        description=(
+            "stub lets the YggdraCore HTTP launcher start the stub AUSF\n"
+            "and AAnF (a loopback test rig); off (the default, and any\n"
+            "other value) keeps YggdraCore library-only. The YggdraCore\n"
+            "actions in the GUI run in either mode and report it."
+        ),
+        kind=KIND_CHOICE,
+        choices=("off", "stub"),
+        default_hint="off",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_HOST",
+        category=CATEGORY_TOOLS,
+        summary="Bind address of the YggdraCore HTTP launcher",
+        description=(
+            "Default for the launcher's --host. An address that is not\n"
+            "loopback is refused unless YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK\n"
+            "is set."
+        ),
+        kind=KIND_STRING,
+        default_hint="127.0.0.1",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_PORT",
+        category=CATEGORY_TOOLS,
+        summary="Port of the YggdraCore HTTP launcher",
+        description="Default for the launcher's --port.",
+        kind=KIND_INT,
+        default_hint="8089",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK",
+        category=CATEGORY_TOOLS,
+        summary="Let the YggdraCore launcher bind beyond loopback",
+        description=(
+            "Default for the launcher's --allow-nonloopback: a bind\n"
+            "address that is not loopback is accepted. Meant for a sealed\n"
+            "lab on a private bridge only."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset -> loopback addresses only",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE + " On, the stub AUSF can answer other hosts.",
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_TOKEN_FILE",
+        category=CATEGORY_TOOLS,
+        summary="Bearer-token file of the YggdraCore HTTP launcher",
+        description=(
+            "Default for the launcher's --token-file. Without it the\n"
+            "launcher generates a token and writes it under its default\n"
+            "token directory."
+        ),
+        kind=KIND_PATH,
+        default_hint="unset -> a generated token",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_5GCORE_NO_TOKEN",
+        category=CATEGORY_TOOLS,
+        summary="Run the YggdraCore launcher without bearer tokens",
+        description=(
+            "Default for the launcher's --no-token: requests are taken\n"
+            "without a bearer token. Refused for a bind address that is\n"
+            "not loopback."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset -> bearer token required",
+        applies=APPLIES_STARTUP,
+        sensitive=True,
+        persist_scope=PERSIST_SESSION,
+        notes=_YGGDRACORE_PROCESS_NOTE + " On, any local process can call the stub AUSF.",
+    ),
 
     # --- Session recording ---------------------------------------------
     EnvFlag(
@@ -772,6 +1201,34 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_RUNTIME,
     ),
 
+    # --- Appearance ------------------------------------------------------
+    EnvFlag(
+        name="YGGDRASIM_CLI_THEME",
+        category=CATEGORY_APPEARANCE,
+        summary="Terminal colour palette for the CLI and the shells",
+        description=(
+            "Selects the palette every CLI, launcher menu and secure-channel\n"
+            "shell colours its output with. Most names are the Universal GUI\n"
+            "themes transcribed from their token files, so a terminal can be\n"
+            "matched to the GUI; 'nord' is the CLI's own palette and the\n"
+            "default, and 'mono' emits no colour at all.\n"
+            "\n"
+            "Only foreground colour is emitted, and each palette is built\n"
+            "against its own theme background: a light palette on a dark\n"
+            "terminal is readable only if the terminal is light too.\n"
+            "Whether colour is emitted at all still follows NO_COLOR and\n"
+            "whether the stream is a TTY."
+        ),
+        kind=KIND_CHOICE,
+        choices=_cli_theme_choices(),
+        default_hint="nord (the canonical YggdraSIM palette)",
+        applies=APPLIES_STARTUP,
+        persist_scope=PERSIST_FILE,
+        notes=(
+            "Resolved once per process on first coloured output. The GUI's "
+            "own theme lives in browser storage and is selected separately."
+        ),
+    ),
     # --- Universal GUI -------------------------------------------------
     EnvFlag(
         name="YGGDRASIM_GUI_HOST",
@@ -826,7 +1283,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         description=(
             "Override the bind port for `yggdrasim --web-server`.\n"
             "Default 27854. Unlike desktop mode, server mode refuses to\n"
-            "fall back to an ephemeral port — operators rely on a stable\n"
+            "fall back to an ephemeral port -- operators rely on a stable\n"
             "URL."
         ),
         kind=KIND_INT,
@@ -850,6 +1307,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         sensitive=True,
         persist_scope=PERSIST_SESSION,
         notes="Session-scoped. Never persisted. Operator's responsibility to rotate.",
+        secret=True,
     ),
     EnvFlag(
         name="YGGDRASIM_GUI_TOKEN_FILE",
@@ -967,6 +1425,50 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
         applies=APPLIES_STARTUP,
     ),
     EnvFlag(
+        name="YGGDRASIM_GUI_ZOOM",
+        category=CATEGORY_GUI,
+        summary="Page zoom of the --gui desktop window",
+        description=(
+            "Scale of the desktop window's page as a factor: 1 is the\n"
+            "layout's native size (drawn for a 1280 x 800 window), 1.25\n"
+            "makes everything a quarter larger, and so on between 0.5 and\n"
+            "3. 'auto' fits the layout to the window instead (a larger\n"
+            "window zooms in, never below 1). Ctrl+plus, Ctrl+minus and\n"
+            "Ctrl+0 (or Ctrl+wheel) in the window step the zoom live and\n"
+            "write the chosen factor back here, so it is remembered across\n"
+            "launches; a value set in this view reaches the open window\n"
+            "within a second. Browser tabs on --web-server use the\n"
+            "browser's own zoom and ignore this flag."
+        ),
+        kind=KIND_CHOICE,
+        choices=(
+            "auto", "0.5", "0.67", "0.75", "0.8", "0.9", "1",
+            "1.1", "1.25", "1.5", "1.75", "2", "2.5", "3",
+        ),
+        default_hint="1 (native size)",
+        applies=APPLIES_RUNTIME,
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_GPU",
+        category=CATEGORY_GUI,
+        summary="Let the --gui desktop window draw with the GPU",
+        description=(
+            "Off by default: the Qt desktop window starts Chromium with\n"
+            "the GPU and GPU compositing switched off and one raster\n"
+            "thread, which keeps memory low and stays clear of graphics\n"
+            "driver faults but draws every frame on the CPU, so scrolling\n"
+            "a large window can stutter. On drops those three switches\n"
+            "and lets Chromium choose its raster threads; the other\n"
+            "limits stay. Read when the window starts, so it takes\n"
+            "effect on the next launch. If the window then comes up\n"
+            "blank, switch it off again from the launcher's [E] menu.\n"
+            "The GTK backend and browser tabs on --web-server ignore it."
+        ),
+        kind=KIND_BOOL_TOGGLE,
+        default_hint="unset → GPU off (software drawing, one raster thread)",
+        applies=APPLIES_STARTUP,
+    ),
+    EnvFlag(
         name="YGGDRASIM_GUI_HOST_SHELL",
         category=CATEGORY_GUI,
         summary="Expose the GUI Host-Shell tab (free-form OS shell PTY)",
@@ -977,7 +1479,7 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "shell (resolved $SHELL, fallback /bin/bash) running as the\n"
             "process that launched yggdrasim. This is functionally\n"
             "equivalent to giving every bearer-token holder a remote SSH\n"
-            "session — operators must opt in explicitly. The accompanying\n"
+            "session -- operators must opt in explicitly. The accompanying\n"
             "'AT decode' overlay (off by default per session) tee's the\n"
             "PTY byte stream through Tools.HilBridge.at_simlink so\n"
             "AT+CSIM / AT+CRSM lines surface a decoded ISO 7816 / TS\n"
@@ -993,6 +1495,28 @@ FLAG_REGISTRY: Final[tuple[EnvFlag, ...]] = (
             "--web-server bind. Full operator guide: "
             "guides/GUI_HOST_SHELL_GUIDE.md."
         ),
+    ),
+    EnvFlag(
+        name="YGGDRASIM_GUI_CARD_SESSION_IDLE_SECONDS",
+        category=CATEGORY_GUI,
+        summary="Idle ceiling for a GUI card session holding a reader",
+        description=(
+            "Seconds a card session may sit unused before the reader poll\n"
+            "closes it and releases the PC/SC handle. The workbench draws\n"
+            "a decoded file from its own cache, so reading one never\n"
+            "reaches the backend to refresh the clock: this has to cover\n"
+            "how long a file is read, not how often the tree is clicked.\n"
+            "Raise it when a card stays in an attached reader for a long\n"
+            "inspection, lower it when a reader has to come free for\n"
+            "another tool quickly. Read when a session opens, so a change\n"
+            "reaches the next one; an already expired session comes back\n"
+            "by re-scanning the tab. SAIP authoring sessions hold no\n"
+            "reader and keep their own, much longer ceiling, and the\n"
+            "interactive shells answer to YGGDRASIM_GUI_IDLE_SECONDS."
+        ),
+        kind=KIND_INT,
+        default_hint="900 (15 minutes)",
+        applies=APPLIES_RUNTIME,
     ),
 )
 
@@ -1095,9 +1619,14 @@ def _write_overrides_file(path_text: str, payload: dict[str, Any]) -> None:
     directory = os.path.dirname(normalized)
     if len(directory) > 0:
         os.makedirs(directory, exist_ok=True)
-    with open(normalized, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    # Overrides can name token/TLS-key paths and security-posture toggles, so
+    # the file is owner-private rather than written at the ambient umask.
+    from yggdrasim_common.secure_files import atomic_write_bytes
+
+    atomic_write_bytes(
+        normalized,
+        (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
 
 
 def _filter_to_registered(payload: dict[str, Any]) -> dict[str, str]:

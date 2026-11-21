@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``Tools.ProfilePackage.saip_dgi_decode``.
 
 Pure-function module: no I/O, no card transport. The fixture below
@@ -34,9 +33,9 @@ from Tools.ProfilePackage.saip_dgi_decode import (
 )
 
 
-# Real-world ``sdPersoData`` blob carrying connectivity parameters.
-# Same payload used by the existing shell render-test, so the lift is
-# regression-proof against the historical shape consumers rely on.
+# ``sdPersoData`` blob carrying connectivity parameters, with
+# reserved-range identifiers. Same payload as the shell render-test,
+# so the two stay regression-proof against the shape consumers rely on.
 _SD_PERSO_FIXTURE_HEX: str = (
     "00707a"
     "8578"
@@ -47,11 +46,11 @@ _SD_PERSO_FIXTURE_HEX: str = (
     "3c030227be"
     "3e0521c000020a"
     "8517"
-    "133839343435303136303532343637363333363202400186070003a503002000"
+    "133839383832303132333435363738393031323302400186070003a503002000"
     "8936"
-    "8a0d3133392e3136322e31352e3633"
-    "8b133839313033303030303030303638353336333"
-    "38c102f67736d612f61646d696e6167656e74"
+    "8a0d3139382e35312e3130302e3432"
+    "8b133839383832303938373635343332313039383"
+    "78c102f67736d612f61646d696e6167656e74"
 ).replace(" ", "")
 
 
@@ -115,7 +114,7 @@ class SimpleTlvPayloadTests(unittest.TestCase):
         self.assertIsNone(parse_simple_tlv_stream(bytes.fromhex("8404AABB")))
 
     def test_decode_simple_tlv_payload_recurses(self) -> None:
-        # 85 04 [ 84 02 AABB ] — outer simple-TLV that wraps another.
+        # 85 04 [ 84 02 AABB ] -- outer simple-TLV that wraps another.
         decoded = decode_simple_tlv_payload(bytes.fromhex("85048402AABB"))
         self.assertIsInstance(decoded, list)
         self.assertEqual(decoded[0]["tag"], "85")
@@ -284,6 +283,32 @@ class DecodeLengthPrefixedIdentifierBlockTests(unittest.TestCase):
     def test_non_ascii_identifier_returns_none(self) -> None:
         payload = bytes([0x02, 0xFF, 0xFE])
         self.assertIsNone(decode_length_prefixed_identifier_block(payload))
+
+class ValidateDgiStreamTests(unittest.TestCase):
+    """``validate_dgi_stream`` refuses what ``decode_dgi_stream`` tolerates."""
+
+    def test_accepts_whole_blocks_in_both_length_forms(self) -> None:
+        from Tools.ProfilePackage.saip_dgi_decode import validate_dgi_stream
+
+        short = bytes.fromhex("007003AABBCC") + bytes.fromhex("801002") + b"\x01\x02"
+        self.assertEqual(validate_dgi_stream(short), [("0070", 3), ("8010", 2)])
+        long_value = b"\x5A" * 300
+        long = bytes.fromhex("0070FF012C") + long_value
+        self.assertEqual(validate_dgi_stream(long), [("0070", 300)])
+
+    def test_refuses_empty_truncated_and_over_claiming_input(self) -> None:
+        from Tools.ProfilePackage.saip_dgi_decode import validate_dgi_stream
+
+        with self.assertRaises(ValueError):
+            validate_dgi_stream(b"")
+        with self.assertRaises(ValueError):
+            validate_dgi_stream(bytes.fromhex("0070"))
+        with self.assertRaises(ValueError):
+            validate_dgi_stream(bytes.fromhex("007004AABBCC"))
+        with self.assertRaises(ValueError):
+            validate_dgi_stream(bytes.fromhex("007003AABBCC80"))
+        with self.assertRaises(ValueError):
+            validate_dgi_stream(bytes.fromhex("0070FF01"))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from cryptography.x509.oid import NameOID
 
 from SCP03.config import Config
 from SCP03.logic.sgp22 import Sgp22Manager
+from yggdrasim_common.stk_terminal import terminal_profile_apdu
 from SCP03.logic.sgp32_decode import decode_rat_rules
 
 
@@ -118,11 +119,46 @@ class StkBasicRetryTransport:
             return b"", 0x68, 0x81
         if normalized == "80AA000005A903840101":
             return b"", 0x90, 0x00
-        if normalized == "80100000010C":
+        if normalized == terminal_profile_apdu().hex().upper():
             return b"", 0x90, 0x00
         if normalized == "81E2910003BF2D00":
             return b"", 0x68, 0x81
         raise AssertionError(f"Unexpected APDU: {apdu_hex}")
+
+
+class LostHandleTransport:
+    """Transport whose power cycle between rungs fails and drops the handle."""
+
+    def __init__(self):
+        self.calls = []
+        self.connected = True
+
+    def reset(self):
+        self.connected = False
+        raise RuntimeError("PC/SC connect to reader 'Fake Reader 00 00' (index 0) failed 6 times")
+
+    def is_connected(self):
+        return self.connected
+
+    def transmit(self, apdu_hex: str, silent: bool = False):
+        del silent
+        if not self.connected:
+            raise AssertionError("transmit after the handle was lost")
+        normalized = apdu_hex.upper()
+        self.calls.append(normalized)
+        if normalized == "00A4040010A0000005591010FFFFFFFF8900000100":
+            return b"", 0x90, 0x00
+        if normalized == "80E2910003BF2D00":
+            return b"", 0x69, 0x85
+        raise AssertionError(f"Unexpected APDU: {apdu_hex}")
+
+
+class ResetFailingTransport(DummyTransport):
+    """DummyTransport whose reset raises but which cannot report its state."""
+
+    def reset(self):
+        self.reset_calls += 1
+        raise RuntimeError("reset not supported on this bearer")
 
 
 class ExportReportManager(Sgp22Manager):
@@ -194,6 +230,35 @@ class Sgp22RetryLadderTests(unittest.TestCase):
             ],
         )
 
+    def test_retry_ladder_stops_with_the_reset_error_when_the_handle_is_lost(self):
+        transport = LostHandleTransport()
+        manager = Sgp22Manager(transport)
+
+        with redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError) as raised:
+                manager.list_profiles()
+
+        self.assertIn("card transport reset failed before retry", str(raised.exception))
+        self.assertIn("failed 6 times", str(raised.exception))
+        self.assertEqual(
+            transport.calls,
+            [
+                "00A4040010A0000005591010FFFFFFFF8900000100",
+                "80E2910003BF2D00",
+            ],
+        )
+
+    def test_retry_ladder_keeps_climbing_when_the_transport_cannot_report_its_state(self):
+        transport = ResetFailingTransport()
+        manager = Sgp22Manager(transport)
+
+        with redirect_stdout(io.StringIO()):
+            manager.list_profiles()
+
+        self.assertEqual(transport.reset_calls, 1)
+        self.assertIn("LAB (DOMAIN-A 01)", manager.profile_cache)
+        self.assertEqual(transport.calls[-1], "0070800100")
+
     def test_list_profiles_retries_on_basic_channel_after_stk_bootstrap(self):
         transport = StkBasicRetryTransport()
         manager = Sgp22Manager(transport)
@@ -225,7 +290,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         self.assertEqual(self.manager._resolve_tag_name(0x88, 0xBF22), "RSP Capability")
         self.assertEqual(self.manager._resolve_tag_name(0x99, 0xBF22), "Forbidden Profile Policy Rules")
         self.assertEqual(self.manager._resolve_tag_name(0x04, 0xBF22), "PP Version")
-        self.assertEqual(self.manager._resolve_tag_name(0x90, 0xBF22), "IPA Mode")
+        self.assertEqual(self.manager._resolve_tag_name(0x90, 0xBF22), "LPA/IPA Mode")
         self.assertEqual(self.manager._resolve_tag_name(0xB4, 0xBF22), "IoT Specific Info")
 
     def test_euicc_info2_value_decoder_formats_pp_version_and_ipa_mode(self):
@@ -235,7 +300,7 @@ class Sgp22RetryLadderTests(unittest.TestCase):
         )
         self.assertEqual(
             self.manager._decode_value(0x90, bytes.fromhex("01"), 0xBF22),
-            "Mode 1 active (1)",
+            "IPAe active (1)",
         )
         self.assertIn(
             "ppr1",

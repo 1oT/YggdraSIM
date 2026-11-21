@@ -12,8 +12,8 @@
   width: min(420px, 92vw);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  border-radius: var(--radius-ms);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -32,7 +32,7 @@
   flex: 1 1 auto;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--fg);
   padding: 5px 7px;
   font-family: var(--mono);
@@ -54,7 +54,7 @@
   cursor: pointer;
   border: 1px solid transparent;
   padding: 2px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
 
 .saip-find-toggle input[type=checkbox] {
@@ -125,7 +125,7 @@
 
 .saip-find-hit {
   background: var(--accent);
-  color: #181a1f;
+  color: var(--accent-fg);
   padding: 0 1px;
   border-radius: 2px;
 }

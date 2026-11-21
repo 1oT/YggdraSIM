@@ -61,7 +61,7 @@ OTA sequence against a per-ICCID state.
 | `iccid <hex>` | bind the session to a specific ICCID state |
 | `build <hex>` | assemble a secured packet from direct payload hex |
 | `send` | transmit the last built packet |
-| `sendraw <hex>` | transmit a raw APDU without OTA wrapping |
+| `sendraw <hex>` | transmit a raw APDU without OTA wrapping; a data field over 255 bytes is sent as a STORE DATA block sequence |
 | `ota <hex>` | build and send in one step |
 | `script <path>` | execute a command script |
 | `history` | show session history |
@@ -90,7 +90,7 @@ The parameter set exposed by `set` covers:
 | Location | Contents |
 | --- | --- |
 | `state/device_inventory.sqlite3` | per-ICCID OTA parameters, history |
-| `SCP80/ota_config.ini` | legacy import source, retained for migration |
+| `SCP80/ota_config.ini` | legacy import source, read while the inventory holds no SCP80 state; not shipped |
 
 ## Common recipes
 
@@ -129,8 +129,49 @@ and the rest of the parameter set.
 python -m SCP80 --cmd "script ./my_ota_sequence.scp80; exit"
 ```
 
+## Reading the answer
+
+When the SPI asks for a PoR, `send` and `ota` collect it without operator
+input. A PoR sent by SMS-DELIVER-REPORT is the ENVELOPE's own response data;
+one sent by SMS-SUBMIT arrives as a SEND SHORT MESSAGE, which the shell
+FETCHes on the ENVELOPE's `91 xx` and answers with a TERMINAL RESPONSE. The
+shell then prints:
+
+- `[<--] <data> <SW>` -- the response data and status word of the last
+  command the script ran (TS 102 226 v19 table 5.1). A PoR without that
+  field, an error PoR or one that does not decode prints raw, beside the
+  ENVELOPE status word.
+- `[POR] ...` -- the PoR status, TAR, CNTR, how many of the sent commands
+  ran, the carrier and the status word that led to the FETCH. A PoR OK whose
+  script ran to the end and answered `9000` prints this line only under `-v`.
+- `--- Decoded (...) ---` -- the data of an EF read after a SELECT, or else
+  the data decoded by context: GlobalPlatform registry entries, FCP
+  templates, other BER-TLV objects.
+
+Under `-v` the exchanges print below an `[OTA] SMS-PP data download` line,
+each named: `ENVELOPE`, `FETCH`, `TERMINAL RESPONSE`, `GET RESPONSE`.
+
+```text
+[SCP80] > send 80F24002054F005C014F00C0000000
+[<--] E3094F07F0010203040501E3094F07F0010203040502 9000
+--- Decoded (GlobalPlatform card content management) ---
+    GlobalPlatform registry entries  [GPC v2.3.1 tables 11-36 / 11-37]
+      E3 GlobalPlatform Registry related data
+        4F AID = 'F0010203040501'H
+      E3 GlobalPlatform Registry related data
+        4F AID = 'F0010203040502'H
+    SW 9000: Success
+```
+
 ## Pitfalls
 
+- A compact command string is a list of T=0 TPDUs, so a case 4 command such
+  as GET STATUS carries no Le, and its response stays on the card unless a
+  GET RESPONSE (`00C0000000`) follows it. TS 102 226 v19 §5.1.1 allows one
+  GET RESPONSE or case 2 command per string, as the last command; the
+  `[POR]` line counts the commands that ran against those sent. A reply of
+  `61 xx` means the GET RESPONSE was missing; the shell names the one to
+  append.
 - SPI must be consistent on both sides. If `CC` is required, the card will
   reject any packet missing it with `6988` or a PoR error code.
 - Counter mode must be aligned with whatever the card has seen last. An

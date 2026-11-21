@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for yggdrasim_common/hil_bridge_runtime.py pure utility functions.
 
 Covers: load_json_file, split_shell_like_arguments, supervisor_state_path,
@@ -14,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import shutil
 import unittest
 from unittest import mock
 
@@ -138,7 +138,7 @@ class SplitShellLikeArgumentsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# is_hil_bridge_running  (checks supervisor state — safe to call with no state)
+# is_hil_bridge_running  (checks supervisor state -- safe to call with no state)
 # ---------------------------------------------------------------------------
 
 class IsHilBridgeRunningTests(unittest.TestCase):
@@ -183,11 +183,10 @@ class ClearSupervisorStateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# systemctl wrappers — skipped when systemctl is absent
+# systemctl wrappers -- skipped when systemctl is absent
 # ---------------------------------------------------------------------------
 
-import shutil as _shutil
-_SYSTEMCTL_AVAILABLE = _shutil.which("systemctl") is not None
+_SYSTEMCTL_AVAILABLE = shutil.which("systemctl") is not None
 _SKIP_SYSTEMCTL = unittest.skipUnless(_SYSTEMCTL_AVAILABLE, "systemctl not available")
 
 

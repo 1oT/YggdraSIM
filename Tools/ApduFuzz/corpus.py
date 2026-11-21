@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 APDU corpus loader.
 
@@ -9,7 +8,7 @@ The fuzzer replays known-good APDU sequences captured from the
 YggdraSIM simulator ``ShellSessionRecorder`` (see
 ``yggdrasim_common.session_recording``) and mutates them before
 sending the commands to a physical card. Corpora are JSON files with
-the following shape (superset-friendly — unknown keys are ignored)::
+the following shape (superset-friendly -- unknown keys are ignored)::
 
     {
         "session_id": "...",

@@ -96,7 +96,9 @@
 .cc-getcerts-cert-title {
   margin: 0;
   font-size: 12px;
-  text-transform: uppercase;
+  /* Names from the card or the package (eUICCConfigurationData, a
+     certificate, an ASN.1 path) keep their case under Bench. */
+  text-transform: var(--group-case);
   letter-spacing: 0.05em;
   color: var(--fg-dim);
 }
@@ -153,7 +155,7 @@
 .cc-action-datasheet-raw .cc-hex {
   margin: 0;
   border: none;
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;

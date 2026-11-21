@@ -5,8 +5,8 @@
 
 The Stage-edit affordance was originally bitmap-only (EF.UST / EF.IST /
 generic service tables); operators asked for the same workflow on every
-decoded EF. Service-table payloads keep their purpose-built checklist —
-its UI value comes from the bitmap-aware encoder backend — but every
+decoded EF. Service-table payloads keep their purpose-built checklist --
+its UI value comes from the bitmap-aware encoder backend -- but every
 other transparent EF that arrives with raw bytes now opens a generic
 side-by-side hex editor pre-filled with the current EF body.
 

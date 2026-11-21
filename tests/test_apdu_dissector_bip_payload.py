@@ -118,6 +118,47 @@ HTTP_REQUEST = (
 )
 
 
+def client_hello(host: str = "smdp.example.com") -> bytes:
+    """A TLS 1.2 ClientHello naming *host* in its SNI extension.
+
+    RFC 8446 clause 4.1.2 for the message, RFC 6066 clause 3 for the
+    extension. Built rather than captured: a recorded handshake carries
+    both a real hostname and a real random.
+    """
+    name = host.encode("ascii")
+    server_name = bytes([0x00]) + len(name).to_bytes(2, "big") + name
+    server_name_list = len(server_name).to_bytes(2, "big") + server_name
+    extension = (
+        bytes.fromhex("0000")
+        + len(server_name_list).to_bytes(2, "big")
+        + server_name_list
+    )
+    body = b"".join(
+        [
+            bytes.fromhex("0303"),          # legacy_version
+            bytes(range(32)),               # random
+            bytes([0x00]),                  # legacy_session_id: empty
+            bytes.fromhex("0002")           # cipher_suites
+            + bytes.fromhex("1301"),        # TLS_AES_128_GCM_SHA256
+            bytes.fromhex("0100"),          # legacy_compression_methods
+            len(extension).to_bytes(2, "big") + extension,
+        ]
+    )
+    handshake = bytes([0x01]) + len(body).to_bytes(3, "big") + body
+    return (
+        bytes.fromhex("160303") + len(handshake).to_bytes(2, "big") + handshake
+    )
+
+
+#: A ServerHello: handshake type 2, which carries no SNI.
+SERVER_HELLO = bytes.fromhex("1603030004020000")
+
+#: A record declaring length 0 whose only body byte is the handshake type.
+#: The ClientHello walk reads a 24-bit length from bytes 7 to 9, which are
+#: not there -- the shortest block that reaches the SNI parser at all.
+TLS_HANDSHAKE_STUB = bytes.fromhex("160303000001")
+
+
 class BipPayloadBase(unittest.TestCase):
     @classmethod
     def build(cls, exchanges: list[Exchange], name: str) -> None:
@@ -264,6 +305,117 @@ class DnsInsideBip(BipPayloadBase):
         rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
         values = [row[0] for row in rows if row and row[0]]
         self.assertEqual(values, ["dns"])
+
+    def test_the_query_name_populates_a_filterable_field(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.fqdn"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["smdp.example.com"])
+
+    def test_the_query_name_reaches_the_send_data_detail(self) -> None:
+        # The whole point: the resolved host shows in the packet list, not
+        # only three levels down in the stock dns tree.
+        rows = decode_fields(self.capture, ["yapdu.command_name", "yapdu.detail"])
+        send = [
+            row[1]
+            for row in rows
+            if len(row) > 1 and row[0] == "FETCH" and "SEND DATA" in row[1]
+        ]
+        self.assertTrue(send)
+        self.assertIn("smdp.example.com", send[0])
+
+
+class TlsSniInsideBip(BipPayloadBase):
+    """The host survives the switch from DNS to TLS.
+
+    Once the IPAd has resolved the eIM or SM-DP+ it opens a channel to
+    the address, and from there the ClientHello's SNI is the only place
+    the name still appears -- so a trace read from the packet list would
+    otherwise go anonymous exactly where the download happens.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                fetch(send_data(client_hello())),
+            ],
+            "sni.pcap",
+        )
+
+    def test_the_tls_dissector_is_still_reached(self) -> None:
+        self.assertIn("tls", self.protocols()[1])
+
+    def test_the_payload_protocol_is_reported(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.payload_protocol"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["tls"])
+
+    def test_the_sni_populates_the_same_field_as_a_dns_name(self) -> None:
+        # One field for "this row names a host", whichever half of the
+        # trace it came from; payload_protocol says which.
+        rows = decode_fields(self.capture, ["yapdu.cat.fqdn"])
+        values = [row[0] for row in rows if row and row[0]]
+        self.assertEqual(values, ["smdp.example.com"])
+
+    def test_the_sni_reaches_the_send_data_detail(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.command_name", "yapdu.detail"])
+        send = [
+            row[1]
+            for row in rows
+            if len(row) > 1 and row[0] == "FETCH" and "SEND DATA" in row[1]
+        ]
+        self.assertTrue(send)
+        self.assertIn("smdp.example.com", send[0])
+
+
+class TlsWithoutAClientHelloNamesNoHost(BipPayloadBase):
+    """Only a complete ClientHello yields a name.
+
+    A truncated handshake would give a truncated hostname, and BIP
+    channel data is not reassembled -- so half a name in the Detail
+    column is worse than none. A ServerHello and an alert carry no SNI
+    at all, and must not acquire one from a misread offset.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                # A ClientHello cut mid-extension, as a >236-byte one
+                # arrives split across channel-data blocks.
+                fetch(send_data(client_hello()[:40])),
+                fetch(send_data(SERVER_HELLO)),
+                fetch(send_data(TLS_BAD_CERTIFICATE)),
+                fetch(send_data(TLS_HANDSHAKE_STUB)),
+            ],
+            "sni-absent.pcap",
+        )
+
+    def test_no_row_claims_a_host(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.cat.fqdn"])
+        self.assertEqual([row[0] for row in rows if row and row[0]], [])
+
+    def test_a_record_too_short_to_walk_does_not_abort_the_frame(self) -> None:
+        """A raise in the SNI walk would take the whole frame's tree down.
+
+        Nothing in add_channel_payload wraps the call, so reading past the
+        end of a short block is not a missing name -- it is a frame that
+        stops dissecting at the CAT layer.
+        """
+        rows = decode_fields(
+            self.capture,
+            ["frame.number", "yapdu.cat.payload_protocol", "yapdu.detail"],
+        )
+        stub = [row for row in rows if row and row[0] == "5"]
+        self.assertTrue(stub, "the stub frame did not decode at all")
+        self.assertEqual(stub[0][1], "tls")
+        self.assertIn("SEND DATA", stub[0][2])
+
+    def test_the_truncated_record_is_still_flagged(self) -> None:
+        rows = decode_fields(self.capture, ["yapdu.tls.incomplete"])
+        self.assertTrue([row[0] for row in rows if row and row[0]])
 
 
 class DnsOverTcpIsDeFramed(BipPayloadBase):
@@ -468,6 +620,19 @@ class DnsResolvesThroughTheAllocatedChannel(BipPayloadBase):
         text = decode_text(self.capture, display_filter="frame.number==3")
         self.assertIn("smdp.example.com", text)
 
+    def test_the_query_name_reaches_the_send_data_detail(self) -> None:
+        # Frame 3 is the SEND DATA on the channel the terminal allocated;
+        # its Detail must name the host even though the port was learned
+        # two frames earlier.
+        rows = decode_fields(self.capture, ["yapdu.command_name", "yapdu.detail"])
+        send = [
+            row[1]
+            for row in rows
+            if len(row) > 1 and row[0] == "FETCH" and "SEND DATA" in row[1]
+        ]
+        self.assertTrue(send)
+        self.assertIn("smdp.example.com", send[0])
+
 
 class EncryptedAlertsAreNotGuessedAt(BipPayloadBase):
     """A plaintext alert is exactly two bytes; anything longer is not one.
@@ -497,6 +662,119 @@ class EncryptedAlertsAreNotGuessedAt(BipPayloadBase):
         """Saying nothing at all would read as "there was no alert"."""
         rows = decode_fields(self.capture, ["yapdu.tls.alert_encrypted"])
         self.assertEqual([row[0] for row in rows if row and row[0]], ["True"])
+
+
+def receive_data_response(payload: bytes, *, remaining: int = 0) -> bytes:
+    """TERMINAL RESPONSE to RECEIVE DATA: ETSI TS 102 223 V18.3.0 clause 6.8,
+    with Channel data (8.53) and Channel data length (8.54)."""
+    return b"".join(
+        [
+            comprehension_tlv("81", bytes.fromhex("014200")),
+            comprehension_tlv("82", bytes.fromhex("8281")),
+            comprehension_tlv("83", bytes.fromhex("00")),
+            comprehension_tlv("36", payload),
+            comprehension_tlv("37", bytes([remaining])),
+        ]
+    )
+
+
+#: A fatal alert from the peer: level 2, description 40 (handshake_failure).
+TLS_HANDSHAKE_FAILURE = bytes.fromhex("15030300020228")
+
+
+class AlertsReachTheDetailColumn(BipPayloadBase):
+    """An alert shows on its row, not only in the tree.
+
+    The Detail column is the line a BIP trace is scanned by, and a SEND
+    DATA that carried the card's certificate rejection read the same as
+    any other seven-byte block. Both directions: the card's alert rides in
+    SEND DATA, the peer's in the response to RECEIVE DATA.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        encrypted = bytes.fromhex("1503030014") + bytes(range(0x14))
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                fetch(send_data(TLS_BAD_CERTIFICATE)),
+                terminal_response(receive_data_response(TLS_HANDSHAKE_FAILURE)),
+                fetch(send_data(encrypted)),
+            ],
+            "alert-detail.pcap",
+        )
+
+    def _details(self) -> dict[str, str]:
+        rows = decode_fields(self.capture, ["frame.number", "yapdu.detail"])
+        return {row[0]: row[1] for row in rows if len(row) > 1}
+
+    def test_the_cards_alert_follows_the_send_data_size(self) -> None:
+        self.assertEqual(
+            self._details()["2"],
+            "SEND DATA: channel 1, 7 bytes, fatal TLS alert bad_certificate (42)",
+        )
+
+    def test_the_peers_alert_follows_the_receive_data_result(self) -> None:
+        self.assertEqual(
+            self._details()["3"],
+            "RECEIVE DATA: command performed successfully, fatal TLS alert handshake_failure (40)",
+        )
+
+    def test_an_encrypted_alert_is_named_as_one_without_a_description(self) -> None:
+        self.assertEqual(
+            self._details()["4"], "SEND DATA: channel 1, 25 bytes, encrypted TLS alert"
+        )
+
+
+#: A certificate alert sent at warning level, which TLS 1.2 allows.
+TLS_WARNING_CERTIFICATE_EXPIRED = bytes.fromhex("1503030002012D")
+
+#: The orderly end of a session: warning close_notify.
+TLS_CLOSE_NOTIFY = bytes.fromhex("15030300020100")
+
+
+class TheHilProfileColoursTlsFailures(BipPayloadBase):
+    """The HIL profile's red rule matches what this dissector hands over.
+
+    The rule reads the stock ``tls`` fields, which exist only because a
+    whole alert record is handed to Wireshark's TLS dissector; a change
+    to that handoff would leave the rule compiling and matching nothing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        encrypted = bytes.fromhex("1503030014") + bytes(range(0x14))
+        cls.build(
+            [
+                fetch(open_channel(443)),
+                fetch(send_data(TLS_BAD_CERTIFICATE)),
+                terminal_response(receive_data_response(TLS_HANDSHAKE_FAILURE)),
+                fetch(send_data(TLS_WARNING_CERTIFICATE_EXPIRED)),
+                fetch(send_data(TLS_CLOSE_NOTIFY)),
+                fetch(send_data(encrypted)),
+            ],
+            "tls-failures.pcap",
+        )
+
+    def test_certificate_and_fatal_alerts_are_red_and_nothing_else(self) -> None:
+        from Tools.HilBridge.wireshark_profile import TLS_FAILURE_FILTER
+
+        result = run_tshark(
+            [
+                "-X",
+                f"lua_script:{DISSECTOR_PATH}",
+                "-r",
+                str(self.capture),
+                "-Y",
+                TLS_FAILURE_FILTER,
+                "-T",
+                "fields",
+                "-e",
+                "frame.number",
+            ]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["2", "3", "4"])
 
 
 class AlertTableConformance(unittest.TestCase):
@@ -529,13 +807,21 @@ class AlertTableConformance(unittest.TestCase):
         120: "no_application_protocol",
     }
 
-    def test_every_expected_alert_is_present_at_its_decimal_value(self) -> None:
+    def test_every_expected_alert_is_present_at_its_value(self) -> None:
+        # The registry moved out of cat.lua into the generated
+        # tables.lua, which renders integer keys as two-digit uppercase
+        # hex. Accepting either rendering keeps a generator formatting
+        # change a question about the table rather than a test failure.
         source = (
-            Path(DISSECTOR_PATH).parent / "yggdrasim_apdu" / "cat.lua"
+            Path(DISSECTOR_PATH).parent / "yggdrasim_apdu" / "tables.lua"
         ).read_text(encoding="utf-8")
         for value, name in self.EXPECTED.items():
             with self.subTest(alert=name):
-                self.assertIn(f"[{value}] = \"{name}\"", source)
+                self.assertTrue(
+                    f"[{value}] = \"{name}\"" in source
+                    or f"[0x{value:02X}] = \"{name}\"" in source,
+                    f"alert {value} ({name}) is missing from the generated table",
+                )
 
 
 if __name__ == "__main__":

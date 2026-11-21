@@ -2,7 +2,7 @@
 // Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 /*
- * theme-init.js — applied synchronously in <head> before first paint.
+ * theme-init.js -- applied synchronously in <head> before first paint.
  *
  * Reads the persisted theme from localStorage and installs it as a
  * `data-theme` attribute on the root element so the CSS cascade does
@@ -13,6 +13,11 @@
  * Exposes window.YGG_VALID_THEMES as the single source of truth for
  * valid theme names. app.js reads this instead of maintaining its own
  * duplicate list.
+ *
+ * The skin (`data-skin`: typefaces, shape, chrome; css/skins/) is restored
+ * the same way from its own key, and window.YGG_VALID_SKINS is the single
+ * source of truth for skin names. Theme and skin are independent: every
+ * skin renders in every theme.
  */
 
 (function () {
@@ -32,9 +37,15 @@
     "tokyo-night": 1,
     "catppuccin-mocha": 1,
     "catppuccin-latte": 1,
+    "catppuccin-frappe": 1,
+    "catppuccin-macchiato": 1,
     "dracula": 1,
     "github-dark": 1,
     "github-light": 1,
+    "islands-light": 1,
+    "graphite-light": 1,
+    "bench-dark": 1,
+    "bench-light": 1,
   };
   window.YGG_VALID_THEMES = VALID;
   var saved = null;
@@ -48,4 +59,21 @@
   } else {
     document.documentElement.setAttribute("data-theme", "nord-dark");
   }
+
+  var SKIN_KEY = "ygg-gui-skin";
+  var VALID_SKINS = {
+    "bench": 1,
+    "classic": 1,
+  };
+  window.YGG_VALID_SKINS = VALID_SKINS;
+  var savedSkin = null;
+  try {
+    savedSkin = window.localStorage.getItem(SKIN_KEY);
+  } catch (err) {
+    savedSkin = null;
+  }
+  document.documentElement.setAttribute(
+    "data-skin",
+    savedSkin && VALID_SKINS[savedSkin] ? savedSkin : "bench"
+  );
 })();

@@ -5,7 +5,7 @@
 
 
 /* ---------------------------------------------------------------------
- * Service-table staging popout — mock-edit a UST / IST / generic
+ * Service-table staging popout -- mock-edit a UST / IST / generic
  * bitmap EF without touching the card. Live hex preview at the top,
  * checkbox list below, action bar (copy / reset / send to UPDATE
  * BINARY) docked between them.
@@ -24,7 +24,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   border: 1px solid var(--border-soft);
   margin: 6px 0 8px;
@@ -52,7 +52,7 @@
   white-space: pre-wrap;
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
 }
 
@@ -78,7 +78,7 @@
   color: var(--fg-muted);
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-deep);
   border: 1px dashed var(--border-soft);
 }
@@ -101,11 +101,11 @@
   outline: 1px solid var(--accent);
 }
 
-/* Generic stage-edit popout (Task 3) — non-bitmap decoded EFs ---------- */
+/* Generic stage-edit popout (Task 3) -- non-bitmap decoded EFs ---------- */
 .cc-stage-context {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
 }
 
@@ -152,7 +152,7 @@
 .cc-stage-decoded-preview {
   margin: 0 0 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--bg-elev), transparent 30%);
   padding: 8px 10px;
 }
@@ -175,7 +175,7 @@
   color: var(--fg);
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   resize: vertical;
 }
 
@@ -198,7 +198,7 @@
   background: var(--bg-deep);
   border: 1px solid var(--border-soft);
   color: var(--fg);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: inherit;
   font-size: 12px;
 }
@@ -231,7 +231,7 @@
   overflow-y: auto;
   padding: 4px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg);
 }
 
@@ -241,7 +241,7 @@
   gap: 6px;
   align-items: center;
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -407,12 +407,8 @@
   transform: rotate(90deg);
 }
 
-/* FCP block specifically — share the depth-0 grid with the decoded
-   body so visual rhythm is consistent across FCP + decoded. */
-
-.cc-fcp-block .cc-fcp-fields {
-  font-size: 12px;
-}
+/* FCP block and transparent body share the tighter row; the open FCP card
+   then lays its parameters out in cells (after the Copy key rules). */
 
 .cc-payload-transparent .cc-pv-field,
 .cc-fcp-block .cc-pv-field {
@@ -437,6 +433,242 @@
   margin-bottom: 4px;
 }
 
+/* FCP card: folded in the File system preview, its summary carrying the
+   glance parameters. Chrome follows the record cards (.cc-record) so the
+   FCP and the records below it read as one family. */
+
+.cc-fcp-card {
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-elev), transparent 44%);
+  overflow: hidden;
+}
+
+.cc-fcp-card[open] {
+  background: var(--bg-elev);
+}
+
+.cc-fcp-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background-color var(--transition-fast);
+}
+
+.cc-fcp-card-head::-webkit-details-marker {
+  display: none;
+}
+
+.cc-fcp-card-head::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+  transition: transform var(--transition-fast);
+}
+
+.cc-fcp-card[open] > .cc-fcp-card-head::before {
+  transform: rotate(90deg);
+}
+
+.cc-fcp-card-head:hover {
+  background: var(--bg-hover);
+}
+
+.cc-fcp-card-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg-hover);
+}
+
+.cc-fcp-card-title {
+  flex: 0 0 auto;
+  color: var(--fg);
+  font-family: var(--font-head);
+  font-size: 13px;
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-track);
+}
+
+.cc-fcp-card-facts {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-fcp-card > .cc-fcp-block {
+  padding: 2px 12px 12px;
+}
+
+/* One Copy key per top-level parameter of an FCP or a decoded File system
+   body, in a column of its own so the value keeps its width; it shows on
+   the row under the pointer or in focus, the reveal the log dock rows
+   use. The key column of the FCP and the transparent body is the
+   narrower one those lists already use. */
+
+.cc-pv-object--depth-0 > .cc-pv-field--copy {
+  grid-template-columns: minmax(96px, 200px) minmax(0, 1fr) auto;
+  transition: border-color var(--transition-fast);
+}
+
+.cc-fcp-block .cc-pv-object--depth-0 > .cc-pv-field--copy,
+.cc-payload-transparent .cc-pv-object--depth-0 > .cc-pv-field--copy {
+  grid-template-columns: minmax(76px, 148px) minmax(0, 1fr) auto;
+}
+
+.cc-pv-object--depth-0 > .cc-pv-field--copy:hover {
+  border-color: var(--border-strong);
+}
+
+.cc-pv-copy {
+  align-self: start;
+  min-width: 56px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  user-select: none;
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.cc-pv-field--copy:hover > .cc-pv-copy,
+.cc-pv-field--copy:focus-within > .cc-pv-copy,
+.cc-pv-copy.is-copied {
+  opacity: 1;
+}
+
+.cc-pv-copy:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.cc-pv-copy:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cc-pv-copy.is-copied {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
+}
+
+/* Open FCP card: the short parameters fill a grid of cells, as many across
+   as the pane holds; a parameter that needs a line of its own (raw bytes,
+   rules, a nested template) follows them across the card, and the
+   parameters without a value are named once on the toolbar line. A cell
+   gives no column to its Copy key: the key lies over the cell's right
+   end while the pointer or focus is on it, the reveal the log dock rows
+   use, on an opaque face so the value under it does not show through. */
+
+.cc-fcp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.cc-fcp-meta > .cc-decoded-tools {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.cc-fcp-novalue {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cc-fcp-novalue-label {
+  margin-right: 8px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cc-fcp-block .cc-fcp-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(272px, 100%), 1fr));
+  gap: 4px;
+  font-size: 12px;
+}
+
+.cc-fcp-block .cc-fcp-fields > .cc-pv-field--copy {
+  position: relative;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 8px;
+  min-height: 30px;
+  padding: 3px 8px;
+}
+
+.cc-fcp-block .cc-fcp-fields > .cc-fcp-field--wide {
+  grid-column: 1 / -1;
+  align-items: start;
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  background: var(--bg-elev);
+}
+
+.cc-fcp-fields > .cc-fcp-field--wide > .cc-pv-copy {
+  top: 5px;
+  transform: none;
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy:hover {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-elev);
+}
+
+.cc-fcp-fields > .cc-pv-field--copy > .cc-pv-copy.is-copied {
+  background: var(--ok);
+}
+
+.cc-fcp-fields .cc-pv-array-line {
+  padding: 3px 8px;
+}
+
+/* Resolved access rules arrive as one string, a rule per line. */
+.cc-fcp-fields .cc-pv--str {
+  white-space: pre-line;
+}
+
 .cc-decoded-json-full {
   margin: 0;
   padding: 8px 10px;
@@ -450,16 +682,17 @@
 
 /* -- Command Center: Maximize overlay ----------------------------------- */
 
+/* No `backdrop-filter`: without GPU compositing every scroll frame of the
+ * maximised pane would re-blur the whole window behind it. */
 .cc-max-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
   z-index: 9000;
   display: flex;
   align-items: stretch;
   justify-content: stretch;
   padding: 24px;
-  backdrop-filter: blur(2px);
 }
 
 .cc-max-shell {

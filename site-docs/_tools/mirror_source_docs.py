@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 import shutil
+import subprocess
 
 
 INCLUDED_TOP_LEVEL_DIRS = {
@@ -24,12 +25,7 @@ PUBLIC_PLUGIN_MARKDOWN = {
     Path("plugins/README.md"),
 }
 
-EXCLUDED_SOURCE_PARTS = {
-    ("plugins", "polling"),
-}
-
 EXCLUDED_SOURCE_FILES = {
-    "tests/eim-sh/" + "EIM_" + "POLL" + "_SEQUENCE.md",
     # Assistant-facing working notes. Kept on disk for local use, never
     # tracked and never published, so the generated index stays identical
     # between a working checkout and a fresh clone.
@@ -106,18 +102,40 @@ def iter_markdown_sources() -> list[Path]:
             continue
         if relative_posix in EXCLUDED_SOURCE_FILES:
             continue
-        if any(
-            tuple(relative_path.parts[: len(excluded_parts)]) == excluded_parts
-            for excluded_parts in EXCLUDED_SOURCE_PARTS
-        ):
-            continue
         if len(relative_path.parts) == 1:
             if relative_path.name not in ROOT_MARKDOWN_FILES:
                 continue
         elif relative_path.parts[0] not in INCLUDED_TOP_LEVEL_DIRS:
             continue
         matches.append(relative_path)
+    ignored = _git_ignored(root, matches)
+    matches = [item for item in matches if item.as_posix() not in ignored]
     return sorted(matches, key=lambda item: item.as_posix().lower())
+
+
+def _git_ignored(root: Path, paths: list[Path]) -> set[str]:
+    """The paths git ignores: operator notes on disk never reach the site.
+
+    Outside a git checkout (an sdist build) nothing is filtered; the tree
+    then holds only what was published.
+    """
+    if not paths:
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "check-ignore", "--stdin"],
+            cwd=root,
+            input="\n".join(item.as_posix() for item in paths) + "\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return set()
+    # 0: some paths ignored, 1: none ignored, anything else: not a checkout.
+    if result.returncode not in (0, 1):
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
 def _is_external_url(url: str) -> bool:

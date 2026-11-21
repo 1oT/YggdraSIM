@@ -20,7 +20,9 @@ This guide covers the YggdraSIM hardware-in-the-loop path built around:
 > referenced in this guide solely as a device identifier so the HIL
 > supervisor can find the physical hardware; it is not a vendor
 > endorsement, partnership, or certification. The same applies to
-> `osmo-remsim-client-st2`, which is the upstream tool name.
+> `osmo-remsim-client-st2`, which is the upstream tool name, and to the
+> other board names in section 2, which are the USB product identifiers
+> of the upstream SIMtrace2 firmware.
 
 > **Build flavor note.** The direct SIMtrace2/RemSIM HIL bridge is
 > Linux-only and is bundled in the **full** executable and in source
@@ -127,7 +129,7 @@ Setup, end-to-end:
 
 3. **On the rig**, start the HIL bridge with the remote-card flags.
    The local `--reader-index` / `--reader-name` flags are ignored in
-   this mode — the card lives at the other end of the tunnel:
+   this mode -- the card lives at the other end of the tunnel:
 
    ```bash
    yggdrasim-hil-bridge \
@@ -141,11 +143,11 @@ Setup, end-to-end:
    visible at a glance. Equivalent env vars are
    `YGGDRASIM_HIL_REMOTE_CARD_URL` and
    `YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE`. `--apdu-timeout-ms` is
-   optional; raise it for slow eUICC operations or high-latency SSH
-   paths.
+   optional (default 30000); raise it for slower eUICC operations or
+   high-latency SSH paths.
 
 GSMTAP capture, the bridge's own HTTP `/apdu` relay, the supervisor,
-and every YggdraSIM consumer keep working unchanged — they all sit
+and every YggdraSIM consumer keep working unchanged -- they all sit
 upstream of the card-source decision and don't observe the swap.
 The rig-side relay exposes `apduUrl`, `statusUrl`, and `cardResetUrl`;
 YggdraSIM tools on the rig discover that relay through the runtime
@@ -234,14 +236,36 @@ python -m Tools.HilBridge.supervisor
 Check the USB identity:
 
 ```bash
-lsusb | rg -i 'simtrace|sysmocom|1d50:60e3'
+lsusb -d 1d50:
 ```
 
 Example:
 
 ```text
 Bus 003 Device 042: ID 1d50:60e3 OpenMoko, Inc. Osmocom SIMtrace 2
+Bus 003 Device 026: ID 1d50:616e OpenMoko, Inc. ngff-cardem
 ```
+
+The supervisor watches every board that runs the SIMtrace2 firmware by its
+USB ID, the list the upstream host tools match (`osmo_st2_compatible_dev_ids`
+in simtrace2 `host/lib/usb_util.c`), so no selector is needed for these:
+
+| VID:PID | Board |
+|---|---|
+| `1d50:60e3` | SIMtrace2 |
+| `1d50:616e` | ngff-cardem (M.2 modem carrier with card emulation) |
+| `1d50:4004` | QMOD |
+| `1d50:4001` | OWHW |
+| `1d50:616d` | octsimtest |
+
+The REMSIM client and the pre-session reset (section 5.1) take the board
+whose active configuration has the card-emulation interface (class `ff`,
+subclass `02`; `simtrace2-list` shows it as `CardEmulator Modem 1`). A board
+running the sniffer firmware, or one in its DFU bootloader, which keeps the
+same USB ID, gets no client and no reset, and the supervisor state says so.
+With two card-emulation boards attached the supervisor takes the first one
+and logs a warning; pin one with `--remsim-arg` selectors (section 5 shows
+the form).
 
 List PC/SC readers:
 
@@ -287,7 +311,7 @@ python -m Tools.HilBridge.supervisor \
 
 Notes:
 
-- `--usb-vidpid 1d50:60e3` is a good explicit selector for SIMtrace2 on systems where that VID:PID is visible in `lsusb`.
+- `--usb-vidpid` adds a USB ID to the boards of section 2, which the supervisor watches without it; `1d50:60e3` above is one of them, so the line changes nothing and is kept for existing units.
 - start and stop HIL sessions manually from the main wrapper when you need modem or trace access
 - while a manual HIL session is active, the supervisor spawns the bridge child only while the SIMtrace2 is detected
 - the supervisor also spawns `osmo-remsim-client-st2` by default and tears it down together with the bridge child
@@ -395,8 +419,8 @@ keeps two independent gates:
 Practical consequences:
 
 - Sim mode with the SIMtrace2 cable still attached behaves exactly
-  like reader mode from the modem's point of view — REMSIM stays
-  alive so the modem keeps getting answers from the bridge — except
+  like reader mode from the modem's point of view -- REMSIM stays
+  alive so the modem keeps getting answers from the bridge -- except
   the bridge serves APDUs from the simulator instead of the PC/SC
   reader.
 - Sim mode without SIMtrace2 attached still serves the YggdraSIM-side
@@ -428,6 +452,40 @@ Default generated client command:
 ```bash
 osmo-remsim-client-st2 -i 127.0.0.1 -p 9997 -c 0 -n 0
 ```
+
+### 5.1 ATR seeding
+
+The supervisor starts the client with `-a <ATR>`, so the emulated card
+answers with the card's real ATR from its first activation and again after
+every bankd reconnect. With a remote card the ATR comes from the relay's
+`statusUrl`; with a local reader it comes from the relay marker the bridge
+child publishes once the reader is open, and the client start waits up to
+5 s for that marker.
+
+Without the seed the client presents its own `3B00` placeholder at start-up
+and every time it re-establishes the bankd link, until bankd sends a
+`setAtrReq`; the bridge sends one only after the modem reports a slot-status
+edge. The bankd link is re-established after every card failure the bridge
+recovers from (a PC/SC timeout among them), and a modem that activates in
+that gap reads `3B00` instead of the card. A modem that was already powered when the bridge came up produces
+no edge at all, latches `3B00`, and reports `+CPIN: NOT INSERTED`
+indefinitely. `AT+CFUN=0` / `AT+CFUN=1` is radio-only and does not clear it;
+a full `AT+CFUN=1,1` re-activates the SIM interface and does.
+
+The seed is skipped, leaving the previous behaviour, when `--remsim-arg=-a`
+already carries an ATR, when the remote relay is unreachable or a local
+bridge publishes no marker in time (for example under `--no-apdu-relay`), or
+when the reported ATR's TS is not `'3B'` or `'3F'` (ETSI TS 102 221 V18.4.0
+Annex D). Those cases log a warning.
+
+The bridge waits up to 30 s for the card to answer one APDU
+(`--apdu-timeout-ms`, or `YGGDRASIM_HIL_APDU_TIMEOUT_MS` from Environment ->
+Configuration, which the HIL session passes on). With a remote card the Card
+Bridge that holds the reader applies its own wait (same default, same
+variable on that host), and the relay request gives up after 30 s. An eUICC can hold a command
+for seconds while the board keeps the modem waiting with NULL procedure
+bytes; a timeout closes the bankd link and re-opens the reader, which the
+modem sees as a card reset, so keep the value above the card's slowest step.
 
 If USB auto-selection fails on your host, pass explicit selector arguments through the supervisor.
 
@@ -476,7 +534,8 @@ Practical notes:
 - the remsim client command defaults to the local bridge host / port and the configured client ID / slot
 - do not force a fixed ATR for normal bridge use; the bridge pushes the physical card ATR
 - if you already know the exact selector that works on your host, keep using it
-- `-H`, `-V/-P`, and other SIMtrace2 selectors are host-setup dependent
+- `-H`, `-V/-P`, and other SIMtrace2 selectors are host-setup dependent; an ngff-cardem takes `-P 0x616e`
+- any selector passed this way replaces the supervisor's own board choice (section 2), including its refusal to start a client for a board without card emulation
 - when forwarding remsim flags that start with `-`, prefer `--remsim-arg=<value>` form
 - if you want to run the remsim client by hand for debugging, disable supervisor management with `--no-remsim-client`
 
@@ -491,7 +550,7 @@ to press a button defeats the point of a remote rig.
 The supervisor therefore reboots the board itself before every session,
 without any firmware modification. Osmocom's cardem firmware already
 resets its own microcontroller when USB drops below the `CONFIGURED`
-state — see `firmware/apps/cardem/main.c` upstream:
+state -- see `firmware/apps/cardem/main.c` upstream:
 
 ```c
 if (USBD_GetState() < USBD_STATE_CONFIGURED) {
@@ -521,6 +580,17 @@ Modes, selected with `--simtrace-reset` or `YGGDRASIM_HIL_SIMTRACE_RESET`:
 > hang off the same switched hub port. Card state is cleared separately
 > -- see [5.2](#52-card-session-hygiene).
 
+> **On an ngff-cardem the modem restarts too.** That board carries the
+> modem, and its firmware cuts the modem's supply for 200 ms on every
+> switch between the board's own SIM slot and the emulated card
+> (`sim_switch_use_physical`, simtrace2
+> `firmware/libboard/ngff_cardem/source/sim_switch.c`): once when the reset
+> reboots the board, which starts on its SIM slot, and again when the REMSIM
+> client selects the emulated card. The client then pulses the modem's
+> reset line (PERST#). The modem's USB ports re-enumerate each time, so a
+> modem terminal or ModemManager loses its port for a few seconds after
+> every session start.
+
 Ordering inside the supervisor is deliberate:
 
 1. the remsim client is stopped, so the bus is never reset underneath an
@@ -542,10 +612,14 @@ unprivileged `systemd --user` supervisor can issue the ioctl:
 ```bash
 sudo tee /etc/udev/rules.d/60-simtrace2.rules >/dev/null <<'EOF'
 SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="60e3", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="616e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 EOF
 sudo usermod -a -G plugdev "$USER"
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
+
+The second line is for an ngff-cardem. Both boards keep their USB ID in the
+DFU bootloader, so the rule also lets an unprivileged `dfu-util` update them.
 
 For the VBUS variant, find the hub location with `uhubctl` and pin it:
 
@@ -588,13 +662,28 @@ reader and keeps its state across a SIMtrace2 reset exactly as it does
 when you press the reset button: selected AID, open logical channels,
 an established SCP03 / SCP11 secure channel, PIN verification status.
 
-Two mechanisms clear it, both power-cycling the card with
+Three mechanisms clear it, all power-cycling the card with
 `SCardReconnect(..., SCARD_UNPOWER_CARD)` and re-reading the ATR:
 
 **Modem sessions.** When `osmo-remsim-client-st2` attaches -- or
 re-attaches after the board reset -- the bridge power-cycles the card
 and pushes the fresh ATR to the modem with `setAtrReq`. So every modem
 session starts from a card that just came up.
+
+**Modem resets.** The modem resets the emulated UICC, not the card: the
+cardem firmware answers RST with the ATR it was given and reports the
+edge to `osmo-remsim-client-st2`, which forwards it to the bridge as
+`clientSlotStatusInd`. The bridge acts on that the way osmo-remsim's
+bankd does -- a RST rising edge or a VCC drop power-cycles the card in
+the reader before the modem's first post-reset command is served -- and
+pushes the ATR to the board again when it changed (the board has already
+answered that activation with the previous one; the new ATR serves the
+next reset). This is what makes an eUICC profile switch land: the ISD-R
+issues REFRESH in "UICC Reset" mode (SGP.02 v4.2 clause 3.2, step 7),
+the terminal resets the UICC without a TERMINAL RESPONSE (ETSI TS 102 223
+V18.3.0 clause 6.4.7), and the switch takes effect on that reset. A
+bridge that stopped at the board left the eUICC serving the profile the
+switch had just disabled, while the modem re-read it as the new one.
 
 **Relay sessions.** Operator shells (SCP03, SCP80, SCP11) drive the same
 card through the APDU relay, potentially while a modem session is live.
@@ -613,8 +702,11 @@ is the mechanism working, not a fault.
 Watch it in the bridge log:
 
 ```text
-Card power-cycled (relay session start (ygg-4213-9f2ab117)); reader … ATR 3B9F…
-Reset card for modem session; reader … ATR 3B9F… reset={'mode': 'pcsc-reconnect-unpower'}
+Card power-cycled (relay session start (ygg-4213-9f2ab117)); reader ... ATR 3B9F...
+Reset card for modem session; reader ... ATR 3B9F... reset={'mode': 'pcsc-reconnect-unpower'}
+Card issued REFRESH (uicc-reset): the terminal resets the UICC instead of answering with TERMINAL RESPONSE; the card is power-cycled when the remsim client reports that reset
+Modem slot status: RST active, VCC present, CLK unreported, card unreported
+Modem reset the UICC (RST asserted, after REFRESH (uicc-reset)); card power-cycled, reader ... ATR 3B9F... reset={'mode': 'pcsc-reconnect-unpower'}
 ```
 
 Set `YGGDRASIM_HIL_RELAY_SESSION_RESET=0` (or pass
@@ -649,6 +741,114 @@ If your Wireshark SIM dissector is older and shows malformed packets, start the 
 ```bash
 --gsmtap-compat wireshark44
 ```
+
+### 6.1 Modem-side SIM log
+
+The bridge and a SIMtrace2 sniffer both show the SIM interface from the card
+side. A modem with a Qualcomm baseband also logs it from its own side: the UIM
+driver writes every character it sends and receives, with the modem's time
+stamp, to the DIAG log item `LOG_UIM_DATA_C` (0x1098; 0x14CE on dual-SIM
+builds). `yggdrasim-hil-modem-diag` reads that log from the modem's DIAG
+port, rebuilds the T=0 exchanges and sends them into the same GSMTAP stream:
+
+```bash
+yggdrasim-hil-modem-diag --device /dev/serial/by-id/usb-Android_Android-if00-port0
+```
+
+The example is USB interface 0 (`if00`) of a modem that reports itself as
+`Android`, which is where that by-id name comes from. `--device auto` takes
+USB interface 0 of a modem the Linux `option` or `qcserial` driver serves and
+looks it up again after every re-enumeration; a modem that puts DIAG on
+another interface needs the path. Membership of the
+`dialout` group is enough to open it; no `sudo`. Only one program may hold
+the DIAG port, so stop QCSuper, SCAT or QXDM first. The command waits for
+the port, and when the modem power-cycles it reopens the port once it is
+back.
+
+To have every HIL session start it, set `YGGDRASIM_HIL_MODEM_DIAG` to
+`auto` or to the DIAG path (Environment -> Configuration in the GUI, `[E]`
+in the launcher). The supervisor then runs the mirror as a child of its own
+for the whole session, sending to the bridge's GSMTAP host and port. The
+mirror sits outside the SIM path: when the modem is missing it waits, when
+it exits the supervisor restarts it after 30 s (600 s after exit code 2, a
+condition a restart will not change), and none of that touches the bridge,
+the REMSIM client or the session status. The supervisor state reports it
+under `modemDiag`.
+
+The Wireshark a HIL session opens starts with the profile named in
+`YGGDRASIM_HIL_WIRESHARK_PROFILE` (default `YggdraSIM-HIL`; `off` keeps the
+last-used profile). YggdraSIM adds two files to that profile: filter
+buttons -- **SIM side**, **Modem side**, **Modem notes**, **Modem cuts**,
+**Exchanges**, **STK**, **TLS alerts** -- and coloring rules that show a TLS
+certificate alert (at any level) or any fatal TLS alert in dark red on either
+side, tint modem-side rows blue, notes amber and cut exchanges light red,
+ahead of Wireshark's default rules. An encrypted alert cannot be read, so it
+is not coloured. **STK** shows, on both sides, the toolkit traffic of ETSI
+TS 102 221 V18.4.0 clause 14.6: TERMINAL PROFILE, ENVELOPE, FETCH and
+TERMINAL RESPONSE (clause 14.6.3), STATUS, which the terminal sends for
+proactive polling (clause 14.6.2), and every exchange whose answer announces
+a proactive command: `91 XX` (clause 10.2.1.1), `62 F2` or `63 F2` (clause
+10.2.1.3). BIP is part of it: OPEN CHANNEL, CLOSE CHANNEL, RECEIVE DATA and
+SEND DATA arrive as FETCH answers and their results as TERMINAL RESPONSEs,
+the Data available and Channel status events as ENVELOPEs (ETSI TS 102 223
+V18.3.0 clauses 6.4 and 7.5). A filter sees one frame at a time, so the GET
+RESPONSE that collects an ENVELOPE's answer data is left out unless the card
+ended it with one of those status words; the modem's NULL holds and cut
+exchanges stay under **Modem notes** and **Modem cuts**. Both files
+open with a marker line; once Wireshark or you rewrite one without it, it is
+left alone. If the profile cannot be prepared, Wireshark starts as before.
+The decoded terminal view reads the bridge's own capture file, so it shows
+the SIM side only.
+
+That Wireshark also opens with its Time column on the UTC time of day each
+frame was captured (`-t u`) rather than seconds since the first frame;
+`journalctl --utc` prints the supervisor journal on the same clock.
+`YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT` takes any value of Wireshark's `-t`
+option: `ud` adds the date, `a` and `ad` are local time, `r` is Wireshark's
+relative default, and `.N` sets N decimals (`u.6`). Wireshark stores the
+format in the profile when it exits, so `off` leaves the one last shown, and
+a choice from View -> Time Display Format lasts until the next launch. A
+value Wireshark would refuse counts as `off`. If the column is too narrow
+for the longer value, widen it once; Wireshark keeps the width in the
+profile.
+
+The APDU dissector names a TLS alert in the row's Detail column, for
+example `SEND DATA: channel 1, 7 bytes, fatal TLS alert bad_certificate (42)`
+when the card rejects the server's certificate. A copy installed with
+`yggdrasim-apdu-dissect install` loads before the one the HIL menu passes,
+so it is the copy that decodes: re-run `install` after updating YggdraSIM,
+or a stale copy hides newer decoding.
+
+What it sends, all on UDP `4729`:
+
+- one APDU frame per exchange, in the bridge's layout, so the APDU dissector
+  decodes both sides the same way;
+- the ATR frames the modem actually received;
+- a log line (GSMTAP libosmocore log) for an exchange the card held with NULL
+  procedure bytes or for at least `--hold-note-seconds` (default 0.5 s), for
+  the PPS exchange, and for an exchange a reset cut short before its status
+  word.
+
+The modem-side frames carry GSMTAP antenna 1 and come from `127.0.0.2`; the
+bridge and SIMtrace2 send antenna 0 from `127.0.0.1`. Wireshark 4.4 passes
+SIM and log frames to their dissectors before it decodes the GSMTAP header,
+so `gsmtap.antenna` stays empty; filter on the source or the raw byte:
+
+- `ip.src == 127.0.0.2` -- modem side, live;
+- `udp.payload[13:1] == 01` -- modem side, also in a saved pcap;
+- `udp.payload[13:1] == 00` -- bridge or SIMtrace2 side.
+
+What only the modem side shows: the ATR the modem got (the bridge mirrors the
+reader's ATR, while a modem that activated before the bridge's `setAtrReq`
+can have received the remsim client's `3B 00` stub), the PPS, the NULL bytes
+SIMtrace2 drops, and whether the modem sent a command the card then held
+through a reset. Hold times come from the modem's clock and are exact; the
+frames themselves are sent when DIAG delivers the log, so their capture time
+trails the bridge's frames by the DIAG latency.
+
+`--capture-path` also writes the frames to a pcap, `--no-notes` leaves the
+log lines out, and `--gsmtap-host` / `--gsmtap-port` / `--gsmtap-compat`
+work as on the bridge.
 
 ## 7. Use YggdraSIM from the side while the bridge is active
 
@@ -843,10 +1043,13 @@ moving between frames in the TUI does not drift the counters.
 Check:
 
 ```bash
-lsusb | rg -i 'simtrace|sysmocom|1d50:60e3'
+lsusb -d 1d50:
 ```
 
 If the supervisor state file shows `usbPresent: false`, the bridge child will not be started.
+If the board is listed but the state reason starts with `No board in card emulation`, it
+runs the sniffer firmware or sits in its DFU bootloader; `simtrace2-list` should show
+`CardEmulator Modem 1` once the cardem firmware runs (`SIMTRACE2_CARDEM_GUIDE.md`).
 
 ### Supervisor uses polling instead of udev
 
@@ -861,7 +1064,7 @@ python -m pip install pyudev
 Try the explicit USB selectors:
 
 - `-H <usb-path> -C 1 -I 0 -S 0`
-- `-V 0x1d50 -P 0x60e3 -C 1 -I 0 -S 0`
+- `-V 0x1d50 -P 0x60e3 -C 1 -I 0 -S 0` (`-P 0x616e` for an ngff-cardem)
 
 Also confirm the board is really in the relay / card-emulation firmware mode.
 
@@ -894,6 +1097,205 @@ session that failed. If neither appears, the card was never cleared.
 Note that `port-power` does not help here either unless the PC/SC
 reader shares the switched hub port with the board -- the card is behind
 the reader, not the SIMtrace2.
+
+### The modem re-initialises after a REFRESH but still sees the old profile
+
+An eUICC applies a profile switch at the next reset. The ISD-R issues
+REFRESH in "UICC Reset" mode, the terminal resets the UICC without a
+TERMINAL RESPONSE (ETSI TS 102 223 V18.3.0 clause 6.4.7), and the newly
+enabled profile is what answers after the ATR. On the rig that reset
+hits the SIMtrace2, which replays the ATR it holds; the card in the
+reader is reset only because the bridge follows the
+`clientSlotStatusInd` the remsim client forwards (see
+[5.2](#52-card-session-hygiene)). A switch that landed logs three lines:
+
+```text
+Card issued REFRESH (uicc-reset): the terminal resets the UICC instead of answering with TERMINAL RESPONSE; the card is power-cycled when the remsim client reports that reset
+Modem slot status: RST active, VCC present, CLK unreported, card unreported
+Modem reset the UICC (RST asserted, after REFRESH (uicc-reset)); card power-cycled, reader ... ATR ... reset={'mode': 'pcsc-reconnect-unpower'}
+```
+
+If the first line appears and the third never does, the reset stopped at
+the board and the modem is re-reading a card that was never reset. The
+bridge says so on the modem's next command once the 10 s grace has
+passed:
+
+```text
+REFRESH (uicc-reset) was served more than 10 s ago and the remsim client reported no UICC reset since; ...
+```
+
+Check the client. `osmo-remsim-client-st2` has to forward the modem's
+RST and VCC edges as `clientSlotStatusInd` (osmo-remsim 1.2.0 does, and
+logs `Tx clientSlotStatusInd(reset_act=1, ...)` when it happens); a
+client that only prints `STATUS: flags=...` never tells the bridge.
+Until that is in place, `yggdrasim-hil-reset` after the REFRESH forces a
+re-attach, and the modem-session handshake power-cycles the card.
+
+Rebooting the board on every REFRESH is not the fix. The board holds
+only the ATR, never the profile; the file system the modem reads is the
+card's, and the card is what has to be reset.
+
+### The modem terminal
+
+The HIL panel's modem terminal is always available on a build that
+carries the HIL bridge. It needs no flag and no restart: what keeps it
+safe is the command policy rather than a gate in front of it. It opens
+no login shell and accepts only a known serial terminal (`tio`,
+`minicom`, `picocom`, `screen`) against an explicit device path.
+
+`sudo` and `doas` are allowed in front of that terminal, because a
+serial device is often root-owned and a udev rule is not always yours to
+write. They are allowed as a plain prefix only:
+
+```text
+sudo tio /dev/ttyUSB2          accepted
+sudo -n tio /dev/ttyUSB2       accepted
+sudo -s                        refused
+sudo -i                        refused
+sudo bash                      refused
+sudo tio                       refused, no device path
+```
+
+Every option but `-n` is refused rather than reasoned about, so the word
+after the wrapper is always the command that runs. Expect a password
+prompt in the terminal unless that user has passwordless sudo for it.
+
+Granting the device instead avoids the prompt entirely, and is the
+better answer where you can write the rule: add the operator's group to
+the device node the way the SIMtrace2 rule does.
+
+### The modem terminal attaches to a port that answers nothing
+
+A distribution that ships ModemManager claims a cellular modem's AT ports
+the moment it enumerates, and it keeps them. The port still opens, so a
+terminal attaches and simply sits there: ModemManager is consuming the
+replies. Nothing in the terminal says so.
+
+Check who holds it, naming the AT port for your modem:
+
+```bash
+sudo fuser -v /dev/ttyUSB2
+systemctl is-active ModemManager
+```
+
+A rig modem is driven by hand, so hand the device back rather than
+disabling the service for every other device on the host:
+
+```bash
+sudo tee /etc/udev/rules.d/62-modem-manual-control.rules >/dev/null <<'RULE'
+SUBSYSTEM=="usb", ATTR{idVendor}=="<vid>", ATTR{idProduct}=="<pid>", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="<vid>", ATTRS{idProduct}=="<pid>", ENV{ID_MM_DEVICE_IGNORE}="1"
+RULE
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=usb --subsystem-match=tty --attr-match=idVendor=<vid>
+sudo systemctl restart ModemManager
+```
+
+`fuser` should then report nobody, and `AT` should answer `OK`. Removing
+the rule file and restarting ModemManager puts it back.
+
+### The rig is up but the modem reports no SIM
+
+`+CME ERROR: 10` for `AT+CPIN?` while the bridge reports its bankd side
+attached is the expected state, not a fault. The card is presented to the
+modem at activation, and a modem that was already powered when the rig
+came up has nothing to re-read on its own.
+
+Cycle the radio and the card appears:
+
+```bash
+printf 'AT+CFUN=0;+CFUN=1\r' | socat -T6 - /dev/ttyUSB2,b115200,raw,echo=0
+```
+
+That re-initialises the SIM interface in place and the card is readable
+in a few seconds. `AT+CFUN=1,1` also works and is the wrong tool: it
+reboots the modem, so the USB device disappears for about twenty seconds
+and takes the AT port with it.
+
+`yggdrasim-hil-supervisor` is not what sends this. The Remote Bridge rig
+start issues it as its last step, once the path that feeds the modem is
+up, because a refresh before that has nothing to find.
+
+Afterwards `AT+CPIN?` reports `READY`, and `AT+CCID` reads the ICCID of
+the card the rig is streaming, which is the quickest way to confirm the
+modem is on the card you think it is.
+
+Use `socat`, not `stty`. A USB serial modem rejects part of the raw mode
+`stty` asks for and the whole command fails with it.
+
+If the card never appears, check the card lease rather than the modem:
+a rig whose reset is refused with `409 The card is leased by another
+consumer` never re-presents the card, and the modem has nothing new to
+read. `GET /lease` on the operator's Card Bridge names the holder, and a
+holder of `""` means the lease was orphaned and should be force-released.
+
+### The client log shows `ComponentType(1) != RemsimBankd`
+
+osmo-remsim-client-st2 keeps two RSPRO links to the bridge, both to the
+bridge's port (`-p`, 9997 by default): a control link in the remsim-server
+role and a bankd link that carries the card traffic. The client sends the
+same `connectClientReq` on both and checks the role named in the answer. A
+link answered with the other role is closed, and the client re-dials it only
+when the control link sends a new `configClientBankReq`; with both links
+answered wrongly, the modem is left without a card until the client
+restarts.
+
+The bridge therefore keeps the roles apart by order. A failure closes only
+the link it concerns: a card failure (a PC/SC timeout, a transmit error)
+closes the bankd link and re-opens the reader, and a lost control link is
+closed alone. A connection that arrives before the control link has
+answered `configClientIdReq` is closed unanswered (the bridge logs
+`Closing pending@...: control link not confirmed yet; the client re-dials
+this link`), and the client re-dials it at once. A bridge restart stops the
+client too, and a starting client
+dials its bankd link only once the control link is configured.
+
+The line can still appear when both links drop together, for example after
+a keepalive timeout, and the client re-dials its bankd link first. That link
+then comes back through the next `configClientBankReq`, and the bridge log
+shows a fresh `Assigned ... as bankd connection`. These client lines around
+a re-dial are expected on their own:
+
+- `Connection to bankd lost` -- the bankd link dropped; the client waits for
+  it in `WAIT_BANKD`.
+- `Event MF_E_MDM_STATUS_IND not permitted` and `Event MF_E_SRVC_CONNECTED
+  not permitted` in `WAIT_BANKD` -- modem status and a reconnected control
+  link reported while the client waits for bankd; both are dropped.
+- `transition to state WAIT_BANKD not permitted!` -- a `configClientBankReq`
+  reached a client that already waits for bankd. The client re-dials bankd
+  regardless.
+
+A reconnected control link always sends `configClientBankReq`, and an
+operational client answers it by dropping and re-dialling its bankd link,
+so the modem sees a card reset even when only the control link was lost.
+If no `Assigned ... as bankd connection` follows within a few seconds,
+restart the HIL session.
+
+### The modem resets the UICC after 120 s on a TERMINAL RESPONSE
+
+The bridge log answers a FETCH with a RECEIVE DATA command, then shows
+nothing for 120 s, then `Modem reset the UICC`; the modem-side mirror notes
+`no status word before a new ATR; 178/178 command data bytes sent, ... NULL,
+120 s after the terminal's last byte`. The modem did send its TERMINAL
+RESPONSE. The SIMtrace2 board held it, keeping the modem waiting with NULL
+procedure bytes, because its firmware ends a USB message of 128, 192 or 256
+bytes without a zero-length packet, and the host only reads such a message
+once the board sends the next one. That is any modem command carrying 114,
+178 or 242 data bytes (Lc `72`, `B2`, `F2`); in practice a RECEIVE DATA that
+returns the last 97, 160 or 224 bytes of a server response. Which response
+does so is set by its length, so a card that has always worked fails on
+every attempt once a server answer lands on one of those lengths.
+
+The held command reaches the bridge after the reset. The bridge drops it
+unanswered and logs `Dropping modem APDU ...: the modem sent it before
+resetting the UICC`, naming the 192-byte USB message; it never forwards the
+card's answer to a command sent before a reset, or to one a newer command
+has superseded. Answering it would put the card's `6F00` on the modem's
+first SELECT and every later answer one command late, which the modem
+answers with more resets. The 120 s hold itself goes away only with
+patched board firmware: `upstream_patches/osmocom-simtrace2-cardem-zlp/`
+carries the patch, a journal scan (`repro_zlp_stall.py`) and an `AT+CSIM`
+check; build and flash it as in [SIMTRACE2_CARDEM_GUIDE.md](SIMTRACE2_CARDEM_GUIDE.md).
 
 ### YggdraSIM falls back to direct PC/SC
 

@@ -4,14 +4,14 @@
 """Regression tests for the service-table staging encoder.
 
 Operators wanted a "what if I flipped these flags?" view for bitmap
-service-table EFs (EF.UST / EF.IST / generic) — toggle services in
+service-table EFs (EF.UST / EF.IST / generic) -- toggle services in
 the GUI, watch the resulting hex update live, and copy the bytes
 into UPDATE BINARY without doing the bit-math by hand.
 
 Contract pinned by these tests:
 
 * ``AdvancedDecoders.encode_service_table`` is the round-trip dual of
-  ``_build_service_table`` — given a list of active service numbers
+  ``_build_service_table`` -- given a list of active service numbers
   it produces the same bitmap the decoder would consume.
 * The ``scp03.stage_service_table`` action is registered, takes a
   JSON list of integers as ``active`` (no string coercion), and
@@ -23,7 +23,7 @@ Contract pinned by these tests:
 * The matching CSS hooks (``cc-svc-stage-*``) exist so the popout
   renders without falling back to default browser styles.
 
-Pure-Python / static-grep tests — no card, no GUI server.
+Pure-Python / static-grep tests -- no card, no GUI server.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from pathlib import Path
 
 
 # ----------------------------------------------------------------------
-# Backend encoder — SCP03/core/decoders.py
+# Backend encoder -- SCP03/core/decoders.py
 # ----------------------------------------------------------------------
 
 
@@ -107,7 +107,7 @@ def test_encode_service_table_rejects_invalid_service_numbers() -> None:
 
 
 # ----------------------------------------------------------------------
-# Dispatcher — yggdrasim_common/gui_server/actions/scp03.py
+# Dispatcher -- yggdrasim_common/gui_server/actions/scp03.py
 # ----------------------------------------------------------------------
 
 
@@ -132,7 +132,7 @@ def test_dispatch_stage_service_table_returns_diff_and_decoded() -> None:
     assert out["byte_count"] == 3
     assert out["active"] == [2, 6, 10]
     assert isinstance(out["diff_bytes"], list)
-    # At least one byte must differ — we added service 6 to byte 0.
+    # At least one byte must differ -- we added service 6 to byte 0.
     assert len(out["diff_bytes"]) >= 1, out["diff_bytes"]
     decoded = out["decoded"]
     assert isinstance(decoded, dict)
@@ -194,7 +194,7 @@ def test_stage_service_table_spec_is_registered_pure_local() -> None:
 
 
 # ----------------------------------------------------------------------
-# Frontend wiring — yggdrasim_common/gui_server/static/app.{js,css}
+# Frontend wiring -- yggdrasim_common/gui_server/static/app.{js,css}
 # ----------------------------------------------------------------------
 
 

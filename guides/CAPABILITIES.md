@@ -35,7 +35,7 @@ YggdraSIM currently provides:
 - shared mutable state through SQLite, keyed by card identity or eIM identity
 - optional encryption for stored runtime payloads
 - a writable runtime-tree model for frozen executables
-- commit-pinned upstream `pySim` integration for SAIP, SCP03/SCP80, and
+- commit-pinned `pySim` integration for SAIP, SCP03/SCP80, and
   SCP11-related flows; `[saip]` adds dependencies for spreadsheet extensions
   that are supplied as plugins rather than shipped here, while a local
   `pysim/` developer checkout still takes priority when present
@@ -234,6 +234,15 @@ include:
 - `SET-SMDP`, `SET-ES9`, `SET-ES9-TLS`, and `SET-ES9-CA`
 - `ES9-CERT-INFO`
 - `FLOW` and `EIM-AUTHENTICATE` compatibility probes
+- `ADD-INITIAL-EIM`, a wizard that builds ES10b.AddInitialEim (SGP.32 v1.3
+  §5.9.4) from the AddInitialEim builder store and, once confirmed, sends
+  eUICCMemoryReset (resetEimConfigData, resetImmediateEnableConfig) and then
+  the request; unlike the Local eIM shell's package-driven verb of the same
+  name, it needs no package file. The GUI sends the same request from
+  Offline Tools (`tool.eim_builder.send`) and eSIM Management
+  (`scp11_live.add_initial_eim`)
+- `EIM-CERT-STORE` for that store's certificates and saved values, shared with
+  the Offline Tools AddInitialEim build
 - automatic notification synchronization around transactional flows
 
 ### `SCP11/test`
@@ -257,8 +266,8 @@ lab-only shaping behavior, not operator model drift.
 `SCP11/relay` remains the compatibility namespace. Current capabilities include:
 
 - preserving older import and script contracts
-- exposing a relay-oriented shell/orchestrator surface under the legacy module
-  name
+- starting the same eSIM management relay shell as `SCP11/live` under the
+  legacy module name
 
 ### `SCP11/shared`
 
@@ -347,12 +356,11 @@ current capability set includes:
 - eIM package authoring from JSON templates
 - canonical fake-eIM peer-provisioning artifacts for `AddEim`
 - eIM package linting and issue workflows
-- localized relay execution through the eSIM management relay orchestrator
-- adapter-first standalone `IPAd` runner export through `ipad_standalone.py`
+- `IPAd` discovery against the card, with optional package selection
 - simulator-side default BF55 eIM identity override through
   `Workspace/SIMCARD/eim_identity.json`, with full card-side layouts still
   overridable through `Workspace/SIMCARD/isdr_config.json` and `eim_entries`
-- built-in localized handover-state management and linked download helpers
+- handover-state management and linked download helpers
 - hotfolder queue execution and fetch flows
 - response logging and filtering
 - counter inspection and override by `eim_id`
@@ -363,26 +371,38 @@ current capability set includes:
 Current execution-path families are:
 
 - Direct Auth
-- Localized relay
+- `IPAd` discovery and handover
 
 Current lifecycle and direct-card operations include:
 
 - `ADD-INITIAL-EIM`
-- `ADD-EIM`
 - `GET-EIM-CONFIG`
-- `DELETE-EIM`
 - `EUICC-MEMORY-RESET`
 - `ISDR-ADD-INITIAL-EIM`
-- `ISDR-ADD-EIM`
 - `ISDR-GET-EIM-CONFIG`
-- `ISDR-DELETE-EIM`
 - `LOAD-EIM-PACKAGE`
 
-Current localized relay and handover operations include:
+Current operation-queue functions include:
+
+- an operation queue per eUICC (`QUEUE`, `OPS`, `OP`, `EDIT`, `MOVE`, `CANCEL`, `COPY`):
+  PSMOs, eCOs (`ADD-EIM`, `DELETE-EIM` among them), IPA eUICC data requests and profile
+  download triggers, signed when an IPA takes them
+- association of a card with the Local eIM (`ASSOCIATE`) and eUICC records (`EUICC`)
+- a background ESipa service with a local SM-DP+ (`SERVE`), direct delivery as IPAd
+  (`DELIVER`), eIM Package Injection to an IPAd that listens for it (`INJECT`, with
+  `EIM-LISTEN` in the eSIM Management console; plain HTTP on the loopback, or HTTPS with
+  the eIM's client certificate on an address another host can reach) and export for another
+  IPA (`EXPORT`, `RESULT`)
+- forwarding of the Notifications an IPA hands over to the SM-DP+ each names
+  (`NOTIFICATIONS`; ES9+'.HandleNotification, GSMA SGP.32 v1.3 §5.7.4)
+- Add eIM from an eIM configuration saved in the AddInitialEim builder (`ADD-EIM config=<name>`)
+- package documents queued from templates or a hotfolder (`PACKAGE-IMPORT`)
+
+Current discovery and handover operations include:
 
 - `IPAD-DISCOVER`
-- `IPAD-LIVE`
-- `IPAD-TEST`
+- `HANDOVER-SET`
+- `HANDOVER-STATUS`
 
 Current hotfolder and response operations include:
 
@@ -462,7 +482,7 @@ relay. Current capabilities include:
   for the YggdraSIM modules
 - GSMTAP mirroring on UDP 4729 for live Wireshark capture
 - AT+CSIM / AT+CRSM transcoding (`Tools/HilBridge/at_simlink.py`) per
-  3GPP TS 27.007 §8.17 / §8.18 — turns AT request lines into raw
+  3GPP TS 27.007 §8.17 / §8.18 -- turns AT request lines into raw
   ISO 7816 APDUs and back, transport-agnostic so any modem-side serial
   / TCP loopback can drive the simulated card
 - HIL supervisor (`yggdrasim-hil-supervisor`) with health-checked
@@ -478,20 +498,20 @@ relay. Current capabilities include:
 `Tools/YggdraCore/` provides in-process 5G-core stubs and a BYO-Open5GS
 provisioning bridge:
 
-- `subscription_store.py` — in-memory subscriber DB
+- `subscription_store.py` -- in-memory subscriber DB
   (K / OPc / AMF / SQN / MCC / MNC / RID / `akma_enabled`) with
   monotone SQN advance per successful authentication
-- `ausf_stub.py` — `Nausf_UEAuthentication_Authenticate` POST and PUT
+- `ausf_stub.py` -- `Nausf_UEAuthentication_Authenticate` POST and PUT
   (`5g-aka-confirmation`) per TS 33.501 §6.1.3; produces a 5G HE AV
   (RAND, AUTN, XRES*, KAUSF) and verifies UE-side RES* before
   deriving KSEAF and pushing `(SUPI, A-KID, KAKMA)` into the AAnF
   when AKMA is enabled
-- `aanf_stub.py` — TS 33.535 §6 AAnF state with
+- `aanf_stub.py` -- TS 33.535 §6 AAnF state with
   `Naanf_AKMA_KeyRegistration` and `Naanf_AKMA_ApplicationKey_Get`
-- `http_app.py` — opt-in FastAPI loopback launcher; refuses to start
+- `http_app.py` -- opt-in FastAPI loopback launcher; refuses to start
   unless `YGGDRASIM_5GCORE_MODE=stub` is set, refuses non-loopback
   binds unless `YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK=1` is set
-- `open5gs_bridge.py` — pymongo-backed wrapper around the
+- `open5gs_bridge.py` -- pymongo-backed wrapper around the
   `open5gs.subscribers` collection. Detects an installed Open5GS
   deployment via `$PATH` + a short MongoDB server-selection probe.
   Every YggdraSIM-provisioned doc carries `_yggdrasim_provisioned`
@@ -670,7 +690,7 @@ Launcher features that are flavor-aware:
 - `main/main.py --doctor` reports the active flavor and probes HIL
   prerequisites (`pyudev`, `osmo-remsim-client-st2`, `dfu-util`,
   `lsusb`) where relevant
-- the main menu always exposes `[CB] Card Bridge / Remote APDU Streaming`
+- the main menu always exposes `[CB] Card Bridge / Card Bridge over SSH`
   on supported Python hosts, including Windows and macOS
 - the main menu hides or visibly disables the `[B] Local SIMtrace2 HIL
   Bridge Session` entry on clean builds and on non-Linux hosts, with a

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Regression tests for the unified SAIP filesystem-tree extraction.
 
 ``saip.list_files`` used to silently drop every file created by a
@@ -37,7 +36,7 @@ def _hex(value: str) -> bytes:
 
 
 class WalkChoicePathsTests(unittest.TestCase):
-    """Tuple-aware walker — root cause of the GFM blind spot."""
+    """Tuple-aware walker -- root cause of the GFM blind spot."""
 
     def test_descends_into_choice_tuples(self) -> None:
         payload = {
@@ -50,7 +49,7 @@ class WalkChoicePathsTests(unittest.TestCase):
         }
         paths = [p for p, _ in _walk_choice_paths(payload)]
         # The linter's plain ``_walk_with_path`` would stop at the
-        # outer list — we expect the choice-aware walk to reach
+        # outer list -- we expect the choice-aware walk to reach
         # ``createFCP.fileID``.
         self.assertIn("fileManagementCMD[0][1].createFCP", paths)
 
@@ -166,7 +165,7 @@ class TemplateFilesystemTreeTests(unittest.TestCase):
         pb = next(r for r in rows if r["field_path"] == "df-phonebook")
         self.assertEqual(pb["parent_path"], "3F00/7F10")
         self.assertEqual(pb["fid_chain"], "3F00/7F10/5F3A")
-        # Templated DF — kind comes from ``_FS_TREE_FILE_TYPE_TO_KIND``.
+        # Templated DF -- kind comes from ``_FS_TREE_FILE_TYPE_TO_KIND``.
         self.assertEqual(pb["kind"], "df")
 
     def test_ef_arr_attached_to_df_telecom(self) -> None:
@@ -179,7 +178,7 @@ class TemplateFilesystemTreeTests(unittest.TestCase):
 
 
 class GfmFilesystemTreeTests(unittest.TestCase):
-    """Generic File Management — the regression the user reported."""
+    """Generic File Management -- the regression the user reported."""
 
     def _document(self) -> dict:
         return {
@@ -370,8 +369,8 @@ class MfAndAdfAsSeparateRootsTests(unittest.TestCase):
 
     1. MF appears at the root (``parent_path == ''``, ``fid_chain == '3F00'``).
     2. Every ADF appears at the root with ``fid_chain == 'ADF.<NAME>'``
-       — never as a folder under MF, and never under its temp_fid
-       (``7FF0`` … ``7FFF``).
+       -- never as a folder under MF, and never under its temp_fid
+       (``7FF0`` ... ``7FFF``).
     3. EFs / DFs whose pySim ``FileTemplate`` parent is an ADF are
        anchored under ``ADF.<NAME>/...`` instead of ``3F00/<temp>/...``.
     """
@@ -435,7 +434,7 @@ class MfAndAdfAsSeparateRootsTests(unittest.TestCase):
         self.assertEqual(adf["fid_chain"], "ADF.USIM")
         self.assertEqual(adf["kind"], "adf")
         # The temp_fid 7FF0 must not leak into the operator-facing
-        # chain — that's GFM SELECT bytecode, not the file tree.
+        # chain -- that's GFM SELECT bytecode, not the file tree.
         self.assertNotIn("7FF0", adf["fid_chain"])
 
     def test_iccid_under_mf(self) -> None:
@@ -451,7 +450,7 @@ class MfAndAdfAsSeparateRootsTests(unittest.TestCase):
         self.assertEqual(imsi["parent_path"], "ADF.USIM")
         self.assertEqual(imsi["fid_chain"], "ADF.USIM/6F07")
         # Parent-aware FID resolver must still pick the right friendly
-        # name — ADF.USIM/6F07 is EF.IMSI, not EF.IST (which lives at
+        # name -- ADF.USIM/6F07 is EF.IMSI, not EF.IST (which lives at
         # ADF.ISIM/6F07).
         self.assertEqual(imsi["friendly_name"], "EF.IMSI")
 
@@ -521,11 +520,11 @@ class OptionalTemplateExtendsAnchorTests(unittest.TestCase):
 
 
 class SingleNamePerRowTests(unittest.TestCase):
-    """Every row resolves to exactly one friendly name — never compound.
+    """Every row resolves to exactly one friendly name -- never compound.
 
     The FID name registry intentionally lists multiple aliases for
     several FIDs (EF.UST + EF.UST-SERVICE-TABLE at 6F38, DF.GSM +
-    DF.EAP at 7F20, EF.IMSI + EF.IST at 6F07, …). The compound
+    DF.EAP at 7F20, EF.IMSI + EF.IST at 6F07, ...). The compound
     ``"FOO / BAR"`` form is informative for a debugger but unreadable
     in an operator-facing tree label. The walker now picks one
     contextual name per row using the chain context as the
@@ -672,7 +671,7 @@ class GfmReanchorUnderAdfTests(unittest.TestCase):
     def test_gfm_row_anchored_under_adf_friendly_name(self) -> None:
         rows = _filesystem_tree_rows(self._document_with_gfm_under_usim())
         # The lone GFM-created EF should land under ADF.USIM/5F50/4F83
-        # — not under 3F00/7FF0/5F50/4F83. The latter would force the
+        # -- not under 3F00/7FF0/5F50/4F83. The latter would force the
         # GUI to render it as a stray sibling of MF children.
         gfm_rows = [r for r in rows if r["source"] == "gfm"]
         self.assertEqual(len(gfm_rows), 1)

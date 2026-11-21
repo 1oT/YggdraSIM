@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PIN / PUK value coding between operator-typed digits and on-card hex.
 
 ETSI TS 102 221 §9.5.1 / 3GPP TS 31.101 §8 specify that a PIN/PUK value
@@ -77,7 +76,7 @@ def decode_hex_to_digits(hex_value: Any) -> dict[str, Any]:
     """Decode an on-card PIN/PUK byte string into its digit prefix.
 
     Returns ``{"hex": <UPPER>, "digits": <str>, "padded_to": <int>,
-    "pad_byte_hex": <"FF" | …>, "valid_digits_only": <bool>}``. Bytes
+    "pad_byte_hex": <"FF" | ...>, "valid_digits_only": <bool>}``. Bytes
     after the first non-ASCII-digit byte are treated as padding; if
     the padding byte is not 0xFF the caller still gets the prefix and
     the actual pad value so they can audit a non-conforming profile.

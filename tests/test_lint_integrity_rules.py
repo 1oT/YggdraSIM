@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for PE-integrity, application, metadata, and file-descriptor lint rules.
 
-Covers: YRL-SEQ-010, YRL-PID-001/002, YRL-SDM-001..004,
+Covers: YRL-SEQ-010, YRL-PID-001/002, YRL-SDM-001..004, YRL-SDM-010..013,
         YRL-JCA-001/002/003/010, YRL-JCI-001..004,
         YRL-MET-001/010/011, YRL-FIL-002/003/005/006/019.
 """
@@ -108,7 +107,7 @@ def _codes(doc: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# YRL-SEQ-010 — duplicate singleton PE type
+# YRL-SEQ-010 -- duplicate singleton PE type
 # ---------------------------------------------------------------------------
 
 class SingletonDuplicateTests(unittest.TestCase):
@@ -130,7 +129,7 @@ class SingletonDuplicateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-PID-001 / YRL-PID-002 — PE identification integrity
+# YRL-PID-001 / YRL-PID-002 -- PE identification integrity
 # ---------------------------------------------------------------------------
 
 class PeIdentificationTests(unittest.TestCase):
@@ -163,7 +162,7 @@ class PeIdentificationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-SDM-001..004 — securityDomain PE integrity
+# YRL-SDM-001..004 -- securityDomain PE integrity
 # ---------------------------------------------------------------------------
 
 class SecurityDomainTests(unittest.TestCase):
@@ -198,7 +197,129 @@ class SecurityDomainTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-JCA-001/002/003/010 — application load-block integrity
+# YRL-SDM-010..013 -- key types and declared protocols of a Security Domain
+# ---------------------------------------------------------------------------
+
+def _sd_key(kvn: str, kid: str, key_type: str, *, as_bytes: bool = False) -> dict:
+    def value(text: str) -> object:
+        return bytes.fromhex(text) if as_bytes else {"hex": text}
+
+    return {
+        "keyUsageQualifier": value("48"),
+        "keyIdentifier": value(kid),
+        "keyVersionNumber": value(kvn),
+        "keyAccess": value("00"),
+        "keyComponents": [{"keyType": value(key_type), "keyData": value("00" * 16), "macLength": 8}],
+    }
+
+
+def _recognition_block(*scp_and_i: str) -> str:
+    """One DGI '0070' block: Card Recognition Data with a tag '64' per protocol (GP v2.4 Annex H.2)."""
+    entries = "".join("640B0609" + "2A864886FC6B04" + item for item in scp_and_i)
+    inner = "06072A864886FC6B01" + entries
+    block_73 = "73" + f"{len(inner) // 2:02X}" + inner
+    block_66 = "66" + f"{len(block_73) // 2:02X}" + block_73
+    return "0070" + f"{len(block_66) // 2:02X}" + block_66
+
+
+def _sd_with(keys: list, *, c9: str | None = None, recognition: str | None = None) -> dict:
+    payload = _sd_pe(key_list=keys)
+    if c9 is not None:
+        payload["instance"] = {"applicationSpecificParametersC9": {"hex": c9}}
+    if recognition is not None:
+        payload["sdPersoData"] = [{"hex": recognition}]
+    return payload
+
+
+def _sdm_findings(doc: dict) -> dict[str, list]:
+    report = SaipProfileLinter().lint_decoded_document(doc, profile_label="test")
+    found: dict[str, list] = {}
+    for finding in report.findings:
+        if finding.code.startswith("YRL-SDM"):
+            found.setdefault(finding.code, []).append(finding)
+    return found
+
+
+class SecurityDomainKeyTypeTests(unittest.TestCase):
+    """YRL-SDM-010/011: key types against GP Card Spec v2.4 Table 11-16."""
+
+    def test_every_reserved_key_type_fails_and_every_defined_one_passes(self) -> None:
+        from Tools.ProfilePackage.saip_security_domain_edit import KEY_TYPE_LABELS
+
+        self.assertEqual(
+            sorted(value for value, label in KEY_TYPE_LABELS.items() if label.startswith("Reserved")),
+            [0x81, 0x82, 0x83, 0x84, 0x90, 0x91],
+        )
+        for value, label in sorted(KEY_TYPE_LABELS.items()):
+            with self.subTest(key_type=f"{value:02X}"):
+                found = _sdm_findings(_make_doc(securityDomain=_sd_with([_sd_key("40", "02", f"{value:02X}")])))
+                if label.startswith("Reserved"):
+                    self.assertEqual([item.severity for item in found["YRL-SDM-010"]], ["FAIL"])
+                    self.assertNotIn("YRL-SDM-OK-KEYTYPES", found)
+                else:
+                    self.assertNotIn("YRL-SDM-010", found)
+                    self.assertNotIn("YRL-SDM-011", found)
+                    self.assertEqual([item.severity for item in found["YRL-SDM-OK-KEYTYPES"]], ["PASS"])
+
+    def test_reserved_type_names_the_key_and_its_path(self) -> None:
+        keys = [_sd_key("01", "01", "80", as_bytes=True), _sd_key("40", "02", "82", as_bytes=True)]
+        finding = _sdm_findings(_make_doc(securityDomain=_sd_with(keys)))["YRL-SDM-010"][0]
+        self.assertEqual(finding.path, "securityDomain.keyList[1].keyComponents[0].keyType")
+        self.assertIn("KVN 40 KID 02", finding.message)
+        self.assertIn("'82'", finding.message)
+
+    def test_undefined_type_warns_and_private_use_is_left_alone(self) -> None:
+        undefined = _sdm_findings(_make_doc(securityDomain=_sd_with([_sd_key("01", "01", "8A")])))
+        self.assertEqual([item.severity for item in undefined["YRL-SDM-011"]], ["WARN"])
+        private = _sdm_findings(_make_doc(securityDomain=_sd_with([_sd_key("01", "01", "10")])))
+        self.assertNotIn("YRL-SDM-010", private)
+        self.assertNotIn("YRL-SDM-011", private)
+
+    def test_malformed_key_entries_raise_nothing(self) -> None:
+        for keys in ([None], ["text"], [{"keyComponents": "x"}], [{"keyComponents": [None, {}]}],
+                     [{"keyVersionNumber": {"hex": "zz"}, "keyComponents": [{"keyType": {"hex": ""}}]}]):
+            with self.subTest(keys=keys):
+                found = _sdm_findings(_make_doc(securityDomain=_sd_with(keys)))
+                self.assertNotIn("YRL-SDM-010", found)
+
+
+class SecurityDomainProtocolTests(unittest.TestCase):
+    """YRL-SDM-012/013: protocols in C9 and Card Recognition Data against each other and the keys."""
+
+    def test_protocol_left_in_recognition_data_only(self) -> None:
+        sd = _sd_with([_sd_key("01", "01", "80")], c9="81028000", recognition=_recognition_block("0255", "8000"))
+        found = _sdm_findings(_make_doc(securityDomain=sd))
+        self.assertEqual([item.severity for item in found["YRL-SDM-012"]], ["WARN"])
+        self.assertIn("only in Card Recognition Data: SCP02", found["YRL-SDM-012"][0].message)
+        self.assertIn("SCP02", found["YRL-SDM-013"][0].message)
+
+    def test_matching_declarations_with_keys_are_quiet(self) -> None:
+        keys = [_sd_key("01", "01", "80"), _sd_key("40", "01", "85"), _sd_key("40", "02", "88")]
+        sd = _sd_with(keys, c9="8102800081028107", recognition=_recognition_block("8000", "8107"))
+        found = _sdm_findings(_make_doc(securityDomain=sd))
+        self.assertNotIn("YRL-SDM-012", found)
+        self.assertNotIn("YRL-SDM-013", found)
+
+    def test_declared_without_keys_is_informational(self) -> None:
+        sd = _sd_with([_sd_key("01", "01", "80")], c9="8102800081028107", recognition=_recognition_block("8000", "8107"))
+        found = _sdm_findings(_make_doc(securityDomain=sd))
+        self.assertNotIn("YRL-SDM-012", found)
+        self.assertEqual([item.severity for item in found["YRL-SDM-013"]], ["INFO"])
+        self.assertIn("SCP81", found["YRL-SDM-013"][0].message)
+
+    def test_one_declaration_alone_and_unreadable_data_are_quiet(self) -> None:
+        for sd in (
+            _sd_with([_sd_key("01", "01", "80")], c9="81028000"),
+            _sd_with([_sd_key("01", "01", "80")], recognition=_recognition_block("8000")),
+            _sd_with([_sd_key("01", "01", "80")], c9="8102", recognition="0070FF66"),
+            _sd_with([_sd_key("01", "01", "80")], c9="zz", recognition="00"),
+        ):
+            with self.subTest(sd=sd):
+                self.assertNotIn("YRL-SDM-012", _sdm_findings(_make_doc(securityDomain=sd)))
+
+
+# ---------------------------------------------------------------------------
+# YRL-JCA-001/002/003/010 -- application load-block integrity
 # ---------------------------------------------------------------------------
 
 class AppLoadBlockTests(unittest.TestCase):
@@ -241,7 +362,7 @@ class AppLoadBlockTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-JCI-001..004 — application instance integrity
+# YRL-JCI-001..004 -- application instance integrity
 # ---------------------------------------------------------------------------
 
 class AppInstanceTests(unittest.TestCase):
@@ -292,7 +413,71 @@ class AppInstanceTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-MET-001 / YRL-MET-010 / YRL-MET-011 — metadata alignment
+# Application AIDs as the DER decoder hands them over (bytes)
+# ---------------------------------------------------------------------------
+
+# TCA SAIP v3.4.1 Annex C §11.2.11 (MNO-SD) and §11.2.13 (PE APPLICATION 1).
+_MNO_SD_AID = bytes.fromhex("A000000151000000")
+_PACKAGE_AID = bytes.fromhex("A000000559101001")
+_INSTANCE_AID = bytes.fromhex("A00000055910100111223301")
+
+
+def _decoded_sd_and_app(instance: dict, security_domain_aid: bytes | None = None) -> dict:
+    load_block: dict = {"loadPackageAID": _PACKAGE_AID, "loadBlockObject": b"\x01\x00\x00"}
+    if security_domain_aid is not None:
+        load_block["securityDomainAID"] = security_domain_aid
+    return _make_doc(
+        securityDomain={
+            "identification": 2,
+            "type": "securityDomain",
+            "instance": {
+                "applicationLoadPackageAID": bytes.fromhex("A0000001515350"),
+                "classAID": bytes.fromhex("A000000151535041"),
+                "instanceAID": _MNO_SD_AID,
+            },
+            "keyList": [{"keyVersionNumber": 1}],
+        },
+        application={
+            "identification": 10,
+            "type": "application",
+            "loadBlock": load_block,
+            "instanceList": [instance],
+        },
+    )
+
+
+class AppDecodedBytesAidTests(unittest.TestCase):
+    """A package decoded from DER carries every AID as bytes, not hex text."""
+
+    def test_matching_byte_aids_raise_nothing(self) -> None:
+        doc = _decoded_sd_and_app(
+            {
+                "applicationLoadPackageAID": _PACKAGE_AID,
+                "classAID": _PACKAGE_AID + bytes.fromhex("112233"),
+                "instanceAID": _INSTANCE_AID,
+                "extraditeSecurityDomainAID": _MNO_SD_AID,
+            },
+            security_domain_aid=_MNO_SD_AID,
+        )
+        codes = _codes(doc)
+        for rule in ("YRL-JCA-002", "YRL-JCA-010", "YRL-JCI-004", "YRL-SDM-005"):
+            self.assertNotIn(rule, codes)
+
+    def test_mismatching_byte_aids_still_fail(self) -> None:
+        doc = _decoded_sd_and_app(
+            {
+                "applicationLoadPackageAID": bytes.fromhex("A000000559101003"),
+                "instanceAID": _INSTANCE_AID,
+            },
+            security_domain_aid=bytes.fromhex("A00000055910100102736456616C7565"),
+        )
+        codes = _codes(doc)
+        self.assertIn("YRL-JCI-004", codes)
+        self.assertIn("YRL-JCA-010", codes)
+
+
+# ---------------------------------------------------------------------------
+# YRL-MET-001 / YRL-MET-010 / YRL-MET-011 -- metadata alignment
 # ---------------------------------------------------------------------------
 
 class MetadataAlignmentTests(unittest.TestCase):
@@ -318,7 +503,7 @@ class MetadataAlignmentTests(unittest.TestCase):
         return [f.code for f in report.findings]
 
     def test_met001_metadata_iccid_mismatch(self) -> None:
-        # Metadata carries a different ICCID string — linter compares via str().
+        # Metadata carries a different ICCID string -- linter compares via str().
         codes = self._lint_with_meta({"profile": {"iccid": "89882099999999991230"}})
         self.assertIn("YRL-MET-001", codes)
 
@@ -343,7 +528,7 @@ class MetadataAlignmentTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# YRL-FIL-002/003/005/006/019 — GFM file-descriptor and fileID checks
+# YRL-FIL-002/003/005/006/019 -- GFM file-descriptor and fileID checks
 # ---------------------------------------------------------------------------
 
 class FileDescriptorTests(unittest.TestCase):
@@ -400,7 +585,7 @@ class FileIdTests(unittest.TestCase):
         self.assertIn("YRL-FIL-006", codes)
 
     def test_fil006_wrong_length_file_id(self) -> None:
-        # 3 octets — must be exactly 2
+        # 3 octets -- must be exactly 2
         doc = _make_doc(
             gfm=_gfm_section(_gfm_cmd(file_descriptor="4121", file_id="6F0700"))
         )
@@ -442,7 +627,7 @@ class ShortEfidTests(unittest.TestCase):
         self.assertIn("YRL-FIL-019", codes)
 
     def test_fil019_wrong_length_short_efid(self) -> None:
-        # 2 octets — must be exactly 1
+        # 2 octets -- must be exactly 1
         doc = _make_doc(
             gfm=_gfm_section(_gfm_cmd(
                 file_descriptor="4121", file_id="6F07", short_efid="0700"

@@ -96,6 +96,43 @@ under review:
 These sidecars are used by the download flows to validate what will actually
 land on the card.
 
+## Single profile elements
+
+The GUI workbench exports and imports one PE at a time (ribbon *Element*
+group and the PE card's context menu; `saip.export_pe` / `saip.import_pe`
+in the action registry). The complete form is the *PE document*, a
+`.pe.json` file with the schema `ygg.pe_document.v1`:
+
+| Key | Contents |
+| --- | --- |
+| `__ygg_pe_document__` | `schema` and `pe_type`; a template PE adds `template` and its `placeholders` |
+| `sections` | the PE's decoded tree in the tagged form a saved package uses, without the display labels, so every setting and the workbench's PE name survive |
+
+The document names nothing outside the PE: no source package, no summary,
+no DER copy. Import rebuilds the PE from the tree, which re-encodes to the
+same bytes. For PE-Application (TCA eUICC Profile Package v3.4.1 section
+8.7) the tree carries the load block with its `loadBlockObject` bytes and
+every `ApplicationInstance`; the export's response lists the load package
+AID, the load block size, a CAP / IJC header inspection and the instance
+AIDs. DER and HEX exports carry the PE bytes only.
+
+Import accepts the PE document, a tagged single-section JSON document, the
+plain decoded JSON the JSON tab shows, binary DER and ASCII hex. The tree
+is the editable truth: a document an earlier release wrote also records
+`der_hex`, and when that no longer matches the tree's re-encoding the
+import reports it and uses the tree. The imported PE takes
+the next free `identification` (section 8.1.3 requires uniqueness), so the
+other PEs keep theirs. A template PE that still carries placeholder
+literals is refused; export it with the stored values substituted first.
+
+The *PE library* (`saip.save_pe`, `saip.list_pe_library`, `saip.load_pe`,
+`saip.delete_saved_pe`; `Tools/ProfilePackage/saip_pe_library.py`) stores
+the same PE document under a name in `~/.yggdrasim/saip_pe_library/`
+(`YGGDRASIM_SAIP_PE_LIBRARY`), so a standardised element loads into any
+package without a file dialog. Unlike the file import, loading a saved
+template PE keeps its placeholder literals: they are registered in the
+receiving package the way a literal typed into an editor is.
+
 ## Standards map
 
 | Area | Spec |

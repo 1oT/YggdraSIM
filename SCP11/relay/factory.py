@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""SCP11-relay session factory: constructs the PC/SC transport, provider, and crypto-engine."""
+"""SCP11-relay session factory: alias of the eSIM management relay module ``SCP11.live.factory``."""
+from __future__ import annotations
 
-from SCP11 import factory as _impl
-from SCP11.shared.compat_exports import reexport_public
+import sys
 
+from SCP11.live import factory as _impl
 
-__all__ = reexport_public(_impl, globals())
+sys.modules[__name__] = _impl

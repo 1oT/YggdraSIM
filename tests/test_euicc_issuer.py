@@ -30,10 +30,10 @@ class EuiccIssuerInferenceTests(unittest.TestCase):
         self.assertEqual(identity["issuer_name"], "Giesecke+Devrient")
 
     def test_infer_identity_from_eid_prefix(self) -> None:
-        identity = infer_ecasd_issuer_from_eid("89044045930000000000001492294428")
+        identity = infer_ecasd_issuer_from_eid("89049032000000000000000000000101")
 
-        self.assertEqual(identity["issuer_number"], "89044045")
-        self.assertEqual(identity["issuer_name"], "Kigen")
+        self.assertEqual(identity["issuer_number"], "89049032")
+        self.assertEqual(identity["issuer_name"], "Giesecke+Devrient")
 
     def test_format_display_falls_back_to_number(self) -> None:
         display = format_ecasd_issuer_display("", "89086029")

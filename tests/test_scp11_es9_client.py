@@ -21,8 +21,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-ES9_CLIENT_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "es9_client.py"
-MODELS_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "models.py"
+ES9_CLIENT_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "es9_client.py"
+MODELS_PATH = Path(__file__).resolve().parent.parent / "SCP11" / "live" / "models.py"
 
 models_spec = importlib.util.spec_from_file_location("scp11_models_module", MODELS_PATH)
 models_module = importlib.util.module_from_spec(models_spec)
@@ -59,6 +59,7 @@ class RecordingEs9Client(Es9LikeClient):
         pinned_tls_public_key_data: bytes = b"",
         use_configured_ca_bundle: bool = True,
         tls_log_label: str = "ES9",
+        user_agent: str = "gsma-rsp-lpad",
     ) -> dict:
         self.post_calls.append(
             {
@@ -69,6 +70,7 @@ class RecordingEs9Client(Es9LikeClient):
                 "pinned_tls_public_key_data": pinned_tls_public_key_data,
                 "use_configured_ca_bundle": use_configured_ca_bundle,
                 "tls_log_label": tls_log_label,
+                "user_agent": user_agent,
             }
         )
         return self.next_response
@@ -297,6 +299,29 @@ def build_test_ca_and_leaf(hostname: str) -> tuple[bytes, bytes]:
     )
 
 
+class TrustPathBundleFlagClient(RecordingEimBinaryClient):
+    """Records the CA-anchor preference each eIM TLS context is built with."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_configured_ca_bundle_flags = []
+
+    def _build_ssl_context_for_endpoint(
+        self,
+        endpoint: str,
+        trust_hint_ci_pkid: str = "",
+        use_configured_ca_bundle: bool = True,
+        log_label: str = "ES9",
+    ):
+        self.use_configured_ca_bundle_flags.append(use_configured_ca_bundle)
+        return super()._build_ssl_context_for_endpoint(
+            endpoint,
+            trust_hint_ci_pkid=trust_hint_ci_pkid,
+            use_configured_ca_bundle=use_configured_ca_bundle,
+            log_label=log_label,
+        )
+
+
 class Es9LikeClientEimTests(unittest.TestCase):
     def test_dump_eim_response_for_debug_defaults_to_eim_local_runtime_dir(self):
         client = RecordingEs9Client(base_url="https://rsp.example.com")
@@ -480,7 +505,8 @@ class Es9LikeClientEimTests(unittest.TestCase):
         self.assertEqual(response.euicc_package_list, ["QUJDRA=="])
         self.assertEqual(response.retry_after_seconds, 4)
         self.assertEqual(client.post_calls[0]["path"], "/gsma/rsp2/asn1")
-        self.assertEqual(client.post_calls[0]["protocol_header"], "gsma/rsp/v2.1.0")
+        self.assertEqual(client.post_calls[0]["protocol_header"], "gsma/rsp/v1.3.0")
+        self.assertEqual(client.post_calls[0]["user_agent"], "gsma-rsp-ipad")
 
     def test_get_eim_package_exposes_no_package_result_code(self):
         client = RecordingEs9Client(base_url="https://rsp.example.com")
@@ -514,7 +540,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
         client = RecordingEs9Client(base_url="https://rsp.example.com")
         raw = bytes.fromhex(
             "BF4F8188BF518184303F8019312E332E362E312E342E312E35333737352E312E352E312E31"
-            "5A10890440459300000000000014922944288101318208000000000000049BA003BF2D005F37"
+            "5A10890490320000000000000000000001018101318208000000000000049BA003BF2D005F37"
             "40CBE8797590F764F1E50E00C2AA7FE42934914775E22DFC6C2FA657B92A144F6F5CECA6AC39"
             "A7106CB0C79B8FC1567FB27C6BA15EEA4A646515A200C3931C3A2C"
         )
@@ -559,6 +585,22 @@ class Es9LikeClientEimTests(unittest.TestCase):
         self.assertTrue(decoded["pollingComplete"])
         self.assertEqual(decoded["packageFormat"], "eimAcknowledgements")
         self.assertIsNone(decoded["eimResultCode"])
+        self.assertEqual(
+            decoded["eimAcknowledgements"],
+            base64.b64encode(bytes.fromhex("BF5303800164")).decode("ascii"),
+        )
+
+    def test_parse_eim_binary_response_keeps_every_acknowledged_sequence_number(self):
+        from SCP03.logic.sgp32_decode import decode_eim_acknowledgements
+
+        client = RecordingEs9Client(base_url="https://rsp.example.com")
+
+        for raw in (bytes.fromhex("BF5009BF5306800121800122"), bytes.fromhex("BF5306800121800122")):
+            with self.subTest(raw=raw.hex().upper()):
+                decoded = client._parse_eim_binary_response(raw)
+
+                acknowledged = base64.b64decode(decoded["eimAcknowledgements"])
+                self.assertEqual(decode_eim_acknowledgements(acknowledged), [33, 34])
 
     def test_parse_eim_binary_response_maps_no_package_result(self):
         client = RecordingEs9Client(base_url="https://rsp.example.com")
@@ -569,6 +611,38 @@ class Es9LikeClientEimTests(unittest.TestCase):
         self.assertEqual(decoded["euiccPackageList"], [])
         self.assertTrue(decoded["pollingComplete"])
         self.assertEqual(decoded["eimResultCode"], 1)
+
+    def test_parse_eim_binary_response_hands_on_alternative_outside_sgp32(self):
+        # SGP.32 v1.3 §6.3.2.6 defines 'BF51', 'BF52', 'BF54' and the
+        # eimPackageError INTEGER. Any other alternative is still a package
+        # the eIM waits on, so it reaches the IPA instead of ending the poll.
+        client = RecordingEs9Client(base_url="https://rsp.example.com")
+        alternative = bytes.fromhex("CA0401020304")
+        raw = bytes.fromhex("BF4F06") + alternative
+
+        decoded = client._parse_eim_binary_response(raw)
+
+        self.assertEqual(
+            decoded["euiccPackageList"],
+            [base64.b64encode(alternative).decode("ascii")],
+        )
+        self.assertFalse(decoded["pollingComplete"])
+        self.assertIsNone(decoded["eimResultCode"])
+
+    def test_parse_eim_binary_response_ignores_unframed_alternative(self):
+        client = RecordingEs9Client(base_url="https://rsp.example.com")
+        for raw_hex in (
+            "BF4F00",  # no alternative at all
+            "BF4F01CA",  # a lone tag octet
+            "BF4F02DF81",  # a multi-octet tag cut short
+            "BF4F02CA05",  # a length that claims more than is there
+            "BF4F05CA010000FF",  # trailing octets after the alternative
+        ):
+            with self.subTest(raw_hex=raw_hex):
+                decoded = client._parse_eim_binary_response(bytes.fromhex(raw_hex))
+
+                self.assertEqual(decoded["euiccPackageList"], [])
+                self.assertTrue(decoded["pollingComplete"])
 
     def test_poll_eim_rest_resource_mode_requires_explicit_mapping(self):
         client = RecordingEs9Client(
@@ -602,7 +676,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
 
         response = client._post_eim_binary(
             "https://polling.example.net",
-            bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+            bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
             b"\x01\x02",
         )
 
@@ -613,6 +687,48 @@ class Es9LikeClientEimTests(unittest.TestCase):
             [b"\x01\x02"],
         )
         self.assertEqual(client.pinned_context_calls, [])
+
+    def test_handle_notification_esipa_posts_bf3d_over_the_asn1_binding(self):
+        # SGP.32 v1.3 section 6.1.1: every ESipa call is one EsipaMessageFromIpaToEim
+        # posted to gsma/rsp2/asn1. HandleNotification is a Notification function,
+        # so the eIM answers 204 with an empty body (SGP.22 v3.1 section 6.3).
+        client = RecordingEimBinaryClient(base_url="https://rsp.example.com")
+        client._response_payload = b""
+        posted = []
+        open_response = client._open_http_response
+
+        def record(request, ssl_context, endpoint, label, timeout_seconds=None, pinned_tls_spki=None):
+            posted.append((endpoint, request.data, request.get_header("Content-type")))
+            return open_response(
+                request,
+                ssl_context,
+                endpoint,
+                label,
+                timeout_seconds=timeout_seconds,
+                pinned_tls_spki=pinned_tls_spki,
+            )
+
+        client._open_http_response = record
+        body = bytes.fromhex("BF3D0BBF5008BF5405300380017F")
+
+        response = client.handle_notification_esipa(
+            EimPollRequest(
+                eim_fqdn="eim.example.com",
+                eim_id="1.2.3",
+                eim_id_type="1",
+                counter_value="2",
+                association_token="",
+                supported_protocol="3",
+                euicc_ci_pkid="",
+                indirect_profile_download="0",
+                euicc_configured_data="",
+                eim_configuration_data="",
+                raw_body=body,
+            )
+        )
+
+        self.assertEqual(response, {})
+        self.assertEqual(posted, [("https://eim.example.com/gsma/rsp2/asn1", body, "application/x-gsma-rsp-asn1")])
 
     def test_post_eim_binary_pinned_path_reraises_original_exception(self):
         # The pinned branch used to wrap any failure in
@@ -630,7 +746,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
         with self.assertRaises(TimeoutError) as raised:
             client._post_eim_binary(
                 "https://polling.example.net",
-                bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+                bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
                 b"\x01\x02",
             )
 
@@ -648,7 +764,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
 
         response = client._post_eim_binary(
             "https://polling.example.net",
-            bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+            bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
             b"",
         )
 
@@ -659,6 +775,132 @@ class Es9LikeClientEimTests(unittest.TestCase):
             client.open_pinned_spki_args,
             [None],
         )
+
+    def test_missing_configured_ca_bundle_is_refused_not_silently_skipped(self):
+        """A configured anchor that has gone missing must not be substituted.
+
+        The path used to fall through to the per-host entry or the system
+        store, so the operator kept believing traffic was pinned to their
+        bundle. The provider chain check already refuses the same path.
+        """
+        client = Es9LikeClient(base_url="https://rsp.example.com")
+        client._ca_bundle_path = "/nonexistent/yggdrasim-test-ca.pem"
+
+        with self.assertRaises(RuntimeError) as caught:
+            client._preferred_ca_bundle_for_endpoint(
+                "https://eim1.esim.example.test/gsma/rsp2/asn1"
+            )
+
+        self.assertIn("/nonexistent/yggdrasim-test-ca.pem", str(caught.exception))
+        self.assertIn("SET-ES9-CA", str(caught.exception))
+
+    def test_missing_configured_ca_bundle_is_ignored_when_not_requested(self):
+        # The eIM and ES9 sites both ask for the configured anchor now, but
+        # the parameter still exists; a caller opting out must not trip the
+        # refusal on a path it never intended to use.
+        client = Es9LikeClient(base_url="https://rsp.example.com")
+        client._ca_bundle_path = "/nonexistent/yggdrasim-test-ca.pem"
+        client._dynamic_ca_lookup = {}
+
+        self.assertEqual(
+            client._preferred_ca_bundle_for_endpoint(
+                "https://eim1.esim.example.test/gsma/rsp2/asn1",
+                use_configured_ca_bundle=False,
+            ),
+            "",
+        )
+
+    def test_poll_eim_offers_the_configured_ca_anchor_to_the_eim_endpoint(self):
+        # SET-ES9-CA / ES9_CA_BUNDLE_PATH is the documented fix for an
+        # untrusted eIM FQDN, not only an untrusted SM-DP+ one, so the
+        # configured anchor has to reach the eIM context.
+        client = RecordingEs9Client(
+            base_url="https://rsp.example.com",
+            eim_base_url="https://eim1.esim.example.test",
+        )
+        client.next_response = {"eimTransactionId": "eim-tx-1"}
+
+        client.poll_eim(
+            EimPollRequest(
+                eim_fqdn="eim1.esim.example.test",
+                eim_id="1.2.3",
+                eim_id_type="1",
+                counter_value="2",
+                association_token="AA",
+                supported_protocol="3",
+                euicc_ci_pkid="BB",
+                indirect_profile_download="0",
+                euicc_configured_data="cfg",
+                eim_configuration_data="eimCfg",
+            )
+        )
+
+        self.assertTrue(client.post_calls[0]["use_configured_ca_bundle"])
+
+    def test_post_eim_binary_trust_path_offers_the_configured_ca_anchor(self):
+        # The live client already reads it this way; this pins the relay
+        # client to the same one so the two cannot drift apart again.
+        client = TrustPathBundleFlagClient(base_url="https://rsp.example.com")
+
+        client._post_eim_binary(
+            "https://polling.example.net",
+            bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
+            b"",
+        )
+
+        self.assertEqual(client.use_configured_ca_bundle_flags, [True])
+
+    def test_post_eim_binary_pin_mismatch_falls_back_to_trust_path(self):
+        # An eIM that rotates its TLS leaf invalidates the BF55 pin without
+        # becoming unreachable, so the poll retries over the CA-verified
+        # path rather than failing the whole sweep.
+        client = RecordingEimBinaryClient(base_url="https://rsp.example.com")
+        client._response_payload = b'{"euiccPackageList":["QUJD"]}'
+        client.open_errors = [
+            es9_module.PinnedTlsMismatchError(
+                "Pinned TLS public key mismatch for eIM endpoint "
+                "https://polling.example.net/gsma/rsp2/asn1."
+            ),
+        ]
+
+        response = client._post_eim_binary(
+            "https://polling.example.net",
+            bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
+            b"\x01\x02",
+        )
+
+        self.assertEqual(response, {"euiccPackageList": ["QUJD"]})
+        self.assertEqual(len(client.open_contexts), 2)
+        self.assertIs(client.open_contexts[1], client._verified_context)
+        self.assertEqual(
+            client.open_pinned_spki_args,
+            [b"\x01\x02", None],
+        )
+
+    def test_post_eim_binary_pin_mismatch_raises_when_pinning_required(self):
+        from SCP11.shared import tls_helpers
+
+        client = RecordingEimBinaryClient(base_url="https://rsp.example.com")
+        client.open_errors = [
+            es9_module.PinnedTlsMismatchError(
+                "Pinned TLS public key mismatch for eIM endpoint "
+                "https://polling.example.net/gsma/rsp2/asn1."
+            ),
+        ]
+
+        with mock.patch.dict(
+            os.environ,
+            {tls_helpers.REQUIRE_PINNED_TLS_ENV: "1"},
+            clear=False,
+        ):
+            with self.assertRaises(es9_module.PinnedTlsMismatchError):
+                client._post_eim_binary(
+                    "https://polling.example.net",
+                    bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
+                    b"\x01\x02",
+                )
+
+        self.assertEqual(len(client.open_contexts), 1)
 
     def test_dynamic_tls_discovery_persists_presented_chain_bundle(self):
         hostname = "new-eim.example.test"
@@ -685,9 +927,19 @@ class Es9LikeClientEimTests(unittest.TestCase):
             expected_subject = crypto_x509.load_der_x509_certificate(ca_der).subject.rfc4514_string()
 
             def fake_verify(certificate_der: bytes, bundle_path: str) -> str:
-                bundle_text = Path(bundle_path).read_text(encoding="utf-8")
-                self.assertIn("BEGIN CERTIFICATE", bundle_text)
-                self.assertIn("Dynamic TLS Root", bundle_text)
+                # The bundle is PEM, so the issuer subject is inside the
+                # encoded body and not in the surrounding text. Matching the
+                # subject as a substring never held; the caller used to
+                # swallow the resulting error and take the bundle anyway.
+                bundle_bytes = Path(bundle_path).read_bytes()
+                self.assertIn(b"BEGIN CERTIFICATE", bundle_bytes)
+                self.assertIn(
+                    ca_der,
+                    [
+                        certificate.public_bytes(serialization.Encoding.DER)
+                        for certificate in crypto_x509.load_pem_x509_certificates(bundle_bytes)
+                    ],
+                )
                 return expected_subject
 
             es9_module.verify_certificate_against_ca_bundle = fake_verify
@@ -737,7 +989,7 @@ class Es9LikeClientEimTests(unittest.TestCase):
             original_verify = es9_module.verify_certificate_against_ca_bundle
 
             def fake_verify(certificate_der: bytes, bundle_path: str) -> str:
-                return "CN=Dynamic TLS Root,O=YggdraSIM Test,C=EE"
+                return "CN=Dynamic TLS Root,O=YggdraSIM Test,C=XX"
 
             es9_module.verify_certificate_against_ca_bundle = fake_verify
             try:
@@ -752,7 +1004,9 @@ class Es9LikeClientEimTests(unittest.TestCase):
             self.assertEqual(resolved_bundle, "")
             saved_lookup = json.loads(lookup_path.read_text(encoding="utf-8"))
             self.assertEqual(saved_lookup, {})
-            self.assertEqual(len(client.bundle_verify_calls), 1)
+            # The presented chain bundle is probed once and, after its
+            # rejection, the leaf-only bundle once; neither is persisted.
+            self.assertEqual(len(client.bundle_verify_calls), 2)
 
 
 class Es9LikeClientTransportLogGatingTests(unittest.TestCase):
@@ -813,49 +1067,39 @@ class Es9LikeClientTransportLogGatingTests(unittest.TestCase):
         self.assertIn("transport: request sent in", captured)
         self.assertIn("transport: response headers received in", captured)
 
-    def test_pinned_tls_spki_mismatch_is_hidden_when_debug_off(self) -> None:
+    def test_pinned_tls_spki_mismatch_aborts_regardless_of_debug(self) -> None:
+        """A pin mismatch closes the connection and raises, in either debug mode.
+
+        The pinned context is built with ``CERT_NONE``, so this layer never
+        sends the body: continuing would put it on an unverified channel.
+        Rebuilding over a CA-verified path is the caller's job. Debug only
+        controls logging, never whether the transfer proceeds.
+        """
         from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
 
-        client = RecordingHttpStageClient(base_url="https://rsp.example.com")
-        leaf_der, _ = build_test_ca_and_leaf("rsp.example.com")
-        client.connection.sock = _FakeTlsSocket(leaf_der)
-        request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/asn1")
-        buffer = io.StringIO()
+        for debug_value in ("0", "1"):
+            with self.subTest(debug=debug_value):
+                client = RecordingHttpStageClient(base_url="https://rsp.example.com")
+                leaf_der, _ = build_test_ca_and_leaf("rsp.example.com")
+                client.connection.sock = _FakeTlsSocket(leaf_der)
+                request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/asn1")
+                buffer = io.StringIO()
 
-        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "0"}, clear=False):
-            with contextlib.redirect_stdout(buffer):
-                with client._open_http_response(
-                    request,
-                    None,
-                    request.full_url,
-                    label="eIM",
-                    pinned_tls_spki=b"\x01",
-                ):
-                    pass
+                with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: debug_value}, clear=False):
+                    with contextlib.redirect_stdout(buffer):
+                        with self.assertRaises(OSError) as caught:
+                            with client._open_http_response(
+                                request,
+                                None,
+                                request.full_url,
+                                label="eIM",
+                                pinned_tls_spki=b"\x01",
+                            ):
+                                pass
 
-        self.assertNotIn("pinned TLS SPKI does not match", buffer.getvalue())
-
-    def test_pinned_tls_spki_mismatch_surfaces_when_debug_on(self) -> None:
-        from yggdrasim_common.process_debug import GLOBAL_DEBUG_ENV
-
-        client = RecordingHttpStageClient(base_url="https://rsp.example.com")
-        leaf_der, _ = build_test_ca_and_leaf("rsp.example.com")
-        client.connection.sock = _FakeTlsSocket(leaf_der)
-        request = urllib.request.Request("https://rsp.example.com/gsma/rsp2/asn1")
-        buffer = io.StringIO()
-
-        with mock.patch.dict(os.environ, {GLOBAL_DEBUG_ENV: "1"}, clear=False):
-            with contextlib.redirect_stdout(buffer):
-                with client._open_http_response(
-                    request,
-                    None,
-                    request.full_url,
-                    label="eIM",
-                    pinned_tls_spki=b"\x01",
-                ):
-                    pass
-
-        self.assertIn("pinned TLS SPKI does not match", buffer.getvalue())
+                self.assertIn("Pinned TLS public key mismatch", str(caught.exception))
+                self.assertTrue(client.connection.closed)
+                self.assertNotIn(("request",), client.connection.calls)
 
 
 if __name__ == "__main__":

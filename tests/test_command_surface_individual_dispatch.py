@@ -2,6 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 import contextlib
+import importlib.util
 import io
 import sys
 import tempfile
@@ -16,6 +17,11 @@ from yggdrasim_common.quit_control import QuitAllRequested
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -52,15 +58,17 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-from SCP03.interface.commands import CommandRegistry
-from SCP03.interface.shell import ShellDispatcher
-from SCP11.console import SCP11Console as RelayConsole
-from SCP11.eim_local.main import EimLocalShell
-from SCP11.live.console import SCP11Console as LiveConsole
-from SCP11.local_access.main import LocalAccessShell, _COMMANDS as LOCAL_ACCESS_COMMANDS
-from SCP11.test.console import SCP11Console as RelayTestConsole
-from Tools.ProfilePackage.shell import ProfilePackageShell
-from Tools.SuciTool.shell import SuciToolShell
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+from SCP03.interface.commands import CommandRegistry  # noqa: E402
+from SCP03.interface.shell import ShellDispatcher  # noqa: E402
+from SCP11.relay.console import SCP11Console as RelayConsole  # noqa: E402
+from SCP11.eim_local.main import EimLocalShell  # noqa: E402
+from SCP11.live.console import SCP11Console as LiveConsole  # noqa: E402
+from SCP11.local_access.main import LocalAccessShell, _COMMANDS as LOCAL_ACCESS_COMMANDS  # noqa: E402
+from SCP11.test.console import SCP11Console as RelayTestConsole  # noqa: E402
+from Tools.ProfilePackage.shell import ProfilePackageShell  # noqa: E402
+from Tools.SuciTool.shell import SuciToolShell  # noqa: E402
 
 
 class _CallableProxy:
@@ -119,6 +127,10 @@ class SCP03CommandSurfaceDispatchTests(unittest.TestCase):
         for command_name in sorted(command_map.keys()):
             with self.subTest(command=command_name):
                 shell = _make_scp03_shell()
+                # _exec_line tells a registry verb from one a plugin added
+                # later by ``command_map`` membership; a plugin verb takes
+                # its whole argument line.
+                shell.command_map = command_map
                 captured_calls: list[tuple[str, ...]] = []
                 shell.commands = {
                     command_name: lambda *args: captured_calls.append(tuple(str(part) for part in args))

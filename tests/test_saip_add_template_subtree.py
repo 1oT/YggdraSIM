@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for the ``saip.list_addable_files_for_pe`` and
 ``saip.add_template_subtree`` dispatchers.
 
@@ -38,7 +37,7 @@ def _pysim_available() -> bool:
 
 @unittest.skipUnless(
     _REFERENCE_PROFILE.exists() and _pysim_available(),
-    "reference profile or pySim missing — skipping end-to-end test",
+    "reference profile or pySim missing -- skipping end-to-end test",
 )
 class AddTemplateSubtreeEndToEndTests(unittest.TestCase):
     """Drive the new dispatchers against the reference profile."""
@@ -115,7 +114,7 @@ class AddTemplateSubtreeEndToEndTests(unittest.TestCase):
 
         walk(resp["tree"])
 
-        # At least one disabled entry — the PE almost certainly has
+        # At least one disabled entry -- the PE almost certainly has
         # ``ef-imsi`` (or another core EF) materialised already.
         flat: list[dict[str, Any]] = []
 

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,11 +30,18 @@ def test_offline_tools_action_rail_has_card_hooks() -> None:
     compact_css = _read("gui_frontend/src/css/views/command-center-compact-pane.css")
 
     assert "CC_OFFLINE_TOOLS_HIDDEN_ACTIONS" in command_js
-    assert '"tool.euicc_info2.decode": true' in command_js
     assert '"tool.saip.lint": true' in command_js
     assert '"suci.status": true' in command_js
-    assert '"tool.tlv.decode": true' in command_js
+    assert '"tool.decoder.context": true' in command_js
+    # The context decoder took over these four; no entry, no hidden id, no renderer.
+    for retired in ("tool.tlv.decode", "tool.sw.lookup", "tool.euicc_info2.decode", "tool.sima_response.decode"):
+        assert retired not in command_js
+    assert "renderSimaResponseResult" not in command_js
     assert 'subsystem === "Offline Tools"' in command_js
+    # Tools that share a store are one entry with a tab each.
+    assert "var CC_OFFLINE_TOOL_ENTRIES = [" in command_js
+    assert "function _buildOfflineToolTabs(entry, actions)" in command_js
+    assert ".cc-tool-tabstrip {" in compact_css and ".cc-tool-tab.is-active {" in compact_css
     assert "cc-workbench--offline-tools" in command_js
     assert "cc-compact-rbtn-desc" in command_js
     assert "cc-compact-rbtn-meta" in command_js
@@ -56,10 +62,11 @@ def test_built_static_contains_offline_tools_cards_and_brand() -> None:
     assert "brand-mark-svg" in static_index
     assert "brand-ring" in static_index
     assert "CC_OFFLINE_TOOLS_HIDDEN_ACTIONS" in static_js
-    assert '"tool.euicc_info2.decode": true' in static_js
     assert '"tool.saip.lint": true' in static_js
     assert '"suci.status": true' in static_js
-    assert '"tool.tlv.decode": true' in static_js
+    assert "var CC_OFFLINE_TOOL_ENTRIES = [" in static_js
+    assert "tool.sima_response.decode" not in static_js
+    assert ".cc-tool-tabstrip {" in static_css
     assert "cc-workbench--offline-tools" in static_js
     assert "cc-compact-rbtn-meta" in static_js
     assert "cc-inline-action-pane" in static_js
@@ -68,3 +75,16 @@ def test_built_static_contains_offline_tools_cards_and_brand() -> None:
     assert ".cc-workbench--offline-tools .cc-compact-rbtn" in static_css
     assert ".cc-inline-action-pane" in static_css
     assert ".cc-inline-action-form" in static_css
+
+
+def test_offline_decoder_opens_empty() -> None:
+    """The decoder keeps no input between visits and decodes nothing on its own."""
+    for relpath in ("gui_frontend/src/js/command-center.js", "yggdrasim_common/gui_server/static/app.js"):
+        text = _read(relpath)
+        start = text.index("function _buildOfflineDecoderPanel(")
+        end = text.index("function _decoderSummaryText(", start)
+        panel = text[start:end]
+        assert "_decoderForgetStoredInput();" in panel
+        assert "localStorage.setItem" not in panel
+        assert 'window.localStorage.removeItem("yggdrasim:cc-decoder:last");' in text
+        assert "_decoderRecallInput" not in text

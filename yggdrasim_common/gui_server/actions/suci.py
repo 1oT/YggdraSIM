@@ -1,28 +1,28 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SUCI Command Center actions.
 
 Wraps the ``Tools.SuciTool`` shell surface into structured Offline Tools
 actions. The underlying ``SuciKeyToolBridge`` calls the external
-``suci-keytool`` binary — operators must have it installed
+``suci-keytool`` binary -- operators must have it installed
 (``YGGDRASIM_SUCI_TOOL`` env var, or ``suci-keytool`` on ``$PATH``).
 
 Actions registered:
 
-* ``suci.status``          — report active key file + tool command.
-* ``suci.use_key_file``    — select the active SUCI key file.
-* ``suci.set_tool_command``— override the ``suci-keytool`` binary path.
-* ``suci.generate_key``    — run ``suci-keytool ... generate-key --curve``.
-* ``suci.dump_pub_key``    — run ``suci-keytool ... dump-pub-key``,
+* ``suci.status``          -- report active key file + tool command.
+* ``suci.use_key_file``    -- select the active SUCI key file.
+* ``suci.generate_key``    -- run ``suci-keytool ... generate-key --curve``.
+* ``suci.dump_pub_key``    -- run ``suci-keytool ... dump-pub-key``,
   with optional ``--compressed``.
 
 All dispatchers instantiate a fresh ``SuciKeyToolBridge`` rooted at the
-runtime workspace root so repeated calls don't share mutable state.
-Key-file state intentionally lives only for the duration of a single
-request — the GUI passes the active key file through the ``key_file``
-input on every generate / dump call.
+runtime workspace root. The key file chosen last is the one piece of state
+they share: generate and dump fall back on it when their ``key_file`` input
+is empty, and the status action reports it. The tool command has one place
+to be set, the ``YGGDRASIM_SUCI_TOOL`` flag: a bridge that lives for one
+request cannot hold it, which is why no action sets it (the shell's TOOL
+verb does, for the shell's own bridge).
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _resolve_key_file(explicit: str | None) -> str:
         return explicit.strip()
     if _last_key_file:
         return _last_key_file
-    raise ValueError("no key file selected — run 'Use key file' first or provide a path.")
+    raise ValueError("no key file selected -- run 'Use key file' first or provide a path.")
 
 
 def _build_bridge() -> Any:
@@ -57,10 +57,12 @@ def _build_bridge() -> Any:
 
 
 def _result_to_dict(result: Any) -> dict[str, Any]:
-    """Normalise a ``SuciCommandResult`` to a plain dict."""
+    """Normalise a ``SuciCommandResult`` to a plain dict; a result without an exit code counts as failed."""
+    returncode = getattr(result, "returncode", None)
     return {
         "command": list(getattr(result, "command", []) or []),
-        "returncode": int(getattr(result, "returncode", 1) or 1),
+        # 0 is the success the callers test for, so it must not be read as "missing".
+        "returncode": int(returncode) if returncode is not None else 1,
         "stdout": str(getattr(result, "stdout", "") or ""),
         "stderr": str(getattr(result, "stderr", "") or ""),
     }
@@ -71,13 +73,32 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
 # ----------------------------------------------------------------------
 
 
+def _tool_command_line(bridge: Any) -> str:
+    """The suci-keytool command the actions run, where it comes from and where it is set."""
+    import os
+
+    from Tools.SuciTool.tool import SUCI_TOOL_ENV
+
+    setting = f"{SUCI_TOOL_ENV} under Environment > Configuration"
+    try:
+        command = " ".join(bridge.get_tool_command())
+    except RuntimeError:
+        return f"not found: set {setting}"
+    except ValueError as error:
+        return f"{SUCI_TOOL_ENV} does not read as a command line ({error}): correct it under Environment > Configuration"
+    if os.environ.get(SUCI_TOOL_ENV, "").strip():
+        return f"{command} (from {setting})"
+    return f"{command} (found on PATH; {setting} overrides it)"
+
+
 def _dispatch_status(ctx: ActionContext) -> dict[str, Any]:
     bridge = _build_bridge()
-    current_key = bridge.current_key_file
+    # A fresh bridge has no key file; the one in use is the last one chosen.
+    current_key = _last_key_file
     lines: list[dict[str, str]] = []
     lines.append({"key": "Workspace root", "value": str(bridge.workspace_root)})
     lines.append({"key": "Active key file", "value": str(current_key) if current_key else "(not selected)"})
-    lines.append({"key": "Tool command", "value": bridge.describe_tool_command()})
+    lines.append({"key": "Tool command", "value": _tool_command_line(bridge)})
     return {
         "workspace_root": str(bridge.workspace_root),
         "current_key_file": str(current_key) if current_key else "",
@@ -102,24 +123,6 @@ def _dispatch_use_key_file(
         "ok": True,
         "key_file": str(resolved),
         "note": f"active key file set to {resolved}.",
-    }
-
-
-def _dispatch_set_tool_command(
-    ctx: ActionContext,
-    *,
-    command: Any = None,
-) -> dict[str, Any]:
-    command_s = str(command or "").strip()
-    if len(command_s) == 0:
-        raise ValueError("command is required (e.g. /usr/local/bin/suci-keytool).")
-    bridge = _build_bridge()
-    tokens = bridge.set_tool_command(command_s)
-    return {
-        "ok": True,
-        "tool_command": " ".join(tokens),
-        "tokens": tokens,
-        "note": f"tool command set to {' '.join(tokens)}.",
     }
 
 
@@ -189,7 +192,9 @@ def _dispatch_dump_pub_key(
         parsed = _parse_pub_key_output(payload["stdout"])
         payload["public_key_hex"] = parsed.get("public_key_hex", "")
         payload["curve"] = parsed.get("curve", "")
-        payload["note"] = f"public key ({payload['curve']}): {payload['public_key_hex'][:32]}…" if payload["public_key_hex"] else "public key dumped; see stdout."
+        # suci-keytool prints the key alone; the curve is named only when the output carries it.
+        named = f" ({payload['curve']})" if payload["curve"] else ""
+        payload["note"] = f"public key{named}: {payload['public_key_hex']}" if payload["public_key_hex"] else "public key dumped; see stdout."
     else:
         payload["public_key_hex"] = ""
         payload["curve"] = ""
@@ -240,31 +245,6 @@ USE_KEY_FILE_SPEC = ActionSpec(
     dispatcher=_dispatch_use_key_file,
     requires_card=False,
     tags=("suci", "key", "select"),
-)
-
-
-SET_TOOL_COMMAND_SPEC = ActionSpec(
-    id="suci.set_tool_command",
-    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="Set suci-keytool command",
-    description=(
-        "Override the binary invocation used to call suci-keytool. "
-        "Accepts a full command with arguments (quoted via shlex)."
-    ),
-    inputs=(
-        ActionField(
-            name="command",
-            label="Tool command",
-            kind="string",
-            required=True,
-            placeholder="/usr/local/bin/suci-keytool",
-            help="Full executable path or command line for suci-keytool.",
-        ),
-    ),
-    output_kind="json",
-    dispatcher=_dispatch_set_tool_command,
-    requires_card=False,
-    tags=("suci", "tool", "config"),
 )
 
 
@@ -338,6 +318,5 @@ DUMP_PUB_KEY_SPEC = ActionSpec(
 
 get_registry().register(STATUS_SPEC)
 get_registry().register(USE_KEY_FILE_SPEC)
-get_registry().register(SET_TOOL_COMMAND_SPEC)
 get_registry().register(GENERATE_KEY_SPEC)
 get_registry().register(DUMP_PUB_KEY_SPEC)

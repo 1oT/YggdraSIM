@@ -147,7 +147,7 @@ async def apdu_event_stream(websocket: WebSocket) -> None:
 
     try:
         # Replay recent buffer so a freshly-opened tab gets context
-        # immediately. We keep the limit modest (200 rows) — enough to
+        # immediately. We keep the limit modest (200 rows) -- enough to
         # show a typical scan + read loop without flooding the UI.
         for past in recorder.snapshot(
             limit=200,
@@ -166,9 +166,14 @@ async def apdu_event_stream(websocket: WebSocket) -> None:
             await websocket.send_text(
                 json.dumps(_exchange_to_frame(exchange))
             )
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        # A force shutdown (desktop window close) cancels this task while
+        # it waits on ``queue.get``. CancelledError is a BaseException, so
+        # it slips past ``except Exception`` and uvicorn logs it as an
+        # "Exception in ASGI application". Treat it like a disconnect and
+        # unwind quietly; ``finally`` still detaches the queue.
         pass
-    except Exception as err:  # noqa: BLE001 — never let one client crash the bus
+    except Exception as err:  # noqa: BLE001 -- never let one client crash the bus
         _LOGGER.warning(
             "gui.apdu_events.stream_error: %s: %s",
             type(err).__name__,

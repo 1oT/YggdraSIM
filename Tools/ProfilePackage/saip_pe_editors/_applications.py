@@ -5,7 +5,7 @@
 
 A flat list of every PE that maps onto a GlobalPlatform application
 (PE-SecurityDomain → ISD instances, PE-Application → applets) along
-with their AID and life-cycle state. Read-only — double-click jumps
+with their AID and life-cycle state. Read-only -- double-click jumps
 to the PE editor.
 """
 
@@ -25,13 +25,12 @@ from ._base import (
 )
 
 
+# GP Card Spec v2.3.1 §11.1.1 Tables 11-4 and 11-5 (page 147).
 _LIFE_CYCLE_LABELS = {
-    "01": "LOADED",
     "03": "INSTALLED",
     "07": "SELECTABLE",
     "0F": "PERSONALIZED",
     "83": "LOCKED",
-    "FF": "TERMINATED",
 }
 
 

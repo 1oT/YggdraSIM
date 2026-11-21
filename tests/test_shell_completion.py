@@ -51,8 +51,9 @@ class TokensNamespaceCompletionTests(_CompletionHarness):
         self.assertIn("RETOKENISE-LENGTHS ", options)
 
     def test_prefix_filters_subcommands(self) -> None:
+        # LISTS (the bound test-value lists) shares the prefix with LIST.
         options = self.shell._completion_options_for("TOKENS", "LI")
-        self.assertEqual(options, ["LIST "])
+        self.assertEqual(options, ["LIST ", "LISTS "])
 
     def test_after_subcommand_completes_file_paths(self) -> None:
         options = self.shell._completion_options_for("TOKENS", "LIST ")

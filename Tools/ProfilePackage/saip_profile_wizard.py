@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Tag-granular wizard for scaffolding a brand-new SAIP profile from a preset.
 
@@ -9,13 +8,13 @@ The wizard is split into single-responsibility steps so each can be unit
 tested in isolation (per the YggdraSIM wizard rule: "All wizards shall be
 split down into each nestled tag"). Step ordering:
 
-  1. ``step_pick_preset``            – choose the base preset.
-  2. ``step_customise_menu_ids``     – keep / drop each PE (optional).
-  3. ``step_collect_placeholders``   – ICCID / IMSI prompts with AUTO support.
-  4. ``step_pick_output_format``     – DER profile or JSON template.
-  5. ``step_declare_tokens``         – JSON-only: declare __ygg_token_defs__.
-  6. ``step_pick_output_path``       – absolute path or workspace default.
-  7. ``step_confirm``                – review screen, abort / accept.
+  1. ``step_pick_preset``            - choose the base preset.
+  2. ``step_customise_menu_ids``     - keep / drop each PE (optional).
+  3. ``step_collect_placeholders``   - ICCID / IMSI prompts with AUTO support.
+  4. ``step_pick_output_format``     - DER profile or JSON template.
+  5. ``step_declare_tokens``         - JSON-only: declare __ygg_token_defs__.
+  6. ``step_pick_output_path``       - absolute path or workspace default.
+  7. ``step_confirm``                - review screen, abort / accept.
 
 Callers instantiate :class:`NewProfileWizard` with an ``input_fn`` (defaults
 to :func:`input`), an ``output_fn`` (defaults to ``print``), and a workspace
@@ -122,7 +121,7 @@ class NewProfileWizard:
     def step_pick_preset(self) -> None:
         """Run the 'pick a PE preset' wizard step and return the selected preset key."""
         self._emit("")
-        self._emit("Step 1/7 — Pick a base preset")
+        self._emit("Step 1/7 -- Pick a base preset")
         presets = list_profile_presets()
         for index, preset in enumerate(presets, start=1):
             marker = ""
@@ -132,7 +131,7 @@ class NewProfileWizard:
             if preset.source == "builtin":
                 tag = ""
             self._emit(
-                f"  {index}. {preset.preset_id}{marker}{tag} — {preset.description}"
+                f"  {index}. {preset.preset_id}{marker}{tag} -- {preset.description}"
             )
         self._emit("")
         default_prompt = (
@@ -156,7 +155,7 @@ class NewProfileWizard:
     def step_customise_menu_ids(self) -> None:
         """Wizard step: let the user pick which template menu-ID items to include."""
         self._emit("")
-        self._emit("Step 2/7 — Review PE sequence")
+        self._emit("Step 2/7 -- Review PE sequence")
         description = describe_preset(self._state.preset_id)
         for entry in description["pes"]:
             self._emit(f"  - {entry['menu_id']}: {entry['description']}")
@@ -188,7 +187,7 @@ class NewProfileWizard:
     def step_collect_placeholders(self) -> None:
         """Wizard step: collect all placeholder tokens from the loaded template."""
         self._emit("")
-        self._emit("Step 3/7 — Typed placeholder values (optional)")
+        self._emit("Step 3/7 -- Typed placeholder values (optional)")
         available = list_preset_placeholders(self._state.preset_id)
         if len(available) == 0:
             self._emit("  (no typed placeholders applicable to this preset)")
@@ -205,7 +204,7 @@ class NewProfileWizard:
     def step_pick_output_format(self) -> None:
         """Wizard step: ask the user to choose the desired output format."""
         self._emit("")
-        self._emit("Step 4/7 — Output format")
+        self._emit("Step 4/7 -- Output format")
         self._emit("  1. DER profile (.der)")
         self._emit("  2. JSON template (.json)")
         prompt = "Format [1=DER, 2=JSON, default 1]: "
@@ -223,9 +222,9 @@ class NewProfileWizard:
     def step_declare_tokens(self) -> None:
         """Wizard step: prompt the user to declare or confirm token values."""
         self._emit("")
-        self._emit("Step 5/7 — Declare template tokens (optional)")
+        self._emit("Step 5/7 -- Declare template tokens (optional)")
         if self._state.output_format != "json":
-            self._emit("  (skipped — tokens only apply to JSON templates)")
+            self._emit("  (skipped -- tokens only apply to JSON templates)")
             return
         self._emit(
             "  Template tokens become {NAME}/[NAME] placeholders in the "
@@ -284,7 +283,7 @@ class NewProfileWizard:
     def step_pick_output_path(self) -> None:
         """Wizard step: ask the user to choose the output file path."""
         self._emit("")
-        self._emit("Step 6/7 — Output file")
+        self._emit("Step 6/7 -- Output file")
         default_path = self._build_default_output_path()
         prompt = (
             f"Path [{default_path}]: "
@@ -301,7 +300,7 @@ class NewProfileWizard:
     def step_confirm(self) -> None:
         """Wizard step: show a confirmation summary and ask the user to proceed."""
         self._emit("")
-        self._emit("Step 7/7 — Review")
+        self._emit("Step 7/7 -- Review")
         self._emit(f"  Preset:     {self._state.preset_id}")
         self._emit(f"  PEs:        {' -> '.join(self._state.menu_ids)}")
         if len(self._state.placeholders) == 0:

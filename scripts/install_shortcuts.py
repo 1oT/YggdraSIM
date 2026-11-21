@@ -15,6 +15,13 @@ per host so the GUI can be started without a terminal:
 * macOS -- an ``osacompile`` applet at ``~/Applications/YggdraSIM.app``,
   or the equivalent instructions when ``osacompile`` is unavailable.
 
+Each launcher is also listed under the file manager's *Open With* menu
+for ``.txt`` profiles and ``.varder`` templates, so a right-click opens
+the file in the SAIP workbench (the launcher runs ``yggdrasim-desktop
+FILE``). The registration is handler-only on every host: the default
+application a double-click uses is never changed, and on Linux a default
+the install happened to displace is put back.
+
 The launcher target is resolved to an absolute path at install time.
 Desktop sessions and Explorer do not inherit the shell ``PATH``, so a
 launcher that merely names ``yggdrasim-desktop`` fails on exactly the
@@ -38,13 +45,15 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import plistlib
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+from typing import Any
 
 APPLICATION_NAME = "YggdraSIM"
 DESKTOP_ENTRY_STEM = "yggdrasim"
@@ -65,6 +74,39 @@ SVG_ASSET = "yggdrasim.svg"
 PNG_ICO_ASSET = "yggdrasim-256.png"
 PNG_LARGE_ASSET = "yggdrasim-512.png"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+# ``Open With`` registration. ``text/plain`` is what a ``.txt`` profile
+# and a ``.varder`` template resolve to on a freedesktop host (neither
+# has a type of its own), so declaring it lists the launcher for both.
+# ``.varder`` deliberately gets no dedicated MIME type: a type whose only
+# registered handler is this entry would make the launcher the
+# double-click default for those files, and the entry exists to sit
+# beside the operator's editor, never in front of it.
+OPEN_WITH_MIME_TYPES: tuple[str, ...] = ("text/plain",)
+OPEN_WITH_EXTENSIONS: tuple[str, ...] = (".txt", ".varder")
+# Desktop Entry Specification "Exec variables": one file per launch,
+# which is what a right-click passes.
+DESKTOP_EXEC_FIELD_CODE = "%f"
+# Launch Services document types for the applet. ``LSHandlerRank``
+# ``Alternate`` is "can open, never the default".
+MACOS_DOCUMENT_TYPES: tuple[dict[str, Any], ...] = (
+    {
+        "CFBundleTypeName": "Plain text",
+        "LSItemContentTypes": ["public.plain-text"],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+    },
+    {
+        "CFBundleTypeName": "SAIP profile template",
+        "CFBundleTypeExtensions": ["varder"],
+        "CFBundleTypeRole": "Viewer",
+        "LSHandlerRank": "Alternate",
+    },
+)
+_LSREGISTER = Path(
+    "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+    "LaunchServices.framework/Support/lsregister"
+)
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -286,6 +328,11 @@ def _desktop_exec_value(command: tuple[str, ...]) -> str:
     return " ".join(parts)
 
 
+def _desktop_exec_line(command: tuple[str, ...]) -> str:
+    """``Exec=`` value: the quoted command followed by the file field code."""
+    return f"{_desktop_exec_value(command)} {DESKTOP_EXEC_FIELD_CODE}"
+
+
 def render_desktop_entry(
     target: LauncherTarget, icon_name: str | None = None
 ) -> str:
@@ -298,9 +345,11 @@ def render_desktop_entry(
     appear twice in a menu. ``Icon`` names a theme entry rather than a
     path, which is what lets the icon survive a moved install; it is
     omitted when the mark could not be installed, because a dangling
-    name shows a broken-image glyph in some menus.
+    name shows a broken-image glyph in some menus. ``MimeType`` lists
+    the entry under Open With for the types in ``OPEN_WITH_MIME_TYPES``
+    and ``%f`` in ``Exec`` is how the chosen file reaches the launcher.
     """
-    exec_value = _desktop_exec_value(target.command)
+    exec_value = _desktop_exec_line(target.command)
     lines = [
         "[Desktop Entry]",
         "Type=Application",
@@ -319,6 +368,7 @@ def render_desktop_entry(
         f"StartupWMClass={APPLICATION_NAME}",
         "Categories=Development;",
         "Keywords=SIM;eUICC;eSIM;APDU;SmartCard;",
+        "MimeType=" + "".join(f"{mime_type};" for mime_type in OPEN_WITH_MIME_TYPES),
     ]
     return "\n".join(lines) + "\n"
 
@@ -413,11 +463,16 @@ def uninstall_linux_icons(*, dry_run: bool) -> None:
         _refresh_icon_cache()
 
 
-def _refresh_desktop_database(applications_dir: Path) -> None:
-    """Best-effort menu refresh; absence of the tool is not an error."""
+def _refresh_desktop_database(applications_dir: Path) -> bool:
+    """Best-effort menu refresh; absence of the tool is not an error.
+
+    Returns whether the tool ran: it also rebuilds the MIME cache the
+    Open With menu is read from, so the caller can say when the entry
+    will appear later instead of now.
+    """
     tool = shutil.which("update-desktop-database")
     if tool is None:
-        return
+        return False
     try:
         subprocess.run(
             [tool, str(applications_dir)],
@@ -426,7 +481,81 @@ def _refresh_desktop_database(applications_dir: Path) -> None:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        pass
+        return False
+    return True
+
+
+def query_default_handler(mime_type: str) -> str | None:
+    """Desktop-entry id a double-click opens ``mime_type`` with.
+
+    ``""`` means the host has none recorded; ``None`` means the answer
+    is unknown because ``xdg-mime`` is missing or failed.
+    """
+    tool = shutil.which("xdg-mime")
+    if tool is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [tool, "query", "default", mime_type],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return (completed.stdout or "").strip()
+
+
+def set_default_handler(desktop_id: str, mime_type: str) -> bool:
+    """Record ``desktop_id`` as the default for ``mime_type`` (user scope)."""
+    tool = shutil.which("xdg-mime")
+    if tool is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [tool, "default", desktop_id, mime_type],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def keep_existing_defaults(defaults_before: dict[str, str | None]) -> None:
+    """Undo a double-click default the new entry may have inherited.
+
+    A host with no default recorded for a type opens it with the first
+    entry in the applications cache, and a user-level entry sorts ahead
+    of the system ones. Re-asserting the answer from before the install
+    keeps double-click where it was; a type that had no default gets a
+    notice instead, because there is nothing to put back.
+    """
+    own_id = f"{DESKTOP_ENTRY_STEM}.desktop"
+    for mime_type, previous in defaults_before.items():
+        if previous is None:
+            continue
+        if query_default_handler(mime_type) != own_id:
+            continue
+        if len(previous) == 0 or previous == own_id:
+            _emit(
+                f"[!] no default application was recorded for {mime_type}, so the "
+                f"desktop now falls back to YggdraSIM for it. Pick one with: "
+                f"xdg-mime default <app>.desktop {mime_type}"
+            )
+            continue
+        if set_default_handler(previous, mime_type):
+            _emit(f"[+] kept {previous} as the default for {mime_type}")
+        else:
+            _emit(
+                f"[!] could not keep {previous} as the default for {mime_type}; "
+                f"run: xdg-mime default {previous} {mime_type}"
+            )
 
 
 def install_linux(
@@ -453,13 +582,27 @@ def install_linux(
         _emit(body.rstrip("\n"))
         return EXIT_OK
 
+    defaults_before = {
+        mime_type: query_default_handler(mime_type)
+        for mime_type in OPEN_WITH_MIME_TYPES
+    }
     applications_dir.mkdir(parents=True, exist_ok=True)
     entry_path.write_text(body, encoding="utf-8")
     entry_path.chmod(0o644)
-    _refresh_desktop_database(applications_dir)
+    refreshed = _refresh_desktop_database(applications_dir)
+    keep_existing_defaults(defaults_before)
     _emit(f"[+] wrote desktop entry: {entry_path}")
-    _emit(f"    Exec={_desktop_exec_value(target.command)}")
+    _emit(f"    Exec={_desktop_exec_line(target.command)}")
     _emit("    Search your application menu for YggdraSIM to launch it.")
+    _emit(
+        "    Right-click a .txt profile or a .varder template -> Open With -> "
+        "YggdraSIM opens it in the SAIP workbench."
+    )
+    if refreshed is False:
+        _emit(
+            "[!] update-desktop-database was not found; the Open With entry "
+            "appears once the desktop rebuilds its application cache."
+        )
     return EXIT_OK
 
 
@@ -566,6 +709,116 @@ def render_shortcut_script(
     return "\n".join(lines)
 
 
+def _windows_application_key(exe_name: str) -> str:
+    return f"HKCU:\\Software\\Classes\\Applications\\{exe_name}"
+
+
+def _windows_open_with_list_key(extension: str, exe_name: str) -> str:
+    return f"HKCU:\\Software\\Classes\\{extension}\\OpenWithList\\{exe_name}"
+
+
+def render_open_with_script(target: LauncherTarget) -> str | None:
+    """Render the PowerShell that lists the launcher under Explorer's Open With.
+
+    ``HKCU\\Software\\Classes\\Applications\\<exe>`` is keyed by the
+    executable's file name, so only a single-executable target can be
+    registered: the ``pythonw -m main.gui`` fallback would claim every
+    ``pythonw.exe`` and is skipped (``None``). ``SupportedTypes`` plus
+    the per-extension ``OpenWithList`` put the entry in the menu; the
+    default lives in ``UserChoice``, which nothing here writes.
+    """
+    if len(target.command) != 1:
+        return None
+    executable = target.command[0]
+    # ``PureWindowsPath`` splits on either separator, so the rendered
+    # key is right when this runs on a POSIX host as well (tests, dry runs).
+    exe_name = PureWindowsPath(executable).name
+    app_key = _windows_application_key(exe_name)
+    command_value = f'"{executable}" "%1"'
+    lines = [
+        "$ErrorActionPreference = 'Stop'",
+        f"$app = {_powershell_quote(app_key)}",
+        'New-Item -Path "$app\\shell\\open\\command" -Force | Out-Null',
+        "Set-ItemProperty -Path $app -Name 'FriendlyAppName' "
+        f"-Value {_powershell_quote(APPLICATION_NAME)}",
+        'Set-ItemProperty -Path "$app\\shell\\open\\command" -Name \'(default)\' '
+        f"-Value {_powershell_quote(command_value)}",
+        'New-Item -Path "$app\\SupportedTypes" -Force | Out-Null',
+    ]
+    for extension in OPEN_WITH_EXTENSIONS:
+        lines.append(
+            'Set-ItemProperty -Path "$app\\SupportedTypes" '
+            f"-Name {_powershell_quote(extension)} -Value ''"
+        )
+        list_key = _windows_open_with_list_key(extension, exe_name)
+        lines.append(f"New-Item -Path {_powershell_quote(list_key)} -Force | Out-Null")
+    return "\n".join(lines)
+
+
+def render_open_with_removal_script() -> str:
+    """Remove the Open With keys for both entry-point executables.
+
+    The uninstall path does not resolve a target, so both names the
+    installer can have registered are removed; a missing key is not an
+    error.
+    """
+    lines = ["$ErrorActionPreference = 'SilentlyContinue'"]
+    for exe_name in (f"{WINDOWLESS_ENTRY_POINT}.exe", f"{CONSOLE_ENTRY_POINT}.exe"):
+        app_key = _windows_application_key(exe_name)
+        lines.append(f"Remove-Item -Path {_powershell_quote(app_key)} -Recurse -Force")
+        for extension in OPEN_WITH_EXTENSIONS:
+            list_key = _windows_open_with_list_key(extension, exe_name)
+            lines.append(f"Remove-Item -Path {_powershell_quote(list_key)} -Recurse -Force")
+    return "\n".join(lines)
+
+
+def _run_powershell(powershell: str, script: str) -> tuple[bool, str]:
+    """Run ``script`` non-interactively; the second value is the failure text."""
+    try:
+        completed = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return False, f"{type(error).__name__}: {error}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip()
+        message = f"PowerShell exited {completed.returncode}"
+        if len(detail) > 0:
+            message = f"{message}: {detail}"
+        return False, message
+    return True, ""
+
+
+def _install_windows_open_with(target: LauncherTarget, powershell: str) -> None:
+    script = render_open_with_script(target)
+    if script is None:
+        _emit(
+            "[!] the launcher is not a single executable, so Explorer's "
+            "Open With is not registered"
+        )
+        return
+    ok, failure = _run_powershell(powershell, script)
+    if not ok:
+        _emit(f"[!] Open With registration failed: {failure}")
+        return
+    _emit(
+        "[+] registered YggdraSIM under Explorer's Open With for "
+        + ", ".join(OPEN_WITH_EXTENSIONS)
+    )
+
+
 def _windows_start_menu_dir(install_dir: Path | None) -> Path:
     if install_dir is not None:
         return install_dir
@@ -608,6 +861,10 @@ def install_windows(
     if dry_run:
         _emit(f"[dry-run] would write {link_path}")
         _emit(script)
+        open_with = render_open_with_script(target)
+        if open_with is not None:
+            _emit("[dry-run] would register Open With with:")
+            _emit(open_with)
         return EXIT_OK
 
     powershell = _powershell_executable()
@@ -616,38 +873,29 @@ def install_windows(
         return EXIT_FAILED
 
     start_menu.mkdir(parents=True, exist_ok=True)
-    try:
-        completed = subprocess.run(
-            [
-                powershell,
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                script,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        _emit(f"[-] shortcut creation failed: {type(error).__name__}: {error}")
-        _manual_windows_instructions(target, link_path)
-        return EXIT_FAILED
-    if completed.returncode != 0:
-        _emit(f"[-] PowerShell exited {completed.returncode}")
-        _emit((completed.stderr or "").strip())
+    ok, failure = _run_powershell(powershell, script)
+    if not ok:
+        _emit(f"[-] shortcut creation failed: {failure}")
         _manual_windows_instructions(target, link_path)
         return EXIT_FAILED
 
     _emit(f"[+] wrote Start Menu shortcut: {link_path}")
     _emit(f"    Target={target.display()}")
+    _install_windows_open_with(target, powershell)
     return EXIT_OK
 
 
 def uninstall_windows(*, install_dir: Path | None, dry_run: bool) -> int:
+    if dry_run:
+        _emit("[dry-run] would remove the Open With registration")
+    else:
+        powershell = _powershell_executable()
+        if powershell is not None:
+            ok, failure = _run_powershell(powershell, render_open_with_removal_script())
+            if ok:
+                _emit("[-] removed the Open With registration")
+            else:
+                _emit(f"[!] Open With removal failed: {failure}")
     icon_path = _windows_icon_dir() / f"{ICON_NAME}.ico"
     if icon_path.exists():
         if dry_run:
@@ -678,13 +926,82 @@ def _macos_applications_dir(install_dir: Path | None, system_wide: bool) -> Path
 def render_applescript(target: LauncherTarget) -> str:
     """Render the applet source.
 
-    The shell command is backgrounded and its streams are discarded:
-    an applet that waits on the GUI stays "running" in the Dock for the
+    ``on run`` starts the GUI bare. ``on open`` is what Finder's Open
+    With and a drop on the Dock icon call; it appends each item as a
+    quoted POSIX path so the launcher opens it in the SAIP workbench.
+    Both background the shell command and discard its streams: an
+    applet that waits on the GUI stays "running" in the Dock for the
     session's whole lifetime, which is the behaviour a windowless
     launcher is meant to avoid.
     """
-    quoted = " ".join(f"'{part}'" for part in target.command)
-    return f'do shell script "{quoted} > /dev/null 2>&1 &"\n'
+    # Two nested quoting layers: each argv word is a shell single-quoted word,
+    # and the whole command is an AppleScript double-quoted string literal.
+    quoted = " ".join(
+        "'" + str(part).replace("'", "'\\''") + "'" for part in target.command
+    )
+    escaped = quoted.replace("\\", "\\\\").replace('"', '\\"')
+    lines = [
+        "on run",
+        f'    do shell script "{escaped} > /dev/null 2>&1 &"',
+        "end run",
+        "",
+        "on open theItems",
+        '    set fileArguments to ""',
+        "    repeat with anItem in theItems",
+        '        set fileArguments to fileArguments & " " & quoted form of POSIX path of anItem',
+        "    end repeat",
+        f'    do shell script "{escaped}" & fileArguments & " > /dev/null 2>&1 &"',
+        "end open",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def apply_macos_document_types(app_path: Path, *, dry_run: bool) -> bool:
+    """Declare the Open With document types in the bundle ``Info.plist``.
+
+    ``osacompile`` writes a bundle without ``CFBundleDocumentTypes``, so
+    Finder would list the applet for nothing. ``LSHandlerRank``
+    ``Alternate`` on every type keeps a double-click with the
+    operator's editor.
+    """
+    plist_path = app_path / "Contents" / "Info.plist"
+    if dry_run:
+        _emit(f"[dry-run] would declare the Open With document types in {plist_path}")
+        return True
+    try:
+        with plist_path.open("rb") as handle:
+            info = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException) as error:
+        _emit(f"[!] could not read {plist_path}: {error}; Open With is not registered")
+        return False
+    info["CFBundleDocumentTypes"] = [dict(entry) for entry in MACOS_DOCUMENT_TYPES]
+    try:
+        with plist_path.open("wb") as handle:
+            plistlib.dump(info, handle)
+    except OSError as error:
+        _emit(f"[!] could not write {plist_path}: {error}; Open With is not registered")
+        return False
+    _emit(f"[+] declared the Open With document types: {plist_path}")
+    return True
+
+
+def _register_with_launch_services(app_path: Path) -> None:
+    """Best-effort re-registration so Finder sees the document types now.
+
+    Launch Services also picks the bundle up on its own the next time
+    Finder encounters it, so a missing tool is not an error.
+    """
+    if not _LSREGISTER.is_file():
+        return
+    try:
+        subprocess.run(
+            [str(_LSREGISTER), "-f", str(app_path)],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def apply_macos_icon(app_path: Path, *, dry_run: bool) -> None:
@@ -755,6 +1072,7 @@ def install_macos(
     if dry_run:
         _emit(f"[dry-run] would build {app_path} from:")
         _emit(source.rstrip("\n"))
+        apply_macos_document_types(app_path, dry_run=True)
         if with_icon:
             apply_macos_icon(app_path, dry_run=True)
         return EXIT_OK
@@ -791,11 +1109,17 @@ def install_macos(
         _macos_manual_instructions(target, app_path)
         return EXIT_FAILED
 
+    apply_macos_document_types(app_path, dry_run=False)
     if with_icon:
         apply_macos_icon(app_path, dry_run=False)
+    _register_with_launch_services(app_path)
     _emit(f"[+] built app bundle: {app_path}")
     _emit(f"    Command={target.display()}")
     _emit("    Launch it from Finder, Spotlight, or the Dock.")
+    _emit(
+        "    Right-click a .txt profile or a .varder template -> Open With -> "
+        "YggdraSIM opens it in the SAIP workbench."
+    )
     return EXIT_OK
 
 
@@ -824,7 +1148,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="install_shortcuts.py",
         description=(
             "Install or remove the native desktop launcher for the "
-            "YggdraSIM Command Center."
+            "YggdraSIM Command Center. The launcher is also listed under "
+            "Open With for .txt and .varder files, never as their default."
         ),
     )
     parser.add_argument(

@@ -32,7 +32,7 @@ try:
     from fastapi import HTTPException
 
     _HAS_FASTAPI = True
-except ImportError:  # pragma: no cover — environment-dependent
+except ImportError:  # pragma: no cover -- environment-dependent
     _HAS_FASTAPI = False
 
 from yggdrasim_common.card_backend import (

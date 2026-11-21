@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Integration tests for the ProfileHeader edit dispatchers.
 
 These exercise the full action pipeline: open a real DER package, run
@@ -71,7 +70,7 @@ class ProfileHeaderDispatcherTests(unittest.TestCase):
         header = result["header"]
         self.assertIn("iccid_digits", header)
         # Reference profile may use either a 19- or 20-digit ICCID
-        # (TS 102 221 §13.2 / SGP.22 §A.2 both are valid).
+        # (E.118 (09/2025) §6 fixes 19 digits; EF_ICCID, TS 102 221 v18.4 §13.2, holds 20).
         self.assertIn(len(header["iccid_digits"]), (19, 20))
         self.assertIn("major_version", header)
 
@@ -114,6 +113,69 @@ class ProfileHeaderDispatcherTests(unittest.TestCase):
         )
         self.assertEqual(result["header"]["major_version"], 3)
         self.assertEqual(result["header"]["minor_version"], 3)
+
+    def test_update_smsc_from_ef_smsp_syncs_the_sms_bearer(self) -> None:
+        from Tools.ProfilePackage import saip_profile_header_edit as ph
+        from Tools.ProfilePackage.saip_connectivity_parameters import (
+            decode_connectivity_parameters,
+        )
+
+        before = decode_connectivity_parameters(
+            self._actions._dispatch_get_profile_header(
+                ctx=None,
+                session_id=self._opened_session_id,
+            )["header"]["connectivity_parameters_hex"]
+        )
+        sms_indexes = [
+            index for index, bearer in enumerate(before["bearers"])
+            if bearer["bearer"] == "sms"
+        ]
+        self.assertEqual(len(sms_indexes), 1)
+        sms_index = sms_indexes[0]
+        # The reference profile's USIM ef-smsp links to DF.TELECOM
+        # 7F10/6F42, which generic file management fills.
+        handle = self._manager.claim(self._opened_session_id)
+        smsp = ph._first_ef_smsp_file(handle["decoded_document"])
+        self.assertEqual((smsp.parent_fid, smsp.fid), ("7F10", "6F42"))
+        expected = ph._ef_smsp_service_centre_address(smsp.image, smsp.record_size)
+
+        result = self._actions._dispatch_update_profile_header_field(
+            ctx=None,
+            session_id=self._opened_session_id,
+            field="smsc_from_ef_smsp",
+            value=str(sms_index),
+        )
+        self.assertIn("7F10/6F42", " ".join(result["summaries"]))
+        after = decode_connectivity_parameters(
+            result["header"]["connectivity_parameters_hex"]
+        )
+        synced = after["bearers"][sms_index]["dialing_number"]
+        self.assertEqual(
+            (synced["ton"], synced["npi"], synced["digits"]),
+            (expected["ton"], expected["npi"], expected["digits"]),
+        )
+        self.assertNotEqual(
+            synced["digits"],
+            before["bearers"][sms_index]["dialing_number"]["digits"],
+        )
+        # Only the address changed: PID, DCS, the other bearers and the
+        # trailing bytes re-encode as they were.
+        for index, bearer in enumerate(before["bearers"]):
+            if index == sms_index:
+                for key in ("pid_hex", "dcs_hex"):
+                    self.assertEqual(after["bearers"][index].get(key), bearer.get(key))
+                continue
+            self.assertEqual(after["bearers"][index], bearer)
+        self.assertEqual(after["trailing_hex"], before["trailing_hex"])
+
+    def test_update_smsc_from_ef_smsp_rejects_a_non_sms_bearer_index(self) -> None:
+        with self.assertRaisesRegex(ValueError, "not an SMS-PP block"):
+            self._actions._dispatch_update_profile_header_field(
+                ctx=None,
+                session_id=self._opened_session_id,
+                field="smsc_from_ef_smsp",
+                value="99",
+            )
 
     def test_update_unknown_field_raises(self) -> None:
         with self.assertRaises(ValueError):

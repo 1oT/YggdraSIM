@@ -64,7 +64,7 @@
   padding: 8px 10px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   min-width: 0;
 }
 
@@ -86,7 +86,7 @@
   background-color: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   width: min(320px, 100%);
   min-width: 0;
   max-width: 100%;
@@ -128,7 +128,7 @@
   padding: 10px 12px;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.4;
@@ -147,7 +147,7 @@
   padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   min-height: 44px;
   max-width: 100%;
   overflow-x: auto;
@@ -190,8 +190,76 @@
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-left: 4px;
+}
+
+/* One APDU per line: the row number, the data cut to its start (the
+   whole hex is the cell's title), the context decoder's reading of the
+   command, and a row for a line that is not an APDU. */
+
+.scp03-apdu-breakdown-table td.scp03-apdu-idx {
+  width: 1%;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-data {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd {
+  min-width: 24ch;
+  font-family: var(--font-sans);
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd.is-pending {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+.scp03-apdu-breakdown-table td.scp03-apdu-cmd.is-error,
+.scp03-apdu-row--issue td {
+  color: var(--warn);
+}
+
+.scp03-apdu-decoded {
+  margin-top: 8px;
+}
+
+.scp03-apdu-decoded > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.scp03-apdu-decoded-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.scp03-apdu-result-index {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+
+.scp03-apdu-result-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .scp03-apdu-actions {
@@ -219,7 +287,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .scp03-apdu-result--ok {
@@ -242,7 +310,7 @@
   font-size: 12.5px;
   font-weight: 600;
   padding: 3px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev);
   border: 1px solid var(--border);
   color: var(--fg);
@@ -290,7 +358,7 @@
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .scp03-apdu-chain-head {
@@ -310,7 +378,7 @@
   padding: 4px 8px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   font-family: var(--font-mono);
 }
@@ -359,7 +427,7 @@
   padding: 10px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .scp03-apdu-history-head {
@@ -402,7 +470,7 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
 }
 
@@ -426,7 +494,7 @@
   color: var(--fg);
   background: var(--code-bg);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   word-break: break-all;
 }
 

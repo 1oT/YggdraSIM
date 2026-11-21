@@ -27,16 +27,19 @@ _TEST_AID = "A0000005591010FFFFFFFF8900001100"
 
 
 class IccidEncodingTests(unittest.TestCase):
-    """ETSI TS 102 221 §13.2 packs ICCID digits low nibble first."""
+    """ETSI TS 102 221 §13.2 packs ICCID digits low nibble first into ten octets."""
 
     def test_even_digit_count_swaps_nibbles(self) -> None:
-        self.assertEqual(encode_iccid_bcd("1234").hex().upper(), "2143")
+        self.assertEqual(encode_iccid_bcd("1234").hex().upper(), "2143FFFFFFFFFFFFFFFF")
 
     def test_odd_digit_count_pads_with_f_filler(self) -> None:
-        self.assertEqual(encode_iccid_bcd("123").hex().upper(), "21F3")
+        self.assertEqual(encode_iccid_bcd("123").hex().upper(), "21F3FFFFFFFFFFFFFFFF")
 
-    def test_non_digits_are_stripped(self) -> None:
-        self.assertEqual(encode_iccid_bcd("12-34").hex().upper(), "2143")
+    def test_separators_are_stripped(self) -> None:
+        self.assertEqual(encode_iccid_bcd("12-34").hex().upper(), "2143FFFFFFFFFFFFFFFF")
+
+    def test_full_iccid_fills_the_size_ten_octet_string(self) -> None:
+        self.assertEqual(encode_iccid_bcd("8988201234567890123").hex().upper(), "988802214365870921F3")
 
     def test_empty_iccid_is_rejected(self) -> None:
         with self.assertRaises(PsmoBuildError):
@@ -108,13 +111,29 @@ class PsmoTagAssignmentTests(unittest.TestCase):
     def test_enable_carries_the_rollback_flag_when_asked(self) -> None:
         without = build_psmo({"operation": "enable", "iccid": _TEST_ICCID})
         with_flag = build_psmo({"operation": "enable", "iccid": _TEST_ICCID, "rollback": True})
-        # rollbackFlag [1] NULL adds the two-byte primitive 81 00.
+        # rollbackFlag is untagged in a component list that tags iccid, so
+        # X.680 §12.3 leaves it at the universal NULL '05' -- two bytes, 05 00.
         self.assertEqual(len(with_flag), len(without) + 2)
-        self.assertTrue(with_flag.hex().upper().endswith("8100"))
+        self.assertTrue(with_flag.hex().upper().endswith("0500"))
 
-    def test_aid_reference_uses_tag_4f(self) -> None:
-        encoded = build_psmo({"operation": "disable", "aid": _TEST_AID})
-        self.assertIn("4F10" + _TEST_AID, encoded.hex().upper())
+    def test_simulator_still_honours_the_previously_emitted_auto_tag(self) -> None:
+        # An eIM that encodes rollbackFlag as the auto-tagged '81' must keep
+        # working against the simulator; only what YggdraSIM emits changed.
+        from SIMCARD.sgp import SgpLogic
+
+        reference = b"\x5a\x0a" + encode_iccid_bcd(_TEST_ICCID)
+        self.assertTrue(
+            SgpLogic._enable_rollback_requested(reference + bytes.fromhex("8100"))
+        )
+        self.assertTrue(
+            SgpLogic._enable_rollback_requested(reference + bytes.fromhex("0500"))
+        )
+        self.assertFalse(SgpLogic._enable_rollback_requested(reference))
+
+    def test_aid_is_not_a_psmo_selector(self) -> None:
+        # SGP.32 v1.3 Psmo enable / disable / delete carry an ICCID only.
+        with self.assertRaises(PsmoBuildError):
+            build_psmo({"operation": "disable", "aid": _TEST_AID})
 
     def test_iccid_reference_uses_tag_5a(self) -> None:
         encoded = build_psmo({"operation": "disable", "iccid": _TEST_ICCID})
@@ -132,7 +151,7 @@ class PsmoValidationTests(unittest.TestCase):
         with self.assertRaises(PsmoBuildError):
             build_psmo({"iccid": _TEST_ICCID})
 
-    def test_profile_reference_requires_iccid_or_aid(self) -> None:
+    def test_profile_reference_requires_iccid(self) -> None:
         with self.assertRaises(PsmoBuildError):
             build_psmo({"operation": "enable"})
 
@@ -195,7 +214,9 @@ class EcoTagAssignmentTests(unittest.TestCase):
 
         for names, expected in (
             (["https_over_tcp_retrieval"], [0]),
-            (["https_over_tcp_injection"], [1]),
+            (["coap_dtls_over_udp_retrieval"], [1]),
+            (["https_over_tcp_injection"], [2]),
+            (["proprietary"], [4]),
             (["https_over_tcp_retrieval", "coap_dtls_over_udp_injection"], [0, 3]),
         ):
             with self.subTest(protocols=names):
@@ -280,6 +301,72 @@ class SimulatorRoundTripTests(unittest.TestCase):
         """Each builder maps onto a tag the simulator dispatches."""
         self.assertEqual(len(PSMO_OPERATIONS), 9)
         self.assertEqual(len(ECO_OPERATIONS), 4)
+
+
+class SupportedProtocolBitAgreementTests(unittest.TestCase):
+    """The encoder's bit positions must be the ones the decoders read back.
+
+    ``EimSupportedProtocol`` is ``{eimRetrieveHttps(0), eimRetrieveCoaps(1),
+    eimInjectHttps(2), eimInjectCoaps(3), eimProprietary(4)}`` (SGP.32
+    §2.11.1) -- retrieval on bits 0 and 1, injection on 2 and 3. Bits 1 and 2
+    were transposed in the builder, so CoAPS retrieval went out as HTTPS
+    injection while both decoders reported what was actually on the wire.
+    """
+
+    def setUp(self) -> None:
+        from SCP03.logic.sgp32_decode import EIM_SUPPORTED_PROTOCOL_FLAGS
+        from SCP11.eim_local.psmo_builders import SUPPORTED_PROTOCOL_BITS
+
+        self._decoder_flags = EIM_SUPPORTED_PROTOCOL_FLAGS
+        self._encoder_bits = SUPPORTED_PROTOCOL_BITS
+
+    def test_spec_bit_order(self) -> None:
+        self.assertEqual(
+            self._decoder_flags,
+            {
+                0: "eimRetrieveHttps",
+                1: "eimRetrieveCoaps",
+                2: "eimInjectHttps",
+                3: "eimInjectCoaps",
+                4: "eimProprietary",
+            },
+        )
+
+    def test_every_encoder_name_lands_on_the_matching_decoder_bit(self) -> None:
+        expected = {
+            "https_over_tcp_retrieval": "eimRetrieveHttps",
+            "coap_dtls_over_udp_retrieval": "eimRetrieveCoaps",
+            "https_over_tcp_injection": "eimInjectHttps",
+            "coap_dtls_over_udp_injection": "eimInjectCoaps",
+            "proprietary": "eimProprietary",
+        }
+        self.assertEqual(set(self._encoder_bits), set(expected))
+        for name, asn1_name in expected.items():
+            with self.subTest(protocol=name):
+                self.assertEqual(
+                    self._decoder_flags[self._encoder_bits[name]], asn1_name
+                )
+
+    def test_encoded_bits_decode_to_the_requested_protocols(self) -> None:
+        from SCP03.logic.sgp32_decode import decode_named_bit_string
+        from SCP11.eim_local.psmo_builders import _encode_named_bit_string
+
+        for names, expected in (
+            (["coap_dtls_over_udp_retrieval"], ["eimRetrieveCoaps"]),
+            (["https_over_tcp_injection"], ["eimInjectHttps"]),
+            (["proprietary"], ["eimProprietary"]),
+            (
+                ["https_over_tcp_retrieval", "coap_dtls_over_udp_injection"],
+                ["eimRetrieveHttps", "eimInjectCoaps"],
+            ),
+        ):
+            with self.subTest(protocols=names):
+                # The builder emits a complete BIT STRING value: the
+                # unused-bit count followed by the payload, which is what
+                # the decoder reads.
+                encoded = _encode_named_bit_string(names)
+                decoded = decode_named_bit_string(encoded, self._decoder_flags)
+                self.assertEqual(decoded, expected)
 
 
 if __name__ == "__main__":

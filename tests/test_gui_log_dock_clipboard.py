@@ -5,7 +5,7 @@
 
 The bottom event-log dock surfaces every ``logBus`` event in one of
 four buckets (Messages / Warnings / Errors / APDU). Operators reported
-that the rows were not directly copy-able — they couldn't grab a
+that the rows were not directly copy-able -- they couldn't grab a
 stack trace or a ``saip.open_package`` warning to paste into an issue
 tracker without re-typing it.
 
@@ -78,7 +78,7 @@ class LogDockClipboardJsContract(unittest.TestCase):
 
     def test_row_format_uses_tab_separator_for_paste_friendliness(self) -> None:
         # Tab characters paste cleanly into terminals, editors, and
-        # spreadsheets alike — much better than fixed-width padding.
+        # spreadsheets alike -- much better than fixed-width padding.
         self.assertIn(
             'return ts + "\\t" + src + "\\t" + msg;',
             self.js,
@@ -117,7 +117,7 @@ class LogDockClipboardJsContract(unittest.TestCase):
 
     def test_append_log_dock_row_supports_dblclick_copy(self) -> None:
         # Operators expect double-click to copy the whole row. We must
-        # NOT clobber a manual text selection though — this guard is
+        # NOT clobber a manual text selection though -- this guard is
         # the contract.
         self.assertIn('el.addEventListener("dblclick"', self.js)
         self.assertIn(
@@ -181,7 +181,7 @@ class LogDockClipboardCssContract(unittest.TestCase):
         self.assertIn("color: var(--fg);", self.css)
 
     def test_copied_flash_uses_ok_token(self) -> None:
-        # Green flash on successful copy — picks up whatever success
+        # Green flash on successful copy -- picks up whatever success
         # colour the active theme defines.
         self.assertIn(".log-dock-row.is-copied", self.css)
         self.assertIn(".log-dock-action.is-copied", self.css)
@@ -200,7 +200,7 @@ class LogDockClipboardCssContract(unittest.TestCase):
 class LogBucketCapacityContract(unittest.TestCase):
     """Each bucket has its own ring cap. APDU keeps a much larger
     ring than the human buckets because operators explicitly asked
-    to see every APDU issued during a session — no throttling.
+    to see every APDU issued during a session -- no throttling.
     """
 
     def setUp(self) -> None:

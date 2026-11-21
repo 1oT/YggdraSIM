@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Third-pass SAIP GUI / tooling consistency (quick-add, tiers, actions, FS markers).
 
 Run::
@@ -87,6 +86,12 @@ def gui_saip_action_ids_referenced_in_app_js(app_js: str | None = None) -> froze
     for a, b in re.findall(r'\?\s*"(saip\.[a-z0-9_]+)"\s*:\s*"(saip\.[a-z0-9_]+)"', text):
         refs.add(a)
         refs.add(b)
+    # The shared POST helpers build the same URL from the id they are given:
+    # saipPostAction / saipRfmPost (pkg, id), saipRunPeAction (pkg, pe, id),
+    # and the typed cards' run(id, inputs) wrappers around saipRunPeAction.
+    refs.update(re.findall(r'\b(?:saipPostAction|saipRfmPost)\(\s*\w+\s*,\s*"(saip\.[a-z0-9_]+)"', text))
+    refs.update(re.findall(r'\bsaipRunPeAction\(\s*\w+\s*,\s*\w+\s*,\s*"(saip\.[a-z0-9_]+)"', text))
+    refs.update(re.findall(r'\brun\(\s*"(saip\.[a-z0-9_]+)"', text))
     return frozenset(refs)
 
 

@@ -15,9 +15,9 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 ## Goal
 
-Bring operator-owned material — certificates, private keys,
+Bring operator-owned material -- certificates, private keys,
 secure-channel keysets, simulator personality files, identity records,
-encryption envelopes, and protected diagnostic inputs — into YggdraSIM
+encryption envelopes, and protected diagnostic inputs -- into YggdraSIM
 without touching any in-tree starter material.
 
 This page is the **task-driven mirror** of the canonical operator
@@ -37,7 +37,7 @@ common flows and walks through them as numbered recipes.
 
 ## Decision tree
 
-| You have …                                                                    | Jump to                                                                  |
+| You have ...                                                                    | Jump to                                                                  |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | operator DPauth / DPpb cert + key for `LOAD-PROFILE` against `ISD-R`          | [Recipe 1](#recipe-1-bring-your-own-rsp-certs-local-access)              |
 | operator DPauth / DPpb cert + key for the eIM local profile-loading path      | [Recipe 2](#recipe-2-bring-your-own-rsp-certs-eim-local)                 |
@@ -105,7 +105,7 @@ Replace the bundled SGP.26 test fixtures used by `LOAD-PROFILE` against
     yggdrasim-scp11-local-access --cmd "LOAD-PROFILE; EXIT"
     ```
 
-**Reference.** Selector code: `SCP11/local_access/cert_store.py` — the
+**Reference.** Selector code: `SCP11/local_access/cert_store.py` -- the
 full sidecar schema (every field) lives in the canonical operator
 guide.
 
@@ -309,7 +309,7 @@ search.
     SUCI key files are 32 bytes of long-term home-network material.
     Keep them at 0600, never share across operators, and rotate per the
     home-network's policy. They never belong inside the inventory
-    encryption envelope — they are operator key material, not stored
+    encryption envelope -- they are operator key material, not stored
     application state.
 
 ## Recipe 8: Seed a YggdraCore subscription
@@ -409,14 +409,14 @@ short form:
     ```
 
 3. Trigger any inventory write (running the SCP03 shell against a
-   card and exiting cleanly is enough — it will write the per-card
+   card and exiting cleanly is enough -- it will write the per-card
    `scp03` namespace), then confirm the on-disk bytes start with
    `-----BEGIN PGP MESSAGE-----`.
 4. Verify with `yggdrasim --doctor` (the `gpg` probe must report
    `ok`); the resulting on-disk bytes are the actual proof the
    envelope took.
 
-`plaintext_fallback_writes` is the strict-mode escape hatch — leave it
+`plaintext_fallback_writes` is the strict-mode escape hatch -- leave it
 `false` so the writer refuses to drop plaintext on disk while the GPG
 provider is ready.
 

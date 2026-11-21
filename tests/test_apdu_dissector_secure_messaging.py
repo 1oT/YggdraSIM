@@ -236,7 +236,7 @@ class PlaintextFromSidecar(unittest.TestCase):
     def test_the_dissector_shows_the_decrypted_command(self) -> None:
         text = self._decode_with_sidecar(self.sidecar_path)
         self.assertIn("Decrypted command APDU", text)
-        self.assertIn("STORE_DATA", text)
+        self.assertIn("STORE DATA", text)
 
     def test_the_decrypted_payload_is_decoded_not_just_shown(self) -> None:
         """The whole point: a ciphered ES10c call reads as an ES10c call."""

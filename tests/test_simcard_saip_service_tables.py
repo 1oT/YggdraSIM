@@ -35,10 +35,18 @@ from SIMCARD.saip_pysim_specs import (
 
 
 def _has_pysim_service_tables() -> bool:
-    """Return ``True`` only if pySim's service-name maps import cleanly."""
+    """Return ``True`` only if pySim's service-name maps import cleanly.
+
+    Probes pySim directly: ``pysim_service_table`` now falls back to the
+    clause wording, so a non-empty result no longer proves pySim is present.
+    """
 
     reset_pysim_service_table_cache()
-    return bool(pysim_service_table("UST"))
+    try:
+        from pySim import ts_31_102
+    except Exception:
+        return False
+    return isinstance(getattr(ts_31_102, "EF_UST_map", None), dict)
 
 
 class PySimServiceTableImportTests(unittest.TestCase):
@@ -83,15 +91,16 @@ class PySimServiceTableImportTests(unittest.TestCase):
         self.assertEqual(ist[2], "Generic Bootstrapping Architecture (GBA)")
         self.assertEqual(ist[15], "MCPTT")
 
-    def test_5g_prose_map_describes_five_buckets(self) -> None:
-        if not _has_pysim_service_tables():
-            self.skipTest("pySim not installed")
-
+    def test_5g_prose_map_covers_every_clause_service(self) -> None:
+        # TS 31.102 v19.5 §4.4.13.2 names services n°1 to n°13; pySim's
+        # EF_5G_PROSE_ST_map still stops at n°5, so the clause base supplies
+        # the rest and pySim only overlays the numbers it knows.
         prose = pysim_service_table("5G_PROSE_ST")
 
-        self.assertEqual(len(prose), 5)
+        self.assertEqual(sorted(prose), list(range(1, 14)))
         self.assertIn("direct discovery", prose[1])
         self.assertIn("UE-to-network relay", prose[3])
+        self.assertIn("multi-hop UE-to-UE end UE", prose[13])
 
     def test_sst_map_includes_legacy_gsm_services(self) -> None:
         if not _has_pysim_service_tables():

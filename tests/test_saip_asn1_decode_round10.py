@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Round-10 EF-decoder coverage tests.
 
 Exercises the manual-list parity decoders added so the GUI editor
@@ -30,8 +29,8 @@ class ProSeServiceTableTests(unittest.TestCase):
         self.assertEqual(
             decoded["activeServices"],
             [
-                "1: ProSe direct discovery (open)",
-                "3: ProSe direct communication (one-to-many)",
+                "1: ProSe direct discovery parameters",
+                "3: ProSe Direct Communication radio parameters",
             ],
         )
         self.assertEqual(decoded["activeCount"], 2)
@@ -43,9 +42,9 @@ class ProSeServiceTableTests(unittest.TestCase):
         self.assertEqual(
             decoded["activeServices"],
             [
-                "8: ProSe UE-to-network relay (Layer-2)",
-                "9: ProSe UE-to-UE relay (Layer-2)",
-                "10: ProSe per-PLMN authorisation",
+                "8: ProSe Usage Information Reporting configuration",
+                "9: UICC ProSe Direct Communication usage information reporting",
+                "10: ProSe Group Member Discovery parameters",
             ],
         )
 
@@ -66,9 +65,9 @@ class ProSeServiceTableTests(unittest.TestCase):
         self.assertEqual(
             decoded["activeServices"],
             [
-                "1: ProSe direct discovery (open)",
-                "2: ProSe direct discovery (restricted)",
-                "3: ProSe direct communication (one-to-many)",
+                "1: ProSe direct discovery parameters",
+                "2: HPLMN ProSe Function",
+                "3: ProSe Direct Communication radio parameters",
             ],
         )
 
@@ -112,7 +111,7 @@ class BcastServiceTableTests(unittest.TestCase):
 
 class WlrPlmnTests(unittest.TestCase):
     def test_three_byte_plmn_decodes_to_mcc_mnc(self) -> None:
-        # Test PLMN 001/01 per 3GPP TS 23.003 §2.2 — encoded as 00 F1 10.
+        # Test PLMN 001/01 (3GPP TS 31.124 v18.7 §27.22.2A default test USIM) -- encoded as 00 F1 10.
         decoded = _decode_ef_wlrplmn("00F110")
         self.assertIsNotNone(decoded)
         assert decoded is not None
@@ -132,7 +131,7 @@ class WlrPlmnTests(unittest.TestCase):
 
 class WlanPlmnSelectorTests(unittest.TestCase):
     def test_oplmnwlan_decodes_as_plmn_list_without_act(self) -> None:
-        # Two PLMNs — 001/01 and 999/99 — neither carries an AcT bitmap.
+        # Two PLMNs -- 001/01 and 999/99 -- neither carries an AcT bitmap.
         decoded = _decode_known_ef_payload(
             ef_key="ef-oplmnwlan",
             fid=None,

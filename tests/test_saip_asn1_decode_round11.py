@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Round-11 EF-decoder field-level parity tests.
 
 Targets the field-level enrichments to EF.AD, EF.IMSI, EF.ICCID,
@@ -26,8 +25,10 @@ class UstCatalogueTests(unittest.TestCase):
     def test_release_18_services_147_through_150_present(self) -> None:
         for service_number in (147, 148, 149, 150):
             self.assertIn(service_number, _UST_SERVICE_NAMES)
+        # TS 31.102 v19.5 §4.2.8 names service 148 after the configuration, not
+        # after the SENSE abbreviation the earlier hand-written table used.
         self.assertIn("5MBS", _UST_SERVICE_NAMES[147])
-        self.assertIn("SENSE", _UST_SERVICE_NAMES[148])
+        self.assertIn("Operator controlled signal threshold", _UST_SERVICE_NAMES[148])
         self.assertIn("A2X", _UST_SERVICE_NAMES[149])
         self.assertIn("IMS Data Channel", _UST_SERVICE_NAMES[150])
 
@@ -64,8 +65,22 @@ class AdministrativeDataTests(unittest.TestCase):
         self.assertEqual(decoded["mncLengthDigits"], 0)
         self.assertIn("service-driven", decoded["mncLengthSource"])
 
+    def test_type_approval_and_test_modes_follow_the_spec_table(self) -> None:
+        # TS 31.102 §4.2.18: '80' type approval, '81' + specific facilities,
+        # '02' maintenance (off line), '04' cell test operation.
+        self.assertEqual(_decode_ad("80000002")["administrativeMode"], "Type approval operations")
+        self.assertEqual(
+            _decode_ad("81000002")["administrativeMode"],
+            "Type approval operations + specific facilities",
+        )
+        self.assertEqual(_decode_ad("02000002")["administrativeMode"], "Maintenance (off line)")
+        self.assertEqual(_decode_ad("04000002")["administrativeMode"], "Cell test operation")
+        self.assertEqual(_decode_ad("03000002")["administrativeMode"], "0x03 (RFU)")
+        # Byte 4 b8-b5 are RFU; only the low nibble codes the MNC length.
+        self.assertEqual(_decode_ad("000000F3")["mncLengthDigits"], 3)
+
     def test_trailing_rfu_bytes_surfaced(self) -> None:
-        # 5+ byte file — extra bytes treated as RFU.
+        # 5+ byte file -- extra bytes treated as RFU.
         decoded = _decode_ad("0000000201020304")
         self.assertIsNotNone(decoded)
         assert decoded is not None
@@ -90,7 +105,7 @@ class ImsiBreakdownTests(unittest.TestCase):
         parity = 0x09 if odd else 0x01
         first_digit = int(digits[0])
         byte1 = (first_digit << 4) | parity
-        # Remaining digits — pad to even count so they pack into
+        # Remaining digits -- pad to even count so they pack into
         # whole bytes; pad nibble = 0xF.
         remaining = digits[1:]
         if (len(remaining) % 2) == 1:
@@ -113,7 +128,7 @@ class ImsiBreakdownTests(unittest.TestCase):
         return prefix + bytes([byte1]).hex().upper() + bytes(body_bytes).hex().upper()
 
     def test_test_plmn_001_01_uses_2digit_mnc_for_001_in_catalogue(self) -> None:
-        # IMSI 001010000000001 — TS 23.003 §2.2 test PLMN. MCC 001
+        # IMSI 001010000000001 -- the TS 31.124 v18.7 §27.22.2A test PLMN. MCC 001
         # is in the 3-digit-MNC catalogue but the test PLMN body uses
         # a 2-digit MNC ("01"); the decoder defaults to 3-digit MNC
         # for MCC 001 because the catalogue lists it. The editor
@@ -133,14 +148,14 @@ class ImsiBreakdownTests(unittest.TestCase):
         self.assertEqual(alt["mnc"], "01")
 
     def test_two_digit_mnc_default_for_uncatalogued_mcc(self) -> None:
-        # MCC '262' is not in the 3-digit-MNC catalogue → default
+        # MCC '999' is not in the 3-digit-MNC catalogue → default
         # 2-digit MNC interpretation, with an alternate 3-digit
         # interpretation surfaced for cross-check against EF.AD.
-        encoded = self._encode_imsi("262010000000000")
+        encoded = self._encode_imsi("999010000000000")
         decoded = _decode_imsi(encoded)
         self.assertIsNotNone(decoded)
         assert decoded is not None
-        self.assertEqual(decoded["mcc"], "262")
+        self.assertEqual(decoded["mcc"], "999")
         self.assertEqual(decoded["mncLengthAssumed"], 2)
         self.assertEqual(decoded["mnc"], "01")
         self.assertIn("mncAlternate", decoded)
@@ -151,8 +166,8 @@ class ImsiBreakdownTests(unittest.TestCase):
 
 class IccidBreakdownTests(unittest.TestCase):
     def test_telecom_mii_and_luhn_validated(self) -> None:
-        # Test ICCID 8988201234567890123 (E.118 telecom + 999/01 test
-        # PLMN body). Compute the actual Luhn digit so the test
+        # Test ICCID 8988201234567890123 (E.118 telecom MII 89, the
+        # project's 8988 test IIN). Compute the actual Luhn digit so the test
         # holds regardless of trailing-pad layout.
         body = "898820123456789012"
         total = 0

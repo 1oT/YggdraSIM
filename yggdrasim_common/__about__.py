@@ -77,7 +77,7 @@ def get_version() -> str:
 
     Resolution order:
 
-    1. Build stamp written by ``yggdrasim_main.spec`` — used by frozen
+    1. Build stamp written by ``yggdrasim_main.spec`` -- used by frozen
        PyInstaller bundles that do not ship ``pyproject.toml``.
     2. ``pyproject.toml`` of the source checkout.
     3. Installed distribution metadata (wheel / editable install).

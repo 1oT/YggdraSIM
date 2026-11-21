@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``saip_connectivity_parameters``."""
 
 from __future__ import annotations
@@ -21,6 +20,36 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(tags["sms"], "A0")
         self.assertEqual(tags["https"], "A1")
         self.assertEqual(tags["cat_tp"], "A2")
+
+
+class AddressBytesTests(unittest.TestCase):
+
+    def test_decodes_ton_npi_and_swapped_bcd_digits(self) -> None:
+        # ETSI TS 102 223 §8.1 Address value: TON/NPI 91 = international,
+        # ISDN; digits in swapped BCD with an F end mark.
+        decoded = C.decode_address_bytes(bytes.fromhex("912120550501F0"))
+        self.assertEqual(
+            (decoded["ton"], decoded["npi"], decoded["digits"]),
+            ("international", "isdn", "12025550100"),
+        )
+        self.assertEqual(decoded["raw_hex"], "912120550501F0")
+        self.assertEqual(C.decode_address_bytes("91 21 20 55 05 01 F0")["digits"], "12025550100")
+
+    def test_decode_boundaries(self) -> None:
+        self.assertEqual(C.decode_address_bytes(b"")["digits"], "")
+        self.assertEqual(C.decode_address_bytes(b"\x91")["digits"], "")
+        with self.assertRaises(ValueError):
+            C.decode_address_bytes("9")
+        with self.assertRaises(ValueError):
+            C.decode_address_bytes("zz")
+
+    def test_matches_the_sms_bearer_encoder(self) -> None:
+        encoded = C.encode_connectivity_parameters([{
+            "bearer": "sms",
+            "dialing_number": {"ton": "international", "npi": "isdn", "digits": "12025550100"},
+        }])
+        # A0 len 06 len <address>
+        self.assertEqual(encoded[8:], "912120550501F0")
 
 
 class SmsRoundTripTests(unittest.TestCase):
@@ -116,3 +145,23 @@ class UnknownBearerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_an_msisdn_placeholder_stands_in_for_the_dialing_number_digits() -> None:
+    """The literal rides in the hex with its width counted; decoding names it again."""
+    from Tools.ProfilePackage.saip_connectivity_parameters import (
+        decode_connectivity_parameters,
+        encode_connectivity_parameters,
+    )
+
+    original = "A00F0607918406010092F88101008201F6"
+    decoded = decode_connectivity_parameters(original)
+    assert encode_connectivity_parameters(decoded["bearers"]) == original
+    decoded["bearers"][0]["dialing_number"]["digits"] = "{smsc:MSISDN:6:nibble_swap}"
+    encoded = encode_connectivity_parameters(decoded["bearers"])
+    assert encoded == "A00F060791{smsc:MSISDN:6:nibble_swap}8101008201F6"
+    again = decode_connectivity_parameters(encoded)
+    number = again["bearers"][0]["dialing_number"]
+    assert number["digits"] == "{smsc:MSISDN:6:nibble_swap}"
+    assert number["placeholder"] == "{smsc:MSISDN:6:nibble_swap}"
+    assert number["ton"] == "international"

@@ -54,7 +54,7 @@ from Tools.ProfilePackage.saip_asn1_decode import (
 
 
 # ---------------------------------------------------------------------------
-# EF.SPN — TS 31.102 §4.2.12
+# EF.SPN -- TS 31.102 §4.2.12
 # ---------------------------------------------------------------------------
 
 
@@ -83,14 +83,14 @@ class TestSpnAlphaStringTyping:
 
 
 # ---------------------------------------------------------------------------
-# EF.PNN — TS 31.102 §4.2.58 / TS 24.008 §10.5.3.5a
+# EF.PNN -- TS 31.102 §4.2.58 / TS 24.008 §10.5.3.5a
 # ---------------------------------------------------------------------------
 
 
 class TestNetworkNameIeDecoder:
     def test_ucs2_be_full_name_is_recovered(self) -> None:
         name_ucs2 = "Test Net".encode("utf-16-be")
-        header = 0x80 | (1 << 5)
+        header = 0x80 | (1 << 4)
         ie = bytes([header]) + name_ucs2
         decoded = _decode_network_name_ie(ie)
         assert decoded is not None
@@ -103,7 +103,7 @@ class TestNetworkNameIeDecoder:
 
     def test_strips_trailing_ff_padding(self) -> None:
         name_ucs2 = "Hi".encode("utf-16-be")
-        header = 0x80 | (1 << 5)
+        header = 0x80 | (1 << 4)
         ie = bytes([header]) + name_ucs2 + b"\xFF\xFF"
         decoded = _decode_network_name_ie(ie)
         assert decoded is not None
@@ -113,7 +113,7 @@ class TestNetworkNameIeDecoder:
 class TestPnnRecordDispatchesNetworkNameIe:
     def test_pnn_tag_43_ucs2_full_name(self) -> None:
         name_ucs2 = "Net A".encode("utf-16-be")
-        header = 0x80 | (1 << 5)
+        header = 0x80 | (1 << 4)
         ie = bytes([header]) + name_ucs2
         record = bytes([0x43, len(ie)]) + ie
         decoded = _decode_pnn_record(record.hex())
@@ -128,7 +128,7 @@ class TestPnnRecordDispatchesNetworkNameIe:
 
     def test_pnn_short_name_tag_45_surface_text(self) -> None:
         name_ucs2 = "SN".encode("utf-16-be")
-        header = 0x80 | (1 << 5)
+        header = 0x80 | (1 << 4)
         ie = bytes([header]) + name_ucs2
         record = bytes([0x45, len(ie)]) + ie
         decoded = _decode_pnn_record(record.hex())
@@ -143,7 +143,7 @@ class TestPnnRecordDispatchesNetworkNameIe:
 
 
 # ---------------------------------------------------------------------------
-# EF.GBANL — TS 31.102 §4.2.80
+# EF.GBANL -- TS 31.102 §4.2.80
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +173,7 @@ class TestGbanlBtidTyping:
 
 
 # ---------------------------------------------------------------------------
-# ISIM P-CSCF address — TS 31.103 §4.2.8
+# ISIM P-CSCF address -- TS 31.103 §4.2.8
 # ---------------------------------------------------------------------------
 
 

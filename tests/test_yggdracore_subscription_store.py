@@ -167,10 +167,10 @@ class FormattingTests(unittest.TestCase):
             "akma.5gc.mnc001.mcc001.3gppnetwork.org",
         )
 
-    def test_public_view_omits_secret_material(self) -> None:
+    def test_public_view_carries_k_and_opc(self) -> None:
         view = self.record.public_view()
-        self.assertNotIn("k", view)
-        self.assertNotIn("opc", view)
+        self.assertEqual(view["k_hex"], _K.hex().upper())
+        self.assertEqual(view["opc_hex"], _OPC.hex().upper())
         self.assertIn("supi", view)
         self.assertIn("akma_enabled", view)
 

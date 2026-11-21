@@ -34,9 +34,10 @@ Tests in this module pin:
    otherwise live only under DF.GSM / DF.TELECOM.
 
 Reference:
-    SAIP / TCA Profile Interoperability v2.3.1 §8.3.5
+    TCA SAIP v3.4.1 §8.3.2 File related types,
     PE_Definitions ASN.1 ``Fcp.linkPath [PRIVATE 7]``
-    3GPP TS 31.102 Annex H (fallback convention)
+    The "Annex H mirror" fallback is this tree's convention; no library
+    document states it (TS 31.102 v19.5 Annex H is the list of SFI values).
 """
 
 from __future__ import annotations

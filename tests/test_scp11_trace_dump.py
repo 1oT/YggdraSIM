@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 from __future__ import annotations
 
 import contextlib
@@ -31,6 +30,43 @@ def _encode_length(length: int) -> bytes:
 
 def _tlv(tag_hex: str, value: bytes) -> bytes:
     return bytes.fromhex(tag_hex) + _encode_length(len(value)) + value
+
+
+_ECDSA_SHA256_OID = bytes.fromhex("2A8648CE3D040302")
+_EC_PUBLIC_KEY_OID = bytes.fromhex("2A8648CE3D0201")
+_PRIME256V1_OID = bytes.fromhex("2A8648CE3D030107")
+
+
+def _subject_public_key_info_contents(key_byte: int) -> bytes:
+    return _tlv("30", _tlv("06", _EC_PUBLIC_KEY_OID) + _tlv("06", _PRIME256V1_OID)) + _tlv(
+        "03", b"\x00\x04" + bytes([key_byte]) * 64
+    )
+
+
+def _certificate_contents(serial: bytes, subject: bytes) -> bytes:
+    """Certificate contents (RFC 5280 section 4.1) without the outer SEQUENCE header.
+
+    The tbsCertificate carries a v3 version, the serial given, an issuer and
+    subject Name of one RDN (id-at-commonName), a Validity, a P-256
+    SubjectPublicKeyInfo and one extension, so a walk would nest five levels
+    below the certificate and every RDN SET would sit at the depth cap of an
+    addEim package.
+    """
+    name = _tlv("30", _tlv("31", _tlv("30", _tlv("06", bytes.fromhex("550403")) + _tlv("0C", subject))))
+    key_usage = _tlv("30", _tlv("06", bytes.fromhex("551D0F")) + _tlv("01", b"\xFF") + _tlv("04", _tlv("03", b"\x07\x80")))
+    tbs_certificate = _tlv(
+        "30",
+        _tlv("A0", _tlv("02", b"\x02"))
+        + _tlv("02", serial)
+        + _tlv("30", _tlv("06", _ECDSA_SHA256_OID))
+        + name
+        + _tlv("30", _tlv("17", b"260101000000Z") + _tlv("17", b"270101000000Z"))
+        + name
+        + _tlv("30", _subject_public_key_info_contents(0x11))
+        + _tlv("A3", _tlv("30", key_usage)),
+    )
+    signature = _tlv("03", b"\x00" + _tlv("30", _tlv("02", b"\x01") + _tlv("02", b"\x02")))
+    return tbs_certificate + _tlv("30", _tlv("06", _ECDSA_SHA256_OID)) + signature
 
 
 class Scp11TraceDumpTests(unittest.TestCase):
@@ -120,7 +156,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
             _tlv(
                 "30",
                 _tlv("80", b"1.3.6.1.4.1.53775.1.5.1.1")
-                + _tlv("5A", bytes.fromhex("89033023931110000000074959384263"))
+                + _tlv("5A", bytes.fromhex("89049032000000000000000000000103"))
                 + _tlv("81", bytes.fromhex("04"))
                 + _tlv("82", bytes.fromhex("0000000000000AD8"))
                 + _tlv(
@@ -144,7 +180,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
 
         self.assertIn("BF51 EuiccPackageRequest/Result", decoded)
         self.assertIn('80 eimId len=25 value="1.3.6.1.4.1.53775.1.5.1.1"', decoded)
-        self.assertIn("5A eidValue len=16 value=89033023931110000000074959384263", decoded)
+        self.assertIn("5A eidValue len=16 value=89049032000000000000000000000103", decoded)
         self.assertIn("81 counterValue len=1 value=4 (04)", decoded)
         self.assertIn('81 eimFqdn len=5 value="eim.t"', decoded)
         self.assertIn("82 eimIdType len=1 value=eimIdTypeOid (01)", decoded)
@@ -157,6 +193,39 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertNotIn("primitive", decoded)
         self.assertNotIn("constructed", decoded)
         self.assertNotIn("context [", decoded)
+
+    def test_format_tlv_decode_names_the_package_result_sequence_number(self) -> None:
+        # SGP.32 v1.3 2.11.2.1: '83' in EuiccPackageResultDataSigned is seqNumber.
+        result_data = (
+            _tlv("80", b"eim1.example.test")
+            + _tlv("81", b"\x16")
+            + _tlv("82", bytes.fromhex("00000000000021B0"))
+            + _tlv("83", b"\x21")
+            + _tlv("30", _tlv("89", b"\x00"))
+        )
+        payload = _tlv("BF51", _tlv("A0", _tlv("30", result_data) + _tlv("5F37", b"\xAA" * 64)))
+
+        decoded = "\n".join(format_tlv_decode(payload))
+
+        self.assertIn("83 seqNumber len=1 value=33 (21)", decoded)
+        self.assertIn("81 counterValue len=1 value=22 (16)", decoded)
+        self.assertIn("euiccResult len=3", decoded)
+        self.assertIn("89 deleteEimResult len=1", decoded)
+        self.assertNotIn("EimConfigurationData", decoded)
+
+    def test_format_tlv_decode_names_the_package_error_codes(self) -> None:
+        signed_error = _tlv(
+            "BF51",
+            _tlv(
+                "A1",
+                _tlv("30", _tlv("80", b"eim1.example.test") + _tlv("81", b"\x05") + _tlv("02", b"\x04"))
+                + _tlv("5F37", b"\xAA" * 64),
+            ),
+        )
+        unsigned_error = _tlv("BF51", _tlv("A2", _tlv("80", b"eim1.example.test") + _tlv("8F", b"\x02")))
+
+        self.assertIn("02 euiccPackageErrorCode len=1", "\n".join(format_tlv_decode(signed_error)))
+        self.assertIn("8F euiccPackageUnsignedErrorCode len=1", "\n".join(format_tlv_decode(unsigned_error)))
 
     def test_format_tlv_decode_names_direct_bf58_add_eim_fields(self) -> None:
         payload = _tlv(
@@ -206,26 +275,109 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn("9F7B eCallIndication len=1 value=false (00)", decoded)
         self.assertIn("9F67 fallbackAllowed len=1 value=255 (FF)", decoded)
 
-    def test_format_tlv_decode_renders_package_data_semantically(self) -> None:
-        ecdsa_sha256_oid = bytes.fromhex("2A8648CE3D040302")
-        ec_public_key_oid = bytes.fromhex("2A8648CE3D0201")
-        prime256v1_oid = bytes.fromhex("2A8648CE3D030107")
-        certificate = _tlv(
-            "30",
-            _tlv("A0", _tlv("02", b"\x02"))
-            + _tlv("02", b"\x01")
-            + _tlv("30", _tlv("06", ecdsa_sha256_oid))
-            + _tlv("30", _tlv("0C", b"Example EUM"))
-            + _tlv("30", _tlv("17", b"260101000000Z") + _tlv("17", b"270101000000Z"))
-            + _tlv(
+    def test_format_tlv_decode_pastes_add_eim_certificates_whole(self) -> None:
+        # OpenSSL issues 20-byte random serials; the old prefix test missed them.
+        eim_certificate = _certificate_contents(serial=bytes(range(0x03, 0x17)), subject=b"eIM signing")
+        tls_certificate = _certificate_contents(serial=bytes(range(0x21, 0x35)), subject=b"eIM TLS CA")
+        payload = _tlv(
+            "BF51",
+            _tlv(
                 "30",
-                _tlv("06", ec_public_key_oid)
-                + _tlv("06", prime256v1_oid)
-                + _tlv("03", b"\x00\x04" + (b"\x11" * 64)),
+                _tlv("80", b"1.3.6.1.4.1.53775.1.5.1.1")
+                + _tlv("5A", bytes.fromhex("89049032123451234512345678901235"))
+                + _tlv("81", b"\x04")
+                + _tlv(
+                    "A1",
+                    _tlv(
+                        "A8",
+                        _tlv("80", b"1.3.6.1.4.1.53775.0.5.1.1")
+                        + _tlv("A5", _tlv("A1", eim_certificate))
+                        + _tlv("A6", _tlv("A1", tls_certificate))
+                        + _tlv("87", bytes.fromhex("0780")),
+                    ),
+                ),
             )
-            + _tlv("30", _tlv("06", ecdsa_sha256_oid))
-            + _tlv("03", b"\x00" + _tlv("30", _tlv("02", b"\x01") + _tlv("02", b"\x02"))),
+            + _tlv("5F37", b"\xAA" * 64),
         )
+
+        lines = format_tlv_decode(payload)
+        decoded = "\n".join(lines)
+        stripped = {line.strip() for line in lines}
+
+        self.assertIn(f"A1 eimCertificate len={len(eim_certificate)} X.509 certificate DER", decoded)
+        self.assertIn(f"A1 trustedCertificateTls len={len(tls_certificate)} X.509 certificate DER", decoded)
+        eim_der = _tlv("30", eim_certificate)
+        tls_der = _tlv("30", tls_certificate)
+        self.assertIn(f"<certificate DER, {len(eim_der)} bytes, wire tag A1 shown as 30; not walked>", decoded)
+        self.assertIn(f"<certificate DER, {len(tls_der)} bytes, wire tag A1 shown as 30; not walked>", decoded)
+        self.assertIn(eim_der.hex().upper(), stripped)
+        self.assertIn(tls_der.hex().upper(), stripped)
+        self.assertNotIn("<max decode depth reached>", decoded)
+        self.assertNotIn("<decode truncated", decoded)
+        self.assertNotIn("SET len=", decoded)
+        self.assertNotIn("UTCTime", decoded)
+        self.assertIn("87 eimSupportedProtocol len=2 value=eimRetrieveHttps (0780)", decoded)
+        self.assertIn("5F37 eimSignature / EuiccSign len=64 value=64B ECDSA-rs", decoded)
+        self.assertLess(len(lines), 24)
+
+    def test_format_tlv_decode_pastes_a_certificate_reached_at_the_depth_cap(self) -> None:
+        certificate = _certificate_contents(serial=b"\x01", subject=b"deep")
+        node = _tlv("A1", certificate) + _tlv("30", _tlv("02", b"\x01"))
+        for _ in range(8):
+            node = _tlv("30", node)
+
+        lines = format_tlv_decode(node)
+        decoded = "\n".join(lines)
+
+        self.assertIn(_tlv("30", certificate).hex().upper(), {line.strip() for line in lines})
+        self.assertIn("<certificate DER, ", decoded)
+        # The plain SEQUENCE beside it, at the same depth, still hits the cap.
+        self.assertEqual(decoded.count("<max decode depth reached>"), 1)
+        self.assertNotIn("02 INTEGER len=1 value=1 (01)", decoded)
+
+    def test_format_tlv_decode_names_and_walks_eim_public_key_alternatives(self) -> None:
+        payload = _tlv(
+            "BF51",
+            _tlv(
+                "30",
+                _tlv("80", b"1.3.6.1.4.1.53775.1.5.1.1")
+                + _tlv(
+                    "A1",
+                    _tlv(
+                        "A8",
+                        _tlv("80", b"1.3.6.1.4.1.53775.0.5.1.1")
+                        + _tlv("A5", _tlv("A0", _subject_public_key_info_contents(0x22)))
+                        + _tlv("A6", _tlv("A0", _subject_public_key_info_contents(0x33))),
+                    ),
+                ),
+            ),
+        )
+
+        decoded = "\n".join(format_tlv_decode(payload))
+
+        self.assertIn("A0 eimPublicKey len=", decoded)
+        self.assertIn("A0 trustedEimPkTls len=", decoded)
+        self.assertIn("06 OBJECT IDENTIFIER len=7 value=1.2.840.10045.2.1", decoded)
+        self.assertIn("06 OBJECT IDENTIFIER len=8 value=1.2.840.10045.3.1.7", decoded)
+        self.assertNotIn("certificate DER", decoded)
+
+    def test_format_tlv_decode_walks_a_three_member_sequence_that_is_not_a_certificate(self) -> None:
+        # Three members with the certificate's tags but no TBSCertificate body.
+        payload = _tlv(
+            "A1",
+            _tlv("30", _tlv("02", b"\x07"))
+            + _tlv("30", _tlv("06", _ECDSA_SHA256_OID))
+            + _tlv("03", b"\x00\x01"),
+        )
+
+        decoded = "\n".join(format_tlv_decode(payload))
+
+        self.assertNotIn("certificate DER", decoded)
+        self.assertIn("02 INTEGER len=1 value=7 (07)", decoded)
+        self.assertIn("06 OBJECT IDENTIFIER len=8 value=1.2.840.10045.4.3.2", decoded)
+
+    def test_format_tlv_decode_renders_package_data_semantically(self) -> None:
+        certificate = _certificate_contents(serial=b"\x01", subject=b"Example EUM")
         euicc_info1 = _tlv(
             "BF20",
             _tlv("82", bytes.fromhex("020500"))
@@ -280,6 +432,9 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertIn("EUM Certificate", decoded)
         self.assertIn("Public Key Entries", decoded)
         self.assertIn("Object Identifiers", decoded)
+        certificate_objects = [line for line in decoded.splitlines() if "Certificate Objects" in line]
+        self.assertEqual(len(certificate_objects), 1)
+        self.assertTrue(certificate_objects[0].rstrip().endswith(": 1"), certificate_objects[0])
         self.assertNotIn("counterValue", decoded)
         self.assertNotIn("eimTransactionId", decoded)
         self.assertNotIn("SEQUENCE len", decoded)
@@ -303,7 +458,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
             b"".join(
                 [
                     _tlv("80", b"1.3.6.1.4.1.53775.0.5"),
-                    _tlv("5A", bytes.fromhex("89033023931110000000074959384263")),
+                    _tlv("5A", bytes.fromhex("89049032000000000000000000000103")),
                     _tlv("81", bytes.fromhex("010E")),
                     _tlv("82", bytes.fromhex("0000000000008ED3")),
                     _tlv("A1", _tlv("A8", _tlv("82", b"\x01"))),
@@ -317,7 +472,7 @@ class Scp11TraceDumpTests(unittest.TestCase):
         self.assertEqual(summary["root_tag"], "BF51")
         self.assertEqual(summary["complete"], "yes")
         self.assertEqual(summary["outer_eim_id"], "1.3.6.1.4.1.53775.0.5")
-        self.assertEqual(summary["eid"], "89033023931110000000074959384263")
+        self.assertEqual(summary["eid"], "89049032000000000000000000000103")
         self.assertEqual(summary["counter"], "270 (010E)")
         self.assertEqual(summary["eim_transaction_id"], "0000000000008ED3")
         self.assertEqual(summary["inner_choice"], "A1")

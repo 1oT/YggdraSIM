@@ -30,10 +30,10 @@
   border: none;
   border-radius: var(--radius-md);
   color: var(--fg-dim);
-  font-size: 11px;
+  font-size: var(--group-size);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: var(--group-case);
+  letter-spacing: var(--group-track);
   cursor: pointer;
   transition: background-color var(--transition-fast),
     color var(--transition-fast);
@@ -97,7 +97,7 @@
 }
 
 #command-center-nav .cc-nav-leaf.is-stub {
-  /* Reserved-but-not-wired surfaces — hint at it without making the
+  /* Reserved-but-not-wired surfaces -- hint at it without making the
      entry look broken. Still clickable; shows a placeholder card. */
   opacity: 0.65;
   font-style: italic;
@@ -105,4 +105,62 @@
 
 #command-center-nav .cc-nav-leaf.is-stub:hover {
   opacity: 0.85;
+}
+
+/* Offline Tools lists each tool one level below its leaf. */
+.cc-nav-subchildren {
+  list-style: none;
+  margin: 0 0 2px 22px;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 1px dashed var(--border);
+}
+
+.cc-nav-subchildren[hidden] {
+  display: none;
+}
+
+/* The caret beside a leaf with a tool list: opens the list in place. */
+.cc-nav-leaf-item--expandable {
+  position: relative;
+}
+
+.cc-nav-subtoggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.cc-nav-subtoggle:hover {
+  background: var(--bg-hover);
+}
+
+.cc-nav-subtoggle:hover .cc-nav-caret,
+.cc-nav-subtoggle:focus-visible .cc-nav-caret {
+  color: var(--fg);
+}
+
+.cc-nav-subtoggle[aria-expanded="true"] .cc-nav-caret {
+  transform: rotate(90deg);
+}
+
+#command-center-nav .cc-nav-subleaf {
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+#command-center-nav .cc-nav-subleaf::before {
+  left: 5px;
 }

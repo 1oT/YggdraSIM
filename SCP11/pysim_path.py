@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 pySim path resolution: locates the pySim installation for ASN.1 codec and SAIP tool access."""
 import sys
 from pathlib import Path
@@ -45,12 +44,12 @@ def ensure_repo_pysim_on_path() -> Path | None:
     """Prepend an on-disk ``pySim`` checkout to ``sys.path`` when present.
 
     The on-disk tree is gitignored and treated as an **optional**
-    developer convenience (``git clone https://gitlab.com/osmocom/pysim.git pysim``)
-    for operators tracking an unreleased upstream branch.
+    developer convenience for work on pySim itself, a clone of the
+    pinned fork (``git clone https://github.com/hampushellsberg-dev/pysim.git pysim``).
     When this helper returns ``None``, callers must rely on the
-    pip-installed upstream package, which ``pip install -e '.[saip]'``
-    pulls from ``git+https://github.com/osmocom/pysim.git`` and makes
-    available as the ``pySim`` module.
+    installed package, which ``pip install -e .`` pulls as a base
+    dependency from ``git+https://github.com/hampushellsberg-dev/pysim.git``
+    and makes available as the ``pySim`` module.
     """
     for pysim_root in _candidate_pysim_roots():
         if pysim_root.is_dir() is False:
@@ -73,9 +72,10 @@ def describe_pysim_resolution() -> str:
     except ImportError as error:
         return (
             "No on-disk pySim checkout was found and the installed pySim package is unavailable. "
-            "Install the upstream tree via `pip install -e '.[saip]'` (recommended), or "
-            "`pip install 'pySim @ git+https://github.com/osmocom/pysim.git'`, or clone it manually "
-            "(`git clone https://gitlab.com/osmocom/pysim.git pysim`). "
+            "Install the pinned pySim fork: `pip install -e .` in a YggdraSIM checkout "
+            "(pySim is a base dependency), or "
+            "`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`, "
+            "or clone it (`git clone https://github.com/hampushellsberg-dev/pysim.git pysim`). "
             f"Checked: {checked_paths}. Import error: {type(error).__name__}: {error}."
         )
     module_path = Path(getattr(pySim, "__file__", "") or "").resolve()

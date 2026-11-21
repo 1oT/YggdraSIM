@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Polling watcher that auto-opens fresh SIMCARD profiles in the SAIP tooling.
 
@@ -20,7 +19,7 @@ Architecture:
    ``saip-diff-tui`` or the transcode TUI at the fresh profile.
 
 Polling (rather than inotify / fsevents) keeps the module dependency
-light — no extra wheels, portable to macOS / Windows / Linux. The
+light -- no extra wheels, portable to macOS / Windows / Linux. The
 default poll interval (2 s) is aligned with the shell REPL ergonomics:
 slow enough not to burn CPU, fast enough that a new ES10b download is
 visible within a breath.
@@ -230,26 +229,44 @@ class ProfileStoreWatcher:
 
 
 def default_profile_store_root(workspace_root: Path) -> Path:
-    """Resolve the simulator default profile-store root.
+    """Resolve the profile-store root the simulator writes to.
 
-    Mirrors ``SIMCARD.config.get_sim_profile_store_path``'s default,
-    but resolved relative to the caller-supplied workspace. We do the
-    import lazily so ``simcard_watch`` stays importable in contexts
+    Follows ``SimulatedSimCardEngine``: the configured profile store when
+    one is set, otherwise the ``profiles`` directory of the eUICC store.
+    The engine picks that store by EID. This watcher knows no EID, so it
+    takes the store only when the root holds exactly one, and falls back
+    to the workspace default otherwise; ``--store-root`` names another.
+
+    The imports are lazy so ``simcard_watch`` stays importable in contexts
     where the simulator-side packages are unavailable.
     """
+    workspace_default = Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
     try:
-        from SIMCARD.config import get_sim_profile_store_path
-        from SIMCARD.euicc_store import default_profile_store_path
-        from SIMCARD.config import get_sim_euicc_store_root
+        from SIMCARD.euicc_store import EUICC_MANIFEST_FILENAME, default_profile_store_path
+        from yggdrasim_common.card_backend import (
+            get_sim_euicc_store_root,
+            get_sim_profile_store_path,
+        )
     except ImportError:
-        return Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
+        return workspace_default
     explicit = str(get_sim_profile_store_path() or "").strip()
     if len(explicit) > 0:
         return Path(explicit).expanduser().resolve()
     euicc_root = str(get_sim_euicc_store_root() or "").strip()
     if len(euicc_root) == 0:
-        return Path(workspace_root) / "Workspace" / "SIMCARD" / "profile_store"
-    return Path(default_profile_store_path(euicc_root)).expanduser().resolve()
+        return workspace_default
+    try:
+        entries = sorted(Path(euicc_root).iterdir(), key=lambda entry: entry.name)
+    except OSError:
+        return workspace_default
+    stores = [
+        entry
+        for entry in entries
+        if entry.name.upper().startswith("EID_") and (entry / EUICC_MANIFEST_FILENAME).is_file()
+    ]
+    if len(stores) != 1:
+        return workspace_default
+    return Path(default_profile_store_path(str(stores[0]))).expanduser().resolve()
 
 
 def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:
@@ -260,7 +277,7 @@ def _build_default_tui_command(arrival: ProfileArrival) -> list[str]:
         )
     # Previous iterations of this hook invoked the diff TUI with the
     # same profile on both sides, which always produced "no
-    # differences" — useless for an operator. Instead drop the new
+    # differences" -- useless for an operator. Instead drop the new
     # profile into the profile-package shell with a three-command
     # inspect batch so the operator sees profile_name/iccid/imsi plus
     # the TREE of PE sections immediately.
@@ -292,14 +309,14 @@ def _expand_launcher_template(
 
     The accepted tokens are:
 
-    * ``{iccid}``         — the newly seen ICCID.
-    * ``{profile}``       — the preferred profile file path.
-    * ``{profile_path}``  — alias of ``{profile}``; kept for callers that
+    * ``{iccid}``         -- the newly seen ICCID.
+    * ``{profile}``       -- the preferred profile file path.
+    * ``{profile_path}``  -- alias of ``{profile}``; kept for callers that
       still use the original placeholder name.
-    * ``{profile_dir}``   — the per-profile directory.
-    * ``{manifest}``      — the manifest JSON path (empty string if the
+    * ``{profile_dir}``   -- the per-profile directory.
+    * ``{manifest}``      -- the manifest JSON path (empty string if the
       arrival did not ship a manifest).
-    * ``{python}``        — the source interpreter or frozen application
+    * ``{python}``        -- the source interpreter or frozen application
       launcher. Frozen ``{python} -m ...`` templates are translated only for
       modules on YggdraSIM's internal child allow-list.
 

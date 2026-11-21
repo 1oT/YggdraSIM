@@ -39,7 +39,7 @@ python -m Tools.CardBridge \
 
 The bridge prints a banner with the URL, the on-disk token file, and
 a short fingerprint. The full token never appears in the banner or in
-logs — operators retrieve it via `cat ~/.config/yggdrasim/card_bridge/8642.token`.
+logs -- operators retrieve it via `cat ~/.config/yggdrasim/card_bridge/8642.token`.
 
 **2. On the Raspberry Pi (where the tool runs):**
 
@@ -62,7 +62,7 @@ local copy in subsequent invocations.
 | Stream confidentiality | OpenSSH transport (ChaCha20-Poly1305 / AES-GCM). |
 | Stream integrity | OpenSSH MAC + SSH sequence numbers. |
 | Peer authentication | OpenSSH public-key auth (`~/.ssh/authorized_keys`). |
-| Authorization | Bearer token written 0600 by the bridge, presented in `Authorization: Bearer …` by the client. |
+| Authorization | Bearer token written 0600 by the bridge, presented in `Authorization: Bearer ...` by the client. |
 | Network exposure | Bridge binds to `127.0.0.1` by default. Non-loopback bind without a token is refused. |
 | Replay protection | SSH sequence numbers per session. |
 | DoS resistance | Per-peer auth-failure rate limit + lockout. |
@@ -80,7 +80,7 @@ local copy in subsequent invocations.
 | `--token-file` | `${XDG_CONFIG_HOME:-~/.config}/yggdrasim/card_bridge/<port>.token` | If the file exists, the bridge reads it; if missing, generates a fresh token and writes it 0600. |
 | `--no-token` | off | Run unauthenticated. Refused on non-loopback bind. |
 | `--audit` | off | Emit a header-only audit record per APDU. |
-| `--audit-full-apdu` | off | Also log full APDU and response hex. **Captures PIN material — only enable for forensic work on test cards.** |
+| `--audit-full-apdu` | off | Also log full APDU and response hex. **Captures PIN material -- only enable for forensic work on test cards.** |
 | `--audit-logger-name` | `yggdrasim.card_bridge.audit` | Name of the Python logger that receives audit records. |
 | `--apdu-timeout-ms` | `YGGDRASIM_HIL_APDU_TIMEOUT_MS`, fallback `5000` | Maximum PC/SC APDU wait time. Raise for slow eUICC operations over a tunnel. |
 
@@ -91,8 +91,8 @@ APDU relay; all routes mount under the bind URL.
 
 | Method | Path | Auth | Body | Response |
 |---|---|---|---|---|
-| GET | `/ping` | open | — | `pong\n` |
-| GET | `/status` | bearer | — | `{"reader", "atr", "authRequired", "tokenFingerprint", ...}` |
+| GET | `/ping` | open | -- | `pong\n` |
+| GET | `/status` | bearer | -- | `{"reader", "atr", "authRequired", "tokenFingerprint", ...}` |
 | POST | `/apdu` | bearer | `{"apdu": "<hex>", "sessionId": "<optional>"}` | `{"data": "<hex>", "sw1": "<hex>", "sw2": "<hex>"}` |
 | POST | `/card/reset` | bearer | `{}` | `{"status": "reset", "reader", "atr"}` |
 
@@ -102,8 +102,8 @@ route except `/ping` requires `Authorization: Bearer <token>`.
 
 ## See also
 
-- `guides/CARD_BRIDGE_GUIDE.md` — operator workflow, including
+- `guides/CARD_BRIDGE_GUIDE.md` -- operator workflow, including
   `~/.ssh/config` snippets and troubleshooting.
-- `yggdrasim_common/card_bridge_auth.py` — shared token utilities.
-- `Tools/HilBridge/apdu_relay.py` — relay HTTP handler (also
+- `yggdrasim_common/card_bridge_auth.py` -- shared token utilities.
+- `Tools/HilBridge/apdu_relay.py` -- relay HTTP handler (also
   consumed by the in-tree HIL bridge).

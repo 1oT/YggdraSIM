@@ -21,7 +21,10 @@ These tests pin three distinct invariants:
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 from typing import Any
 
 from SIMCARD.saip_profile import _FILE_SPECS
@@ -63,6 +66,23 @@ class PySimRegistryShapeTests(unittest.TestCase):
                     ("TR", "LF", "CY", "BT"),
                     f"pe_name {pe_name!r} unexpectedly retained file_type {snap.file_type!r}",
                 )
+
+    def test_first_build_names_the_phonebook_control_rows(self) -> None:
+        # Stock pySim labels the DF.PHONEBOOK EF.PBC rows EF.ADN and the SAIP
+        # JSON codec renames them; the registry has to do it itself, so the
+        # first build runs in a process where nothing else has imported pySim.
+        probe = (
+            "from SIMCARD.saip_pysim_specs import pysim_file_template_registry\n"
+            "raise SystemExit(0 if 'ef-pbc' in pysim_file_template_registry() else 3)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            cwd=Path(__file__).resolve().parent.parent,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:] + result.stdout[-2000:])
 
     def test_cache_reset_repopulates_registry(self) -> None:
         first = pysim_file_template_registry()

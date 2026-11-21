@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge simulated modem channel: bridges AT+CSIM commands from a serial modem to the card relay."""
 from __future__ import annotations
 
@@ -36,11 +35,11 @@ class SimulatedModemCardChannel:
         self._connection = connection
         self._pending_responses: dict[int, PendingResponse] = {}
         self._current_node_by_channel: dict[int, str] = {0: "3F00"}
-        # ETSI TS 102 221 §8.4.2.3 / TS 102 222 §6.6: the "currently
-        # selected application" is sticky per logical channel and only
-        # changes on an explicit SELECT-by-AID. A modem that briefly
-        # walks back through MF (e.g. to read EF.ARR at 2F06) must not
-        # lose the USIM scope, otherwise every subsequent
+        # ETSI TS 102 221 v18.4 §8.3 / §8.5.0 (file referencing, application
+        # selection): the "currently selected application" is sticky per
+        # logical channel and only changes on an explicit SELECT-by-AID.
+        # A modem that briefly walks back through MF (e.g. to read EF.ARR
+        # at 2F06) must not lose the USIM scope, otherwise every subsequent
         # ``00A40804047FFF<EF>`` collapses to 6A82 even though the EF
         # is wired up. ``_active_application_root_by_channel`` carries
         # the sticky pointer so the 7FFF alias keeps resolving across
@@ -178,7 +177,8 @@ class SimulatedModemCardChannel:
             if sw1 == 0x90:
                 landed_id = str(state.current_node_id or previous_node_id)
                 self._current_node_by_channel[logical_channel] = landed_id
-                # TS 102 221 §8.4.2.3: SELECT-by-AID (P1=0x04) and
+                # TS 102 221 v18.4 §8.5.0 (application selection):
+                # SELECT-by-AID (P1=0x04) and
                 # any other select that lands on an ADF rewires the
                 # "currently selected application" anchor used by the
                 # 7FFF alias. Path-rooted (P1=0x08) and FID selects
@@ -240,8 +240,8 @@ class SimulatedModemCardChannel:
         lands inside an ADF subtree.
 
         The pointer is *not* cleared when the cursor walks back to MF
-        (or into a non-ADF DF such as DF.TELECOM) -- TS 102 221
-        §8.4.2.3 only switches the "currently selected application"
+        (or into a non-ADF DF such as DF.TELECOM) -- TS 102 221 v18.4
+        §8.5.0 only switches the "currently selected application"
         on an explicit SELECT-by-AID (or path/FID select that
         actually targets a different ADF root).
         """
@@ -352,8 +352,8 @@ class SimulatedModemCardChannel:
         return None
 
     def _current_application_root_id(self, logical_channel: int) -> str:
-        # Sticky-first lookup: TS 102 221 §8.4.2.3 ties the 7FFF
-        # alias to the *currently selected application*, not to the
+        # Sticky-first lookup: TS 102 221 v18.4 §8.3 (file referencing)
+        # ties the 7FFF alias to the *currently selected application*, not to the
         # current EF cursor. The application stays selected until an
         # explicit SELECT-by-AID switches it, even when the cursor
         # transiently walks to MF/2F06 or to a non-ADF DF.

@@ -2,22 +2,22 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Round-6 Sweep 4 — structured round-trip encoder coverage for the
+Round-6 Sweep 4 -- structured round-trip encoder coverage for the
 Round-4 / Round-5 PE-body decoders.
 
 Each test asserts two invariants for one field:
 
-1. **Hex passthrough** — when ``hex`` is present on the decoded form
+1. **Hex passthrough** -- when ``hex`` is present on the decoded form
    the encoder returns identical bytes (lossless verbatim path that
    keeps legacy JSON documents stable).
-2. **Structured re-encode** — when ``hex`` is stripped the encoder
+2. **Structured re-encode** -- when ``hex`` is stripped the encoder
    must rebuild the on-card bytes from the decoder's spec-named
    fields (OID dotted string, bit flags, TLV items, etc.).
 
 References:
-  * SAIP §2.8.2 (applicationProviderIdentifier)
-  * SAIP §2.6.3 Table 2-6 (globalServiceParameters)
-  * GlobalPlatform Card Spec Amd A §A.3 (implicitSelectionParameter)
+  * TCA SAIP v3.4.1 §8.7.3 / GPC v2.3.1 §6.5.1.7 (applicationProviderIdentifier)
+  * TCA SAIP v3.4.1 §8.7.3 / GPC v2.3.1 §8.1.3 (globalServiceParameters)
+  * GPC v2.3.1 §11.1.7 Table 11-15 (implicitSelectionParameter)
   * GlobalPlatform Card Spec Amd C §5 (contactlessProtocolParameters)
   * GlobalPlatform Card Spec Amd C §6 (userInteractionContactlessParameters)
 """

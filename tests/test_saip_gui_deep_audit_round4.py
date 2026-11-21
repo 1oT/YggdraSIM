@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ class Round4Sweep01ActionSpecRegisterParity(unittest.TestCase):
 
 
 class Round4Sweep02UniqueActionIds(unittest.TestCase):
-    """Angle 2: no duplicate ``id="saip.…"`` strings inside ``saip.py``."""
+    """Angle 2: no duplicate ``id="saip...."`` strings inside ``saip.py``."""
 
     def test_no_duplicate_action_ids(self) -> None:
         self.assertEqual(duplicate_saip_action_ids(), [])

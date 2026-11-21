@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from SCP11.providers import Sgp26LocalProvider
+from SCP11.live.providers import Sgp26LocalProvider
 
 
 def build_cert(subject_cn, issuer_name, issuer_key, public_key):

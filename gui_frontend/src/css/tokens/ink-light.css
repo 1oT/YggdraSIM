@@ -6,14 +6,14 @@
 
 /* -- Theme: Ink · light (paper field + steel blue accent) ---------------- */
 html[data-theme="ink-light"] {
-  --bg: #f5f4f1;
+  --bg: #edebe6;
   --bg-elev: #ffffff;
-  --bg-elev-2: #ebe8e2;
+  --bg-elev-2: #e2dfd8;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(61, 90, 128, 0.07);
-  --border: rgba(40, 48, 60, 0.14);
-  --border-strong: rgba(40, 48, 60, 0.28);
+  --border: rgba(40, 48, 60, 0.24);
+  --border-strong: rgba(40, 48, 60, 0.44);
   --fg: #1e2430;
   --fg-dim: #4f5d6e;
   --fg-muted: var(--fg-dim);
@@ -30,12 +30,12 @@ html[data-theme="ink-light"] {
   --warn-soft: rgba(184, 98, 10, 0.14);
   --fail: #b33a3a;
   --fail-soft: rgba(179, 58, 58, 0.14);
-  --code-bg: #eceae6;
+  --code-bg: #e9e6e0;
   --kbd-bg: rgba(248, 247, 244, 0.98);
-  --shadow-card: 0 10px 26px rgba(28, 35, 48, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(28, 35, 48, 0.13);
+  --shadow-card: 0 1px 2px rgba(28, 35, 48, 0.06), 0 8px 22px -6px rgba(28, 35, 48, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(28, 35, 48, 0.08), 0 16px 34px -8px rgba(28, 35, 48, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 0%, rgba(52, 80, 122, 0.10), transparent 42%),
     radial-gradient(circle at 85% 95%, rgba(61, 104, 104, 0.08), transparent 46%),

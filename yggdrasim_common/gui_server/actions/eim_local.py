@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 eIM-local Command Center actions.
 
 Registers the full operator surface that ``python -m SCP11.eim_local``
@@ -33,6 +32,7 @@ import re
 import threading
 from typing import Any, AsyncIterator
 
+from ..live_trace import configure_channel_trace, live_trace_sink
 from .registry import ActionContext, ActionField, ActionSpec, get_registry
 
 
@@ -61,14 +61,18 @@ def _build_eim_session() -> Any:
     """Instantiate an ``EimLocalSession`` using the default PC/SC channel."""
     from SCP11.eim_local.session import EimLocalSession
 
-    return EimLocalSession()
+    session = EimLocalSession()
+    channel = getattr(session, "apdu_channel", None)
+    if channel is not None:
+        configure_channel_trace(channel)
+    return session
 
 
 def _hex_preview(payload: Any, max_chars: int = 160) -> str:
     text = bytes(payload or b"").hex().upper()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + "…"
+    return text[:max_chars] + "..."
 
 
 # ----------------------------------------------------------------------
@@ -103,7 +107,7 @@ async def _dispatch_hotfolder_campaign(
 
     def _worker() -> None:
         try:
-            _emit("info", "loading EimLocalSession…")
+            _emit("info", "loading EimLocalSession...")
             from SCP11.eim_local.session import EimLocalSession
 
             session = EimLocalSession()
@@ -146,7 +150,7 @@ async def _dispatch_hotfolder_campaign(
                 f"hotfolder campaign finished with {len(rows)} cycle(s).",
                 report=report,
             )
-        except Exception as error:  # noqa: BLE001 — surface every failure mode
+        except Exception as error:  # noqa: BLE001 -- surface every failure mode
             import traceback
 
             _emit("error", f"{type(error).__name__}: {error}")
@@ -426,7 +430,7 @@ HOTFOLDER_CAMPAIGN_SPEC = ActionSpec(
 
 
 def _dispatch_status(ctx: ActionContext) -> dict[str, Any]:
-    """Runtime snapshot — mirrors the shell STATUS command."""
+    """Runtime snapshot -- mirrors the shell STATUS command."""
     session = _build_eim_session()
     state = session.state
     eim_state = session.eim_state
@@ -474,7 +478,7 @@ def _dispatch_status(ctx: ActionContext) -> dict[str, Any]:
 def _dispatch_discover(ctx: ActionContext) -> dict[str, Any]:
     """Run a card-touching discovery probe and scrub the snapshot for JSON."""
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     snapshot: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -493,7 +497,7 @@ def _dispatch_discover(ctx: ActionContext) -> dict[str, Any]:
         "profile_count": profile_count,
         "snapshot": scrubbed,
         "note": "; ".join(note_parts) if note_parts else (
-            f"discovery complete — EID={eid_value or '-'} · {profile_count} profile(s)"
+            f"discovery complete -- EID={eid_value or '-'} · {profile_count} profile(s)"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -520,7 +524,7 @@ def _dispatch_list_profile_aliases(ctx: ActionContext) -> dict[str, Any]:
 
 def _dispatch_get_eim_config(ctx: ActionContext) -> dict[str, Any]:
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     raw_hex = ""
     note_parts: list[str] = []
     try:
@@ -582,7 +586,7 @@ def _dispatch_eim_package_lint(
     session = _build_eim_session()
     strict_b = bool(strict_executable)
     path_s = str(package_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     report: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -618,7 +622,7 @@ def _dispatch_eim_certs_inventory(
     session = _build_eim_session()
     path_s = str(package_path or "").strip()
     cert_s = str(cert_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     payload: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -651,7 +655,7 @@ def _dispatch_hotfolder_list(
 ) -> dict[str, Any]:
     session = _build_eim_session()
     dir_s = str(hotfolder_dir or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     files: list[str] = []
     resolved_dir = ""
     note_parts: list[str] = []
@@ -702,7 +706,7 @@ def _dispatch_error_codes(
     tables: list[tuple[str, dict[int, str]]] = []
     if target in ("ALL", "SGP22"):
         tables.append(("SGP.22 DownloadErrorCode", SGP22_DOWNLOAD_ERROR_CODE))
-        tables.append(("SGP.22 ES10b ProfileState Result", SGP22_ES10B_PROFILE_STATE_RESULT))
+        tables.append(("SGP.22 ES10c ProfileState Result", SGP22_ES10B_PROFILE_STATE_RESULT))
         tables.append(
             ("SGP.22 ProfileInstallationResultErrorReason", SGP22_PROFILE_INSTALLATION_RESULT_REASON),
         )
@@ -785,7 +789,7 @@ def _run_profile_mutation(
     if len(ident_s) == 0:
         raise ValueError("identifier is required (iccid, aid or alias).")
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -814,7 +818,7 @@ def _dispatch_store_metadata(
 ) -> dict[str, Any]:
     session = _build_eim_session()
     path_s = str(metadata_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -841,7 +845,7 @@ def _dispatch_update_metadata(
 ) -> dict[str, Any]:
     session = _build_eim_session()
     path_s = str(metadata_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -861,35 +865,6 @@ def _dispatch_update_metadata(
     }
 
 
-def _dispatch_delete_eim(
-    ctx: ActionContext,
-    *,
-    eim_id: Any = None,
-) -> dict[str, Any]:
-    eim_s = str(eim_id or "").strip()
-    if len(eim_s) == 0:
-        raise ValueError("eim_id is required.")
-    session = _build_eim_session()
-    trace_sink = io.StringIO()
-    response_hex = ""
-    note_parts: list[str] = []
-    try:
-        with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            response = session.delete_eim(eim_s)
-        response_hex = bytes(response or b"").hex().upper()
-    except Exception as error:  # noqa: BLE001
-        note_parts.append(f"{type(error).__name__}: {error}")
-
-    return {
-        "ok": len(note_parts) == 0,
-        "eim_id": eim_s,
-        "response_hex": response_hex,
-        "response_length": len(response_hex) // 2,
-        "note": "; ".join(note_parts) if note_parts else f"DeleteEim completed ({len(response_hex) // 2} bytes).",
-        "trace": _strip_ansi(trace_sink.getvalue()),
-    }
-
-
 def _dispatch_euicc_memory_reset(
     ctx: ActionContext,
     *,
@@ -897,10 +872,10 @@ def _dispatch_euicc_memory_reset(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — eUICC memory reset is destructive.")
+        raise ValueError("confirm must be true -- eUICC memory reset is destructive.")
     session = _build_eim_session()
     path_s = str(package_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -927,7 +902,7 @@ def _dispatch_eim_package_issue(
 ) -> dict[str, Any]:
     session = _build_eim_session()
     path_s = str(package_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     package_file = ""
     package_type = ""
     result_len = 0
@@ -959,7 +934,7 @@ def _dispatch_eim_package_issue(
 
 def _dispatch_scan(ctx: ActionContext) -> dict[str, Any]:
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     snapshot: dict[str, Any] = {}
     try:
@@ -977,7 +952,7 @@ def _dispatch_scan(ctx: ActionContext) -> dict[str, Any]:
         "profile_count": len(profiles) if isinstance(profiles, list) else 0,
         "snapshot": scrubbed,
         "note": "; ".join(note_parts) if note_parts else (
-            f"scan complete — EID={eid_value or '-'}"
+            f"scan complete -- EID={eid_value or '-'}"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -1094,7 +1069,7 @@ def _dispatch_eim_load_profile(
     ident_s = str(identifier or "").strip()
     path_s = str(profile_path or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     response_hex = ""
     note_parts: list[str] = []
     try:
@@ -1122,7 +1097,7 @@ def _dispatch_eim_load_profile(
 
 def _dispatch_isdr_get_eim_config(ctx: ActionContext) -> dict[str, Any]:
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     raw_hex = ""
     note_parts: list[str] = []
     try:
@@ -1142,136 +1117,27 @@ def _dispatch_isdr_get_eim_config(ctx: ActionContext) -> dict[str, Any]:
     }
 
 
-def _dispatch_isdr_delete_eim(
-    ctx: ActionContext,
-    *,
-    eim_id: Any = None,
-) -> dict[str, Any]:
-    eim_s = str(eim_id or "").strip()
-    if len(eim_s) == 0:
-        raise ValueError("eim_id is required.")
-    session = _build_eim_session()
-    trace_sink = io.StringIO()
-    response_hex = ""
-    note_parts: list[str] = []
-    try:
-        with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            session.select_isdr()
-            response = session.delete_eim(eim_s)
-        response_hex = bytes(response or b"").hex().upper()
-    except Exception as error:  # noqa: BLE001
-        note_parts.append(f"{type(error).__name__}: {error}")
-
-    return {
-        "ok": len(note_parts) == 0,
-        "eim_id": eim_s,
-        "response_hex": response_hex,
-        "response_length": len(response_hex) // 2,
-        "note": "; ".join(note_parts) if note_parts else f"ISD-R DeleteEim completed ({len(response_hex) // 2} bytes).",
-        "trace": _strip_ansi(trace_sink.getvalue()),
-    }
-
-
-def _dispatch_isdr_add_eim(
-    ctx: ActionContext,
-    *,
-    package_path: Any = None,
-    initial: bool = False,
-) -> dict[str, Any]:
-    path_s = str(package_path or "").strip()
-    session = _build_eim_session()
-    trace_sink = io.StringIO()
-    response_hex = ""
-    note_parts: list[str] = []
-    try:
-        with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            session.select_isdr()
-            response = session.add_eim(
-                package_path=path_s,
-                source_mode="isdr",
-            )
-        response_hex = bytes(response or b"").hex().upper()
-    except Exception as error:  # noqa: BLE001
-        note_parts.append(f"{type(error).__name__}: {error}")
-
-    kind = "ISD-R AddInitialEim" if initial else "ISD-R AddEim"
-    return {
-        "ok": len(note_parts) == 0,
-        "kind": kind,
-        "package_path": path_s,
-        "response_hex": response_hex,
-        "response_length": len(response_hex) // 2,
-        "note": "; ".join(note_parts) if note_parts else f"{kind} completed ({len(response_hex) // 2} bytes).",
-        "trace": _strip_ansi(trace_sink.getvalue()),
-    }
-
-
-def _dispatch_add_eim(
-    ctx: ActionContext,
-    *,
-    package_path: Any = None,
-    initial: bool = False,
-) -> dict[str, Any]:
-    path_s = str(package_path or "").strip()
-    session = _build_eim_session()
-    trace_sink = io.StringIO()
-    response_hex = ""
-    note_parts: list[str] = []
-    try:
-        with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            if initial:
-                response = session.add_initial_eim(package_path=path_s, source_mode="package")
-            else:
-                response = session.add_eim(package_path=path_s, source_mode="package")
-        response_hex = bytes(response or b"").hex().upper()
-    except Exception as error:  # noqa: BLE001
-        note_parts.append(f"{type(error).__name__}: {error}")
-
-    kind = "AddInitialEim" if initial else "AddEim"
-    return {
-        "ok": len(note_parts) == 0,
-        "kind": kind,
-        "package_path": path_s,
-        "response_hex": response_hex,
-        "response_length": len(response_hex) // 2,
-        "note": "; ".join(note_parts) if note_parts else f"{kind} completed ({len(response_hex) // 2} bytes).",
-        "trace": _strip_ansi(trace_sink.getvalue()),
-    }
-
-
 def _dispatch_eim_package_explain(
     ctx: ActionContext,
     *,
     package_path: Any = None,
 ) -> dict[str, Any]:
     path_s = str(package_path or "").strip()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     payload: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
         with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
-            from SCP11.eim_local.eim_package_codec import EimPackageDocument
-
-            doc = EimPackageDocument.load(path=path_s) if len(path_s) > 0 else EimPackageDocument.load()
-            payload = {
-                "package_path": str(doc.path),
-                "package_type": str(doc.package_type or ""),
-                "package_id": str(doc.package_id or ""),
-                "eim_id": str(doc.eim_id or ""),
-                "title": str(doc.title or ""),
-                "version": str(doc.version or ""),
-                "operations": len(doc.operations or []),
-                "model_only": bool(doc.model_only),
-                "metadata_present": doc.metadata is not None,
-            }
+            payload = _build_eim_session().explain_eim_package(path_s) or {}
     except Exception as error:  # noqa: BLE001
         note_parts.append(f"{type(error).__name__}: {error}")
 
+    package_type = str((payload.get("package") or {}).get("type", "")).strip()
     return {
         "ok": len(note_parts) == 0,
         "explain": _scrub_bytes(payload),
         "note": "; ".join(note_parts) if note_parts else (
-            f"package explained: {payload.get('package_type', '-')}"
+            f"package explained: {package_type or '-'}"
         ),
         "trace": _strip_ansi(trace_sink.getvalue()),
     }
@@ -1284,7 +1150,7 @@ def _dispatch_eim_package_issue_all(
 ) -> dict[str, Any]:
     dir_s = str(package_dir or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     results: list[tuple[str, str, int]] = []
     note_parts: list[str] = []
     try:
@@ -1294,8 +1160,8 @@ def _dispatch_eim_package_issue_all(
         note_parts.append(f"{type(error).__name__}: {error}")
 
     rows = [
-        {"file": str(f), "type": str(t), "result_len": int(l)}
-        for f, t, l in results
+        {"file": str(name), "type": str(kind), "result_len": int(length)}
+        for name, kind, length in results
     ]
     return {
         "ok": len(note_parts) == 0,
@@ -1318,7 +1184,7 @@ def _dispatch_load_eim_package(
     if len(path_s) == 0:
         raise ValueError("package_path is required.")
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     report: dict[str, Any] = {}
     note_parts: list[str] = []
     try:
@@ -1371,7 +1237,7 @@ def _dispatch_hotfolder_export(
 ) -> dict[str, Any]:
     path_s = str(output_path or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     exported = ""
     try:
@@ -1396,7 +1262,7 @@ def _dispatch_hotfolder_aggregate(
 ) -> dict[str, Any]:
     dir_s = str(campaign_dirs or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     aggregated: dict[str, Any] = {}
     try:
@@ -1449,7 +1315,7 @@ def _dispatch_hotfolder_cycle(
 ) -> dict[str, Any]:
     dir_s = str(hotfolder_dir or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     rows: list[dict[str, Any]] = []
     try:
@@ -1475,7 +1341,7 @@ def _dispatch_hotfolder_fetch(
 ) -> dict[str, Any]:
     dir_s = str(hotfolder_dir or "").strip()
     session = _build_eim_session()
-    trace_sink = io.StringIO()
+    trace_sink = live_trace_sink()
     note_parts: list[str] = []
     meta: dict[str, Any] = {}
     try:
@@ -1631,8 +1497,8 @@ EIM_PACKAGE_LINT_SPEC = ActionSpec(
     title="Lint eIM package",
     description=(
         "Validate an eIM package document: structural lint + optional "
-        "strict-executable mode that flags model-only packages when the "
-        "runtime is not in allow_model_only / mock_mode."
+        "strict-executable mode that flags packages EIM-PACKAGE-ISSUE does "
+        "not run (queued with Import package document, or retired)."
     ),
     inputs=(
         ActionField(
@@ -1721,7 +1587,7 @@ ERROR_CODES_SPEC = ActionSpec(
     title="Error code reference",
     description=(
         "Render the SGP.02 / SGP.22 / SGP.32 error-code vocabulary as "
-        "grouped tables. Pure reference data — no card or file access."
+        "grouped tables. Pure reference data -- no card or file access."
     ),
     inputs=(
         ActionField(
@@ -1755,14 +1621,14 @@ ENABLE_PROFILE_SPEC = ActionSpec(
             label="ICCID / AID / alias",
             kind="string",
             required=True,
-            placeholder="89014104… or A0000005591010FFFFFFFF8900001100 or mnoA",
+            placeholder="89014104... or A0000005591010FFFFFFFF8900001100 or mnoA",
             help="Target profile; accepts iccid digits, hex AID, or alias from LIST.",
         ),
     ),
     output_kind="json",
     dispatcher=_dispatch_enable_profile,
     requires_card=True,
-    tags=("eim", "profile", "enable"),
+    tags=("destructive", "eim", "profile", "enable"),
 )
 
 
@@ -1783,7 +1649,7 @@ DISABLE_PROFILE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_disable_profile,
     requires_card=True,
-    tags=("eim", "profile", "disable"),
+    tags=("destructive", "eim", "profile", "disable"),
 )
 
 
@@ -1828,7 +1694,7 @@ STORE_METADATA_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_store_metadata,
     requires_card=True,
-    tags=("eim", "metadata", "store"),
+    tags=("destructive", "eim", "metadata", "store"),
 )
 
 
@@ -1852,28 +1718,7 @@ UPDATE_METADATA_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_update_metadata,
     requires_card=True,
-    tags=("eim", "metadata", "update"),
-)
-
-
-DELETE_EIM_SPEC = ActionSpec(
-    id="eim_local.delete_eim",
-    subsystem="Local eIM",
-    title="Delete eIM",
-    description="Issue DeleteEim for a given eim_id via the local ISD-R.",
-    inputs=(
-        ActionField(
-            name="eim_id",
-            label="eIM id",
-            kind="string",
-            required=True,
-            help="eIM identifier to delete from the card.",
-        ),
-    ),
-    output_kind="json",
-    dispatcher=_dispatch_delete_eim,
-    requires_card=True,
-    tags=("eim", "delete", "destructive"),
+    tags=("destructive", "eim", "metadata", "update"),
 )
 
 
@@ -1883,7 +1728,7 @@ EUICC_MEMORY_RESET_SPEC = ActionSpec(
     title="eUICC memory reset",
     description=(
         "Issue eUICCMemoryReset using the current eIM package's reset "
-        "request / options. Destructive — requires confirm=true."
+        "request / options. Destructive -- requires confirm=true."
     ),
     inputs=(
         ActionField(
@@ -2078,7 +1923,7 @@ LOAD_PROFILE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_eim_load_profile,
     requires_card=True,
-    tags=("eim", "profile", "load"),
+    tags=("destructive", "eim", "profile", "load"),
 )
 
 ISDR_GET_EIM_CONFIG_SPEC = ActionSpec(
@@ -2096,51 +1941,49 @@ ISDR_GET_EIM_CONFIG_SPEC = ActionSpec(
     tags=("eim", "isdr", "config", "read"),
 )
 
-ISDR_DELETE_EIM_SPEC = ActionSpec(
-    id="eim_local.isdr_delete_eim",
-    subsystem="Local eIM",
-    title="Delete eIM (ISD-R path)",
-    description=(
-        "Issue DeleteEim for a given eIM ID via the ISD-R select path. "
-        "Destructive — removes the eIM registration from the card."
-    ),
-    inputs=(
-        ActionField(
-            name="eim_id",
-            label="eIM ID",
-            kind="string",
-            required=True,
-            help="eIM identifier to delete from the card.",
-        ),
-    ),
-    output_kind="json",
-    dispatcher=_dispatch_isdr_delete_eim,
-    requires_card=True,
-    tags=("eim", "isdr", "delete", "destructive"),
-)
+def _dispatch_add_initial_eim_package(
+    ctx: ActionContext,
+    *,
+    package_path: Any = None,
+    isdr: bool = False,
+) -> dict[str, Any]:
+    """ES10b.AddInitialEim 'BF57' (SGP.32 v1.3 §5.9.4) from an add_initial_eim package, on the first reader.
 
-ISDR_ADD_EIM_SPEC = ActionSpec(
-    id="eim_local.isdr_add_eim",
-    subsystem="Local eIM",
-    title="Add eIM (ISD-R path)",
-    description=(
-        "Install an eIM on the card via the ISD-R select path using "
-        "ISD-R handshake mode."
-    ),
-    inputs=(
-        ActionField(
-            name="package_path",
-            label="Package path",
-            kind="path",
-            required=False,
-            help="Path to the eIM package; leave blank for the configured default.",
-        ),
-    ),
-    output_kind="json",
-    dispatcher=lambda ctx, **kw: _dispatch_isdr_add_eim(ctx, initial=False, **kw),
-    requires_card=True,
-    tags=("eim", "isdr", "add"),
-)
+    Both actions send the package's EimConfigurationData; the ISD-R handshake
+    form they used to send instead ({80 certificate, 81 endpoint, 82
+    matchingId}) is no SGP.32 structure.
+    """
+    from .eim_local_ops import _card_session
+    from .scp11_local import _close_channel
+
+    path_s = str(package_path or "").strip()
+    trace_sink = live_trace_sink()
+    response_hex = ""
+    note_parts: list[str] = []
+    channel = None
+    try:
+        session, channel = _card_session("")
+        with contextlib.redirect_stdout(trace_sink), contextlib.redirect_stderr(trace_sink):
+            response = session.add_initial_eim(
+                package_path=path_s,
+                source_mode="package_isdr" if isdr else "package",
+            )
+        response_hex = bytes(response or b"").hex().upper()
+    except Exception as error:  # noqa: BLE001 -- the action reports any failure as its note
+        note_parts.append(f"{type(error).__name__}: {error}")
+    finally:
+        _close_channel(channel)
+    kind = "ISD-R AddInitialEim" if isdr else "AddInitialEim"
+    return {
+        "ok": len(note_parts) == 0,
+        "kind": kind,
+        "package_path": path_s,
+        "response_hex": response_hex,
+        "response_length": len(response_hex) // 2,
+        "note": "; ".join(note_parts) if note_parts else f"{kind} completed ({len(response_hex) // 2} bytes).",
+        "trace": _strip_ansi(trace_sink.getvalue()),
+    }
+
 
 ISDR_ADD_INITIAL_EIM_SPEC = ActionSpec(
     id="eim_local.isdr_add_initial_eim",
@@ -2160,32 +2003,9 @@ ISDR_ADD_INITIAL_EIM_SPEC = ActionSpec(
         ),
     ),
     output_kind="json",
-    dispatcher=lambda ctx, **kw: _dispatch_isdr_add_eim(ctx, initial=True, **kw),
+    dispatcher=lambda ctx, **kw: _dispatch_add_initial_eim_package(ctx, isdr=True, **kw),
     requires_card=True,
-    tags=("eim", "isdr", "add-initial"),
-)
-
-ADD_EIM_SPEC = ActionSpec(
-    id="eim_local.add_eim",
-    subsystem="Local eIM",
-    title="Add eIM (ES10b path)",
-    description=(
-        "Install an eIM on the card using the ES10b package delivery "
-        "path. Uses the local session + package contents."
-    ),
-    inputs=(
-        ActionField(
-            name="package_path",
-            label="Package path",
-            kind="path",
-            required=False,
-            help="Path to the eIM package; leave blank for the configured default.",
-        ),
-    ),
-    output_kind="json",
-    dispatcher=lambda ctx, **kw: _dispatch_add_eim(ctx, initial=False, **kw),
-    requires_card=True,
-    tags=("eim", "add"),
+    tags=("destructive", "eim", "isdr", "add-initial"),
 )
 
 ADD_INITIAL_EIM_SPEC = ActionSpec(
@@ -2206,9 +2026,9 @@ ADD_INITIAL_EIM_SPEC = ActionSpec(
         ),
     ),
     output_kind="json",
-    dispatcher=lambda ctx, **kw: _dispatch_add_eim(ctx, initial=True, **kw),
+    dispatcher=lambda ctx, **kw: _dispatch_add_initial_eim_package(ctx, isdr=False, **kw),
     requires_card=True,
-    tags=("eim", "add-initial"),
+    tags=("destructive", "eim", "add-initial"),
 )
 
 EIM_PACKAGE_EXPLAIN_SPEC = ActionSpec(
@@ -2216,9 +2036,10 @@ EIM_PACKAGE_EXPLAIN_SPEC = ActionSpec(
     subsystem="Local eIM",
     title="Explain eIM package",
     description=(
-        "Load an eIM package document and surface its structure: "
-        "package type, ID, eIM ID, title, version, operation count, "
-        "and metadata presence."
+        "Read an eIM package file and show what it would send: package "
+        "type and command tag, runtime hints, the signing certificate, "
+        "the identity defaults, and the lint report. Same payload as the "
+        "shell's EIM-PACKAGE-EXPLAIN."
     ),
     inputs=(
         ActionField(
@@ -2241,7 +2062,7 @@ EIM_PACKAGE_ISSUE_ALL_SPEC = ActionSpec(
     title="Issue all eIM packages",
     description=(
         "Iterate every eIM package file in the configured directory "
-        "and issue each one to the card. Error-tolerant — individual "
+        "and issue each one to the card. Error-tolerant -- individual "
         "failures are recorded in the results."
     ),
     inputs=(
@@ -2290,7 +2111,7 @@ LOAD_EIM_PACKAGE_SPEC = ActionSpec(
     output_kind="json",
     dispatcher=_dispatch_load_eim_package,
     requires_card=True,
-    tags=("eim", "package", "load"),
+    tags=("destructive", "eim", "package", "load"),
 )
 
 EIM_ACKNOWLEDGE_SPEC = ActionSpec(
@@ -2492,7 +2313,6 @@ get_registry().register(DISABLE_PROFILE_SPEC)
 get_registry().register(DELETE_PROFILE_SPEC)
 get_registry().register(STORE_METADATA_SPEC)
 get_registry().register(UPDATE_METADATA_SPEC)
-get_registry().register(DELETE_EIM_SPEC)
 get_registry().register(EUICC_MEMORY_RESET_SPEC)
 get_registry().register(EIM_PACKAGE_ISSUE_SPEC)
 get_registry().register(SCAN_SPEC)
@@ -2502,10 +2322,7 @@ get_registry().register(RESP_LOG_FILTER_SPEC)
 get_registry().register(COUNTER_SPEC)
 get_registry().register(LOAD_PROFILE_SPEC)
 get_registry().register(ISDR_GET_EIM_CONFIG_SPEC)
-get_registry().register(ISDR_DELETE_EIM_SPEC)
-get_registry().register(ISDR_ADD_EIM_SPEC)
 get_registry().register(ISDR_ADD_INITIAL_EIM_SPEC)
-get_registry().register(ADD_EIM_SPEC)
 get_registry().register(ADD_INITIAL_EIM_SPEC)
 get_registry().register(EIM_PACKAGE_EXPLAIN_SPEC)
 get_registry().register(EIM_PACKAGE_ISSUE_ALL_SPEC)

@@ -14,7 +14,7 @@
 
 .saip-val-dock {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--surface-alt);
   display: flex;
   flex-direction: column;
@@ -108,7 +108,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg-muted);
@@ -164,7 +164,7 @@
 .saip-val-sev {
   display: inline-block;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -215,7 +215,7 @@
   padding: 0 5px;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   color: var(--fg-muted);
   font-size: 11px;
   cursor: pointer;
@@ -354,7 +354,7 @@
 .saip-val-domain-chip {
   font-size: 9px;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   vertical-align: middle;
 }
 

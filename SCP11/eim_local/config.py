@@ -105,6 +105,9 @@ class EimLocalConfig(LocalAccessConfig):
     EIM_NOTIFICATION_MAX_PENDING: int = 0
     EIM_NO_PACKAGE_RESULT_CODE: int = 1
     EIM_POLL_INCLUDE_FIXED_FIXTURES: bool = True
+    # Profile state on the eIM shell is driven by PSMO packages, so a local
+    # load leaves the new profile disabled (LocalAccessConfig turns this on).
+    AUTO_ENABLE_AFTER_LOAD: bool = False
 
     EIM_BIP_ENDPOINT: str = "https://eim.example.test/gsma/rsp2/asn1"
     SMDPP_BIP_ENDPOINT: str = "https://smdpp.example.test/gsma/rsp2/es9plus"

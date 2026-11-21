@@ -20,11 +20,7 @@
 .cc-action-datasheet-meta {
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: linear-gradient(
-    135deg,
-    color-mix(in oklab, var(--accent) 10%, var(--bg-elev)) 0%,
-    var(--bg-elev) 60%
-  );
+  background: var(--bg-elev);
   padding: 2px 0;
 }
 

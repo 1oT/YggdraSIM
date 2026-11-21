@@ -49,7 +49,7 @@ from Tools.ProfilePackage.saip_profile_diff import (
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — minimal jsonified SAIP documents
+# Fixtures -- minimal jsonified SAIP documents
 # ---------------------------------------------------------------------------
 
 
@@ -374,7 +374,7 @@ class TestArgumentValidation:
 
 
 # ---------------------------------------------------------------------------
-# Sanity — every category and severity constant is also in the public tuple.
+# Sanity -- every category and severity constant is also in the public tuple.
 # ---------------------------------------------------------------------------
 
 

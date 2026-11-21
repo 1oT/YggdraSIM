@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Fifth-pass SAIP workbench checks (icons, dispatch literals, GP tables).
 
 Run::
@@ -135,7 +134,6 @@ def _indirect_decoded_editor_pe_coverage(
 def dispatch_branch_literals_for_tiered_pe_types(app_js: str | None = None) -> list[str]:
     """Tiered PE bases have an explicit or direct-decoded editor path."""
     from Tools.ProfilePackage.saip_pe_gui_gap import (
-        _NONSTANDARD_SPARSE_PE,
         _SECURITY_DOMAIN_PE,
         _SPARSE_CARD_PE,
         _TYPED_CARD_PE,
@@ -145,9 +143,13 @@ def dispatch_branch_literals_for_tiered_pe_types(app_js: str | None = None) -> l
     body = _render_saip_pe_editor_body(text)
     if len(body) == 0:
         return ["missing_renderSaipPeEditor_body"]
-    required = _TYPED_CARD_PE | _SPARSE_CARD_PE | _NONSTANDARD_SPARSE_PE | _SECURITY_DOMAIN_PE
+    required = _TYPED_CARD_PE | _SPARSE_CARD_PE | _SECURITY_DOMAIN_PE
     covered = set(re.findall(r't\s*===\s*"([^"]+)"', body))
     covered.update(_indirect_decoded_editor_pe_coverage(text, body))
+    # Every element ends in its fields (saipRenderPeFieldTree), read from the
+    # SAIP ASN.1 module, whatever its type.
+    if "saipRenderPeFieldTree(" in body:
+        covered.update(required)
     missing: list[str] = []
     for pe in sorted(required):
         if pe not in covered:

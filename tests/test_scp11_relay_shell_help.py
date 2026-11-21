@@ -27,7 +27,7 @@ def _load_module(module_name: str, file_path: Path):
 
 
 def _eid_response(module) -> bytes:
-    return module._build_tlv(bytes.fromhex("BF3E"), module._build_tlv(bytes.fromhex("5A"), bytes.fromhex("89044045930000000000001492294428")))
+    return module._build_tlv(bytes.fromhex("BF3E"), module._build_tlv(bytes.fromhex("5A"), bytes.fromhex("89049032000000000000000000000101")))
 
 
 def _encode_length(length: int) -> bytes:
@@ -125,6 +125,9 @@ class DummyApduChannel:
     def disconnect(self) -> None:
         self.disconnect_calls += 1
 
+    def is_connected(self) -> bool:
+        return self.disconnect_calls == 0
+
     def reset(self) -> bool:
         self.reset_calls += 1
         return True
@@ -215,12 +218,11 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("DELETE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
-        self.assertNotIn("POLL", rendered)
-        self.assertNotIn("DOWNLOAD [matchingId]", rendered)
-        self.assertNotIn("POLL [legacy-profile]", rendered)
+        # The expert alias, not its usage suffix: the default IPAd entry
+        # carries the same ``[matchingId] [--<n>...]`` argument list.
+        self.assertNotIn("EIM-DOWNLOAD", rendered)
         self.assertNotIn("FLOW [matchingId]", rendered)
         self.assertNotIn("DOWNLOAD-AC <activation>", rendered)
-        self.assertNotIn("EIM-POLL [legacy-profile]", rendered)
         self.assertNotIn("GET-EID", rendered)
         self.assertNotIn("SET-ES9 [--persist] <url>", rendered)
         self.assertNotIn("GET-EUICC-INFO1", rendered)
@@ -240,7 +242,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("EIM-AUTHENTICATE [matchingId]", rendered)
         self.assertIn("FLOW [matchingId]", rendered)
 
-    def test_test_default_help_omits_eim_poll(self):
+    def test_test_default_help_hides_expert_commands(self):
         console = self._build_console(self.test_module)
 
         rendered = self._capture_help(console)
@@ -252,8 +254,7 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("DELETE-PROFILE <iccid-or-aid>", rendered)
         self.assertIn("DISCOVER", rendered)
         self.assertIn("DOWNLOAD", rendered)
-        self.assertNotIn("DOWNLOAD [matchingId]", rendered)
-        self.assertNotIn("EIM-POLL [legacy-profile]", rendered)
+        self.assertNotIn("EIM-DOWNLOAD", rendered)
         self.assertNotIn("GET-EID", rendered)
 
     def test_legacy_aliases_remain_registered(self):
@@ -265,13 +266,11 @@ class RelayShellHelpTests(unittest.TestCase):
         self.assertIn("METADATA", live_console._commands)
         self.assertIn("EIM-DISCOVER", live_console._commands)
         self.assertIn("EIM-DOWNLOAD", live_console._commands)
-        self.assertNotIn("EIM-POLL", live_console._commands)
         self.assertIn("DOWNLOAD-AC", test_console._commands)
         self.assertIn("GET-METADATA", test_console._commands)
         self.assertIn("METADATA", test_console._commands)
         self.assertIn("EIM-DISCOVER", test_console._commands)
         self.assertIn("EIM-DOWNLOAD", test_console._commands)
-        self.assertNotIn("EIM-POLL", test_console._commands)
 
     def test_hidden_command_remains_callable(self):
         console = self._build_console(self.live_module)
@@ -282,7 +281,7 @@ class RelayShellHelpTests(unittest.TestCase):
 
         rendered = buffer.getvalue()
         self.assertTrue(keep_running)
-        self.assertIn("EID: 89044045930000000000001492294428", rendered)
+        self.assertIn("EID: 89049032000000000000000000000101", rendered)
         self.assertEqual(console.apdu_channel.send_calls[0][0], "GET: EID")
 
     def test_soft_command_rebuilds_bootstraps_and_disconnects_transport(self):
@@ -308,6 +307,55 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertEqual(console.orchestrator.phase_connect_calls, 1)
             self.assertEqual(replacement_channel.send_calls[0][0], "GET: EID")
             self.assertEqual(replacement_channel.disconnect_calls, 1)
+
+    def test_soft_command_stops_when_the_transport_rebuild_fails(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+            original_channel = console.apdu_channel
+
+            def build_channel(_cfg):
+                raise RuntimeError(
+                    "PC/SC transport startup failed on reader index 0: Card is unresponsive."
+                )
+
+            console.client._build_apdu_channel = build_channel
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                keep_running = console._run_command_line("GET-EID")
+
+            rendered = buffer.getvalue()
+            self.assertTrue(keep_running)
+            self.assertIn(
+                "[!] GET-EID: card transport rebuild failed (PC/SC transport startup "
+                "failed on reader index 0: Card is unresponsive.); command not started.",
+                rendered,
+            )
+            self.assertNotIn("rebuilt card transport", rendered)
+            self.assertNotIn("released card transport", rendered)
+            self.assertEqual(original_channel.send_calls, [])
+            self.assertEqual(console.orchestrator.phase_connect_calls, 0)
+            self.assertIs(console.apdu_channel, original_channel)
+            self.assertTrue(console._session_dirty)
+
+    def test_transport_error_inside_a_command_returns_to_the_prompt(self):
+        for module in [self.live_module, self.test_module]:
+            console = self._build_console(module)
+
+            def failing_handler(_argument):
+                raise IOError("PC/SC channel is disconnected.")
+
+            console._commands["GET-EID"].handler = failing_handler
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                keep_running = console._run_command_line("GET-EID")
+
+            self.assertTrue(keep_running)
+            self.assertIn(
+                "[!] GET-EID: OSError: PC/SC channel is disconnected.",
+                buffer.getvalue(),
+            )
 
     def test_download_rebuilds_transport_without_preconnect(self):
         for module in [self.live_module, self.test_module]:
@@ -344,6 +392,51 @@ class RelayShellHelpTests(unittest.TestCase):
             self.assertEqual(phase_load_calls, [])
             self.assertEqual(console.orchestrator.eim_poll_calls, [("", 0)])
             self.assertEqual(replacement_channel.disconnect_calls, 1)
+
+    def test_added_command_that_runs_own_connect_skips_the_connect_phase(self):
+        for module in [self.live_module, self.test_module]:
+            for runs_own_connect, expected_connects in ((True, []), (False, [True])):
+                console = self._build_console(module)
+                replacement_channel = DummyApduChannel(_eid_response(module))
+                built_channels = []
+                phase_connect_calls = []
+                handler_arguments = []
+
+                def build_channel(_cfg, channel=replacement_channel, built=built_channels):
+                    built.append(channel)
+                    return channel
+
+                def handler(argument, seen=handler_arguments):
+                    seen.append(argument)
+                    return True
+
+                console.client._build_apdu_channel = build_channel
+                console.orchestrator._phase_connect = (
+                    lambda calls=phase_connect_calls: calls.append(True)
+                )
+                console._add_command(
+                    "EXT-PROBE",
+                    "EXT-PROBE",
+                    "Added by an extension",
+                    handler,
+                    visible_in_help=False,
+                    session_policy=module.SessionPolicy.HARD_RESET,
+                    runs_own_connect=runs_own_connect,
+                )
+
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    keep_running = console._run_command_line("EXT-PROBE")
+
+                self.assertTrue(keep_running)
+                self.assertEqual(built_channels, [replacement_channel])
+                self.assertIs(console.orchestrator.apdu_channel, replacement_channel)
+                self.assertEqual(phase_connect_calls, expected_connects)
+                self.assertEqual(handler_arguments, [""])
+                self.assertIn(
+                    "EXT-PROBE: rebuilt card transport before command flow.",
+                    buffer.getvalue(),
+                )
 
     def test_get_notifications_uses_logical_fallback_helper(self):
         for module in [self.live_module, self.test_module]:
@@ -634,7 +727,7 @@ class RelayShellHelpTests(unittest.TestCase):
         Regression: ``_execute_result_command`` must not call
         ``_sync_notifications_after_success`` when the command itself is
         ``RemoveNotificationFromList``. The outer profile state flow
-        already runs a notification sync after success — letting the
+        already runs a notification sync after success -- letting the
         remove recursion re-enter it causes the noisy ``listNotifications
         failed (APDU Failed: 6881)`` log seen after DISABLE-PROFILE.
         """
@@ -744,10 +837,10 @@ class RelayShellHelpTests(unittest.TestCase):
     def test_snapshot_collects_notification_count(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
-            console._get_eid = lambda: "89044045930000000000001492294428"
+            console._get_eid = lambda: "89049032000000000000000000000101"
             console._get_ecasd_issuer_identity = lambda eid="": {
-                "issuer_number": "89044045",
-                "issuer_name": "Kigen",
+                "issuer_number": "89049032",
+                "issuer_name": "Giesecke+Devrient",
             }
             console._get_configured_addresses_raw = lambda: b""
             console._decode_euicc_configured_data = lambda raw: {}
@@ -765,10 +858,10 @@ class RelayShellHelpTests(unittest.TestCase):
     def test_snapshot_includes_silent_discovery_summary(self):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
-            console._get_eid = lambda: "89044045930000000000001492294428"
+            console._get_eid = lambda: "89049032000000000000000000000101"
             console._get_ecasd_issuer_identity = lambda eid="": {
-                "issuer_number": "89044045",
-                "issuer_name": "Kigen",
+                "issuer_number": "89049032",
+                "issuer_name": "Giesecke+Devrient",
             }
             console._get_configured_addresses_raw = lambda: b""
             console._decode_euicc_configured_data = lambda raw: {}
@@ -792,8 +885,8 @@ class RelayShellHelpTests(unittest.TestCase):
 
             self.assertEqual(snapshot.euicc_info2_summary["profile_version"], "v2.3.1 (020301)")
             self.assertEqual(snapshot.eim_summary["eim_fqdn"], "eim.example.test")
-            self.assertEqual(snapshot.issuer_name, "Kigen")
-            self.assertTrue(any("Issuer" in line and "Kigen" in line for line in lines))
+            self.assertEqual(snapshot.issuer_name, "Giesecke+Devrient")
+            self.assertTrue(any("Issuer" in line and "Giesecke+Devrient" in line for line in lines))
             self.assertTrue(any("Profile Version" in line and "v2.3.1 (020301)" in line for line in lines))
             self.assertTrue(any("eIM FQDN" in line and "eim.example.test" in line for line in lines))
             self.assertFalse(any("Active Flow Target" in line for line in lines))
@@ -811,7 +904,7 @@ class RelayShellHelpTests(unittest.TestCase):
 
         summary = console._summarize_euicc_info2_response(response)
 
-        self.assertEqual(summary["ipa_mode"], "Mode 1 active (1)")
+        self.assertEqual(summary["ipa_mode"], "IPAe active (1)")
         self.assertIs(summary["iot_specific_info"], True)
         self.assertIs(summary["ecall_supported"], True)
         self.assertIs(summary["fallback_supported"], True)
@@ -823,9 +916,9 @@ class RelayShellHelpTests(unittest.TestCase):
                 console._run_with_stdout_suppressed(lambda: print("NESTED-TRACE-LINE")),
                 print("NOISY-TRACE-LINE"),
                 module.CardSnapshot(
-                    eid="89044045930000000000001492294428",
-                    issuer_number="89044045",
-                    issuer_name="Kigen",
+                    eid="89049032000000000000000000000101",
+                    issuer_number="89049032",
+                    issuer_name="Giesecke+Devrient",
                     configured_raw=b"",
                     configured_decoded={},
                     profiles=[],
@@ -854,9 +947,9 @@ class RelayShellHelpTests(unittest.TestCase):
             def collect_snapshot():
                 console._send_store_data_with_logical_fallback(bytes.fromhex("BF3E00"), "GET: EID")
                 return module.CardSnapshot(
-                    eid="89044045930000000000001492294428",
-                    issuer_number="89044045",
-                    issuer_name="Kigen",
+                    eid="89049032000000000000000000000101",
+                    issuer_number="89049032",
+                    issuer_name="Giesecke+Devrient",
                     configured_raw=b"",
                     configured_decoded={},
                     profiles=[],
@@ -884,9 +977,9 @@ class RelayShellHelpTests(unittest.TestCase):
         for module in [self.live_module, self.test_module]:
             console = self._build_console(module)
             console._collect_snapshot = lambda: module.CardSnapshot(
-                eid="89044045930000000000001492294428",
-                issuer_number="89044045",
-                issuer_name="Kigen",
+                eid="89049032000000000000000000000101",
+                issuer_number="89049032",
+                issuer_name="Giesecke+Devrient",
                 configured_raw=b"",
                 configured_decoded={},
                 profiles=[],

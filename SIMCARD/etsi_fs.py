@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ETSI TS 102 221 elementary-file emulation: transparent, linear-fixed, and cyclic record access on in-memory byte arrays."""
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ from SIMCARD.state import (
     SimProfileRfmInstance,
     SimProfileSecurityDomain,
 )
-from SIMCARD.utils import encode_iccid_ef, encode_imsi_ef, tlv
+from SIMCARD.utils import encode_iccid_ef, encode_impi_ef, encode_imsi_ef, tlv
 
 
 USIM_AID = "A0000000871002FF86FF112233445566"
@@ -38,7 +37,56 @@ PROFILE_AID_PREFIX = "A0000005591010FFFFFFFF890000"
 PROFILE_AID_SUFFIX_START = 0x1100
 PROFILE_AID_SUFFIX_STEP = 0x0100
 PROFILE_AID_SUFFIX_MAX = 0xFF00
-DEFAULT_ARR_RECORD = bytes.fromhex("800101A40683010190A004840132")
+# EF.ARR record table for the file-system roots this module synthesises.
+#
+# `_build_security_attributes_referenced` derives a record number from a node's
+# write ACL -- 0x01 default, 0x02 PIN1, 0x06 never, 0x0A ADM, 0x0E for MF/DF/ADF
+# -- so the file those tag-'8B' references point at has to carry a record at
+# each of those numbers. Every other index denies every access mode, so a
+# reference the emitter never produces fails closed instead of inheriting a
+# neighbouring record's rules.
+#
+# ISO 7816-4 gives a DF and an EF different meanings for the low three bits of
+# the access-mode byte, and a record does not say which it is -- the referring
+# file's kind decides. Records 0x01..0x0A are read by EFs; record 0x0E is read
+# by MF/DF/ADF and is encoded in DF scope, where the same low bits mean CREATE
+# and DELETE CHILD rather than READ, UPDATE and APPEND. The deny-all filler sets
+# every bit, so it denies under either reading.
+#
+# Generated with `Tools.ProfilePackage.saip_asn1_encode.encode_ef_arr_rules` and
+# pinned against its decoder by `tests/test_etsi_fs_default_arr.py`. ADM1 is key
+# reference 0x0A. Every CRT carries the usage qualifier next to the key
+# reference, A4 06 83 01 <ref> 95 01 08 (TS 102 221 v18.4 §9.5.1, Table 9.3);
+# the PIN1 record's two CRTs make it 27 bytes, the length every record is padded to.
+_ARR_DENY_ALL_RECORD = bytes.fromhex("80017F9700FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+
+# read+update always; deactivate/activate/terminate/delete ADM1
+_ARR_RECORD_DEFAULT = bytes.fromhex("8001039000800178A40683010A950108FFFFFFFFFFFFFFFFFFFFFF")
+# read always; update PIN1; deactivate/activate/terminate/delete ADM1
+_ARR_RECORD_PIN1 = bytes.fromhex("8001019000800102A406830101950108800178A40683010A950108")
+# read always; update never; deactivate/activate/terminate/delete ADM1
+_ARR_RECORD_NEVER = bytes.fromhex("80010190008001029700800178A40683010A950108FFFFFFFFFFFF")
+# read always; every write ADM1
+_ARR_RECORD_ADM = bytes.fromhex("800101900080017AA40683010A950108FFFFFFFFFFFFFFFFFFFFFF")
+# DF scope: create DF/EF, delete self/child, activate, deactivate, terminate ADM1
+_ARR_RECORD_CONTAINER = bytes.fromhex("80017FA40683010A950108FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+
+DEFAULT_ARR_RECORDS: tuple[bytes, ...] = tuple(
+    {
+        0x01: _ARR_RECORD_DEFAULT,
+        0x02: _ARR_RECORD_PIN1,
+        0x06: _ARR_RECORD_NEVER,
+        0x0A: _ARR_RECORD_ADM,
+        0x0E: _ARR_RECORD_CONTAINER,
+    }.get(index, _ARR_DENY_ALL_RECORD)
+    for index in range(1, 0x0F)
+)
+
+# The record MF/DF/ADF FCPs cite; read in DF scope, not EF scope.
+CONTAINER_ARR_RECORD_INDEX = 0x0E
+
+# Record 1 alone, for callers that only need the default rule.
+DEFAULT_ARR_RECORD = DEFAULT_ARR_RECORDS[0]
 
 
 def next_generated_profile_aid(profiles: list[SimProfileEntry]) -> str:
@@ -126,7 +174,7 @@ def _encode_ef_ust_default() -> bytes:
     #  91 Support for SM-over-IP (PSISMSC - round 26),
     #  122 Subscription identifier de-concealing function (5G SUCI by ME),
     #  124 Subscription identifier de-concealing function support (5G),
-    #  125 SUCI calculation by the USIM (TS 31.102 §5.1.1.5),
+    #  125 SUCI calculation by the USIM (TS 31.102 v19.5 §5.3.48),
     #  126 EAP-AKA' authentication context support (TS 33.402 / TS 33.501),
     #  129 5GS Mobility Management,
     #  130 5GS Session Management.
@@ -443,10 +491,13 @@ def _encode_ef_kc_default() -> bytes:
     #                3GPP TS 24.008 §10.5.1.2.
     #
     # CKSN value 7 (binary 111) marks "no key available", i.e.
-    # the modem must run AKA before encrypting traffic. We
-    # default Kc to 8x 0x00 and CKSN to 0x07 so a freshly
-    # provisioned card never advertises a stale key set.
-    return b"\x00" * 8 + bytes((0x07,))
+    # the modem must run AKA before encrypting traffic. The key
+    # bytes are erased rather than zeroed: 3GPP TS 31.102 Annex E
+    # and TS 51.011 Annex D ("Suggested contents of the EFs at
+    # pre-personalization") both give 'FF...FF07', and the TCA
+    # SAIP DF GSM-ACCESS template (§9.5.4, 4F20 / 4F52) ships the
+    # same nine bytes as its default value.
+    return b"\xFF" * 8 + bytes((0x07,))
 
 
 def _encode_ef_cfis_record() -> bytes:
@@ -498,7 +549,7 @@ def _attach_ready_usim_nodes(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[DEFAULT_ARR_RECORD],
+            records=list(DEFAULT_ARR_RECORDS),
         ),
         SimProfileFsNode(
             path=("MF", "ADF.USIM", "EF.LI"),
@@ -1305,29 +1356,22 @@ def _encode_isim_pcscf_record(address: str, *, record_length: int = 64) -> bytes
     return tlv_blob + b"\xFF" * (record_length - len(tlv_blob))
 
 
-def _encode_ef_gbabp_default() -> bytes:
-    # 3GPP TS 31.103 §4.2.10 EF.GBABP - GBA Bootstrapping
-    # Parameters. Transparent EF carrying three TLV objects:
-    #
-    #   80 LL B-TID         Bootstrapping Transaction Identifier
-    #   81 LL Ks_NAF        Derived NAF key
-    #   82 LL Lifetime      Key lifetime
-    #
-    # On a freshly-issued card the EF is empty (no successful
-    # GBA bootstrap has run yet). We seed three zero-length
-    # TLVs so a modem that reads the EF before bootstrapping
-    # gets a deterministic 6-byte view rather than ``6A 82``.
-    # First successful bootstrap will UPDATE BINARY over this
-    # placeholder with the real material.
-    return bytes((0x80, 0x00, 0x81, 0x00, 0x82, 0x00))
+def _encode_ef_gbabp_default(*, file_size: int = 128) -> bytes:
+    # TS 31.103 v19 §4.2.9 EF_GBABP: length-prefixed fields, not TLVs --
+    # L RAND, L B-TID, L key lifetime. Annex C suggests 'FF...FF' before
+    # the first bootstrap. The ISIM writes the RAND field when it
+    # bootstraps; the ME writes the B-TID (base64 RAND '@' BSF name,
+    # TS 33.220 v19.1 §5.3.2) and the lifetime afterwards, so the file is
+    # sized for those as well.
+    return b"\xFF" * max(19, int(file_size))
 
 
-def _encode_ef_gbanl_record(*, record_length: int = 28) -> bytes:
-    # 3GPP TS 31.103 §4.2.11 EF.GBANL - GBA NAF List. Linear-
-    # fixed; each record carries the NAF Key identifier
-    # (NAF_ID + B-TID). Default seed is one all-FF placeholder
-    # row; the modem populates the row pair-wise on subsequent
-    # GBA bootstraps using UPDATE RECORD.
+def _encode_ef_gbanl_record(*, record_length: int = 128) -> bytes:
+    # TS 31.103 v19 §4.2.10 EF_GBANL: per record a '80' NAF_ID TLV and a
+    # '81' B-TID TLV, unused bytes 'FF' (Annex C: 'FF...FF' at issue).
+    # UPDATE is ADM: the ISIM fills the records itself in NAF Derivation
+    # Mode (§7.1.1.3). A NAF_ID is the NAF FQDN and a five-octet Ua
+    # protocol identifier, so the record holds an FQDN plus a B-TID.
     return b"\xFF" * max(8, int(record_length))
 
 
@@ -1381,7 +1425,7 @@ def _default_profile_image(
             kind="ef",
             fid="2F06",
             structure="linear-fixed",
-            records=[DEFAULT_ARR_RECORD],
+            records=list(DEFAULT_ARR_RECORDS),
             sfi=0x06,
         ),
         SimProfileFsNode(
@@ -1401,10 +1445,11 @@ def _default_profile_image(
             kind="ef",
             fid="6F06",
             structure="linear-fixed",
-            records=[DEFAULT_ARR_RECORD],
+            records=list(DEFAULT_ARR_RECORDS),
         ),
-        # 3GPP TS 31.102 §4.4.2 / TS 31.103 §4.4.3 phonebook tree
-        # rooted under DF.TELECOM. The DF.PHONEBOOK shell plus a
+        # 3GPP TS 31.102 v19.5 §4.6.2 phonebook tree rooted under
+        # DF.TELECOM, with the structure of the ADF.USIM DF PHONEBOOK
+        # (§4.4.2). The DF.PHONEBOOK shell plus a
         # default EF.PBR (Phone Book Reference) record let a modem
         # walking 7F10/5F3A/4F30 land on a deterministic stub
         # instead of 6A82. The PBR record advertises an empty
@@ -1461,12 +1506,13 @@ def _default_profile_image(
             label="ISIM",
         ),
         SimProfileFsNode(
+            # TS 31.103 v19 §4.2.2: the NAI as a tag-'80' TLV.
             path=("MF", "ADF.ISIM", "EF.IMPI"),
             name="EF.IMPI",
             kind="ef",
             fid="6F02",
             structure="transparent",
-            data=impi.encode("utf-8"),
+            data=encode_impi_ef(impi),
         ),
         SimProfileFsNode(
             # 3GPP TS 31.103 §4.2.2 EF.IMPU (Public User Identity).
@@ -1511,29 +1557,31 @@ def _default_profile_image(
             data=bytes((0x00, 0x00, 0x00, mnc_length & 0x0F)),
         ),
         SimProfileFsNode(
-            # 3GPP TS 31.103 §4.2.7 EF.IST (ISIM Service Table).
-            # Bit-field, 1 byte per service group. The simulator
-            # advertises the four core IMS services (P-CSCF
-            # discovery, GBA, HTTP Digest, GBA-based local key
-            # establishment) as available + activated by setting
-            # the matching bits in byte 0.
+            # 3GPP TS 31.103 v19 §4.2.7 EF.IST (ISIM Service Table).
+            # Bit-field, 1 byte per service group.
             #
-            # Byte 0 bit map (TS 31.103 §4.2.7):
+            # Byte 0 bit map:
             #   bit 1 -- service no. 1: P-CSCF address
             #   bit 2 -- service no. 2: GBA
             #   bit 3 -- service no. 3: HTTP Digest
-            #   bit 4 -- service no. 4: GBA local key establishment
+            #   bit 4 -- service no. 4: GBA-based Local Key
+            #            Establishment Mechanism
             #   bit 5 -- service no. 5: Support of P-CSCF Discovery
             #            for IMS Local Break Out
             #   bit 6 -- service no. 6: Short Message storage
             #   bit 7 -- service no. 7: Short Message status reports
             #   bit 8 -- service no. 8: Support for SM-over-IP
+            #
+            # Services 3 and 4 stay clear: AUTHENTICATE answers the
+            # HTTP Digest context with '98 64' and has no Local Key
+            # Establishment context, and the ME may only select a
+            # service the table shows available (§4.2.7).
             path=("MF", "ADF.ISIM", "EF.IST"),
             name="EF.IST",
             kind="ef",
             fid="6F07",
             structure="transparent",
-            data=bytes((0xFF,)),
+            data=bytes((0xF3,)),
         ),
         SimProfileFsNode(
             # 3GPP TS 31.103 §4.2.8 EF.PCSCF (P-CSCF Address).
@@ -1557,11 +1605,9 @@ def _default_profile_image(
                 ),
             ],
         ),
-        # 3GPP TS 31.103 §4.2.10 EF.GBABP - GBA Bootstrapping
-        # Parameters (round 23). Required because EF.IST
-        # advertises GBA (service 2). Seeded with three empty
-        # TLVs so the EF has a deterministic 6-byte default
-        # before the first bootstrap runs.
+        # 3GPP TS 31.103 v19 §4.2.9 EF.GBABP - GBA Bootstrapping
+        # Parameters. Required because EF.IST advertises GBA
+        # (service 2).
         SimProfileFsNode(
             path=("MF", "ADF.ISIM", "EF.GBABP"),
             name="EF.GBABP",
@@ -1570,18 +1616,19 @@ def _default_profile_image(
             structure="transparent",
             data=_encode_ef_gbabp_default(),
         ),
-        # 3GPP TS 31.103 §4.2.11 EF.GBANL - GBA NAF List
-        # (round 23). Linear-fixed list of NAF_ID / B-TID
-        # pairs. Default seed: one 28-byte all-FF placeholder
-        # so the modem can UPDATE RECORD post-bootstrap
-        # without the simulator pre-allocating per-NAF rows.
+        # 3GPP TS 31.103 v19 §4.2.10 EF.GBANL - GBA NAF List.
+        # Linear-fixed list of NAF_ID / B-TID pairs; two free
+        # records, so a third NAF_ID overwrites the one derived
+        # least recently (§7.1.1.3).
         SimProfileFsNode(
             path=("MF", "ADF.ISIM", "EF.GBANL"),
             name="EF.GBANL",
             kind="ef",
             fid="6FD7",
             structure="linear-fixed",
-            records=[_encode_ef_gbanl_record(record_length=28)],
+            records=[_encode_ef_gbanl_record(), _encode_ef_gbanl_record()],
+            # §4.2.10: UPDATE ADM; the ISIM writes the records itself.
+            write_acl="adm",
         ),
         # 3GPP TS 31.103 §4.2.13 EF.SMS - Short Message
         # storage in ISIM (round 24). Linear-fixed; 1-byte
@@ -1788,11 +1835,11 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
                 path_index[image_node.path] = node.node_id
 
     # If the BPP already shipped an EF.DIR via the active profile image
-    # we must not clobber it: TCA Profile Interoperability §3.5 expects
-    # the issuer-provided record set (AIDs, labels, padding) to surface
-    # verbatim. The active image stores EF.DIR under a path-derived
-    # ``PROFILE::`` node_id, so the canonical lookup is via path_index
-    # rather than by raw FID.
+    # we must not clobber it: content a PE supplies replaces the template
+    # default (TCA SAIP v3.4.1 §8.3.3), so the issuer-provided record set
+    # (AIDs, labels, padding) surfaces verbatim. The active image stores
+    # EF.DIR under a path-derived ``PROFILE::`` node_id, so the canonical
+    # lookup is via path_index rather than by raw FID.
     ef_dir_path = ("MF", "EF.DIR")
     ef_dir_node_id = path_index.get(ef_dir_path)
     bpp_supplied_efdir = False
@@ -1891,9 +1938,11 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
 
     _ensure_default_local_arr_nodes(nodes, path_index)
 
-    # 3GPP TS 31.102 Annex H "EFs shared between SIM and USIM" /
-    # TCA Profile Interoperability §3.5.5: an issuer is free to
-    # ship a single physical copy of any of the listed EFs (FID
+    # EFs present under both DF.GSM and ADF.USIM, the convention this
+    # tree calls the "Annex H mirror". No library document states it:
+    # TS 31.102 v19.5 Annex H is the list of SFI values, and TCA SAIP
+    # v3.4.1 links files only through ``Fcp.linkPath`` (§8.3.2). An
+    # issuer may ship a single physical copy of such an EF (FID
     # 6Fxx -- IMSI, AD, ECC, LOCI, FPLMN, ...) under DF.GSM and
     # leave the same-FID EF under ADF.USIM empty. The card is
     # then expected to "share" the bytes between the two DF
@@ -1904,18 +1953,18 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
     # only when the ADF.USIM-side EF is genuinely empty (so an
     # operator that *did* ship distinct USIM-side content keeps
     # it intact).
-    # SAIP / TCA Profile Interoperability v2.3.1 §8.3.5 explicit
-    # ``Fcp.linkPath`` aliases. Operator BPPs commonly carve out a
-    # template EF inside ADF.USIM / ADF.ISIM whose ``linkPath``
-    # walks to the canonical EF under DF.GSM (7F20) or DF.TELECOM
-    # (7F10). Resolve those aliases first so the issuer's explicit
+    # TCA SAIP v3.4.1 §8.3.2 explicit ``Fcp.linkPath`` aliases. Operator
+    # BPPs commonly carve out a template EF inside ADF.USIM / ADF.ISIM
+    # whose ``linkPath`` walks to the canonical EF under DF.GSM (7F20)
+    # or DF.TELECOM (7F10). Resolve those aliases first so the issuer's explicit
     # intent always wins over the convention-based Annex H mirror
     # and the SAIP template defaults that follow.
     _apply_explicit_file_links_from_profile(nodes, path_index)
 
     _mirror_shared_efs_between_df_gsm_and_adf_usim(nodes, path_index)
 
-    # TCA Profile Interoperability §3.5 / pySim ``FilesUsimMandatoryV2``,
+    # TCA SAIP v3.4.1 §9.1 (Annex A templates, "Default Value" column) /
+    # pySim ``FilesUsimMandatoryV2``,
     # ``FilesUsimOptionalV3``, ``FilesIsimMandatory``, ``FilesAtMF``,
     # ``FilesTelecom`` etc. ship a default-content pattern for every
     # template-defined EF (e.g. ``EF.AD = 00000002``,
@@ -1930,7 +1979,8 @@ def rebuild_runtime_filesystem(state: SimCardState) -> None:
     # bytes the spec says they should.
     _apply_saip_template_defaults_to_runtime(nodes, path_index)
 
-    # SAIP §5.5 / §5.6 / §5.7: project the issuer-supplied PIN/PUK
+    # TCA SAIP v3.4.1 §8.5 (PIN and PUK codes), §8.6.1 (Security Domain
+    # PE) and §8.8 (RFM Parameters): project the issuer-supplied PIN/PUK
     # table, GP Security Domain registry and OTA RFM bindings from the
     # active profile's image onto the runtime card state. Done here so
     # the same path that renders the file system also keeps the
@@ -2033,7 +2083,7 @@ def _ensure_default_local_arr_nodes(
                 fid="6F06",
                 parent_id=parent_id,
                 structure="linear-fixed",
-                records=[DEFAULT_ARR_RECORD],
+                records=list(DEFAULT_ARR_RECORDS),
             ),
         )
         path_index[arr_path] = node_id
@@ -2131,7 +2181,8 @@ def _resolve_link_path_target(
     path_index: dict[tuple[str, ...], str],
     link_path: tuple[str, ...],
 ) -> SimFileNode | None:
-    """Walk a SAIP §8.3.5 ``linkPath`` (sequence of 2-byte FIDs) from
+    """Walk a TCA SAIP v3.4.1 §8.3.2 ``linkPath`` (coded as a §8.3.5
+    ``filePath``: a sequence of 2-byte FIDs) from
     the MF down to the file it points at and return the matching
     ``SimFileNode``, or ``None`` if the path cannot be resolved.
 
@@ -2179,7 +2230,7 @@ def _apply_explicit_file_links_from_profile(
     """Resolve every node carrying a non-empty ``link_path`` and copy
     the target file's content into the source node.
 
-    SAIP / TCA Profile Interoperability v2.3.1 §8.3.5: an EF (or DF
+    TCA SAIP v3.4.1 §8.3.2: an EF (or DF
     in the ``dfLinkSupport`` capability) may declare ``Fcp.linkPath``
     to alias a file located elsewhere in the file system. Operator
     BPPs use this extensively to delegate the canonical content of
@@ -2287,7 +2338,9 @@ def _load_saip_template_defaults_registry() -> dict[tuple[str, str], object]:
         return _SAIP_TEMPLATE_DEFAULTS_CACHE
     registry: dict[tuple[str, str], object] = {}
     try:
-        import pySim.esim.saip.templates as saip_templates
+        from yggdrasim_common.pysim_saip_import import import_saip_templates
+
+        saip_templates = import_saip_templates()
     except Exception:  # pragma: no cover - defensive: pySim missing
         _SAIP_TEMPLATE_DEFAULTS_CACHE = registry
         return registry
@@ -2453,12 +2506,13 @@ def _apply_chv_table_from_profile(
     """Populate ``state.chv_references`` from a SAIP ``pinCodes`` /
     ``pukCodes`` set.
 
-    Honours TS 102 221 §9.5.1 retry counter semantics: the SAIP
-    encoding stores both max-attempts and remaining attempts in a
-    single byte (high / low nibble). The ``pinAttributes`` byte's
-    bit-0 toggles the "PIN enabled" state; SAIP §5.6.1 reserves the
-    other bits for vendor flags so the simulator keeps them in
-    ``SimChvReference`` only as the ``enabled`` flag.
+    TCA SAIP v3.4.1 §8.5.1 (Pin Code PE) and §8.5.2 (PUK Code PE)
+    store the maximum and the remaining attempts in one byte (high /
+    low nibble); the remaining count is what VERIFY PIN reports as
+    '63CX' (TS 102 221 v18.4 §11.1.9.1.2). In ``pinAttributes``, b1 is
+    the PIN state (1 = enabled), b2 "PIN can be changed", b3 "PIN state
+    change allowed" and b4-b8 are RFU (§8.5.1); the simulator keeps
+    only b1, as ``SimChvReference.enabled``.
     """
     if len(pin_entries) == 0 and len(puk_entries) == 0:
         return
@@ -2542,6 +2596,19 @@ def _apply_security_domains_from_profile(
     material is intentionally not promoted to ``state.scp03_keys``
     until per-AID keysets are wired up.
     """
+    # The registry tracks the currently enabled Profile, so SD rows left by a
+    # previously enabled one are dropped before the incoming set is applied --
+    # otherwise GET STATUS / SELECT AID keep answering for every SD ever seen.
+    incoming_aids = {
+        str(domain.instance_aid or "").strip().upper()
+        for domain in domains
+    }
+    incoming_aids.discard("")
+    state.gp_apps[:] = [
+        entry
+        for entry in state.gp_apps
+        if str(entry.kind) != "sd" or str(entry.aid).upper() in incoming_aids
+    ]
     if len(domains) == 0:
         return
     mno_aid_upper = str(state.mno_sd_aid or "").strip().upper()
@@ -2749,6 +2816,9 @@ def build_default_state() -> SimCardState:
             ),
             profile_source="json",
             auth_config=copy.deepcopy(default_auth),
+            # The disabled lab Profile is the one its owner lets become the
+            # Fallback Profile (SGP.32 v1.3 §4.4); the enabled one is not.
+            fallback_allowed=True,
         ),
     ]
     state = SimCardState(
@@ -3169,7 +3239,7 @@ class EtsiFileSystem:
         return payload, 0x90, 0x00
 
     def _resolve_sfi_under_current(self, sfi: int) -> SimFileNode | None:
-        """ETSI TS 102 221 §11.1.3.4 SFI resolution.
+        """ETSI TS 102 221 v18.4 §8.4.3 Short File Identifier (SFI) resolution.
 
         The SFI is interpreted "in the currently selected DF". When
         the current node is itself an EF (because the previous APDU
@@ -3313,10 +3383,20 @@ class EtsiFileSystem:
             return b"", 0x90, 0x00
         if record_number <= 0:
             return b"", 0x6A, 0x83
+        # TS 102 221 §11.1.6: a record write matches the file's record length.
+        # record_length is derived from records[0], so storing a short payload
+        # verbatim would silently redefine the geometry of every later record.
+        # Resolve the width once, before the growth loop can change it.
+        fill_length = target_node.record_length or len(payload)
         while len(target_node.records) < record_number:
-            fill_length = target_node.record_length or len(payload)
             target_node.records.append(b"\xFF" * fill_length)
-        target_node.records[record_number - 1] = bytes(payload)
+        new_record = bytes(payload)
+        if fill_length > 0:
+            if len(new_record) < fill_length:
+                new_record = new_record + b"\xFF" * (fill_length - len(new_record))
+            elif len(new_record) > fill_length:
+                new_record = new_record[:fill_length]
+        target_node.records[record_number - 1] = new_record
         self._persist_node_to_active_image(target_node)
         return b"", 0x90, 0x00
 
@@ -3877,10 +3957,41 @@ class EtsiFileSystem:
         located, is not a transparent EF, or persistence threw an
         unexpected error.
         """
-        node = self.find_node_by_path(path)
+        return self.write_ef_transparent_node(self.find_node_by_path(path), data)
+
+    def write_ef_transparent_node(self, node: SimFileNode | None, data: bytes) -> bool:
+        """Replace the body of transparent EF *node* as the card itself.
+
+        The card-internal twin of UPDATE BINARY: no ``write_acl`` gate
+        (EF_GBABP's RAND field is written by the USIM / ISIM, TS 31.102
+        v19.5 §7.1.1.4), persisted like :meth:`write_ef_transparent_by_path`.
+        """
         if node is None or node.kind != "ef" or node.structure != "transparent":
             return False
         node.data = bytes(data or b"")
+        return self._persist_card_write(node)
+
+    def write_ef_record_node(self, node: SimFileNode | None, record_number: int, record: bytes) -> bool:
+        """Replace record *record_number* (1-based) of linear-fixed EF *node* as the card itself.
+
+        The record keeps its length: a shorter *record* is padded with
+        'FF', a longer one is refused. No ``write_acl`` gate (EF_GBANL is
+        UPDATE ADM and filled by the USIM / ISIM, TS 31.102 v19.5
+        §7.1.1.5).
+        """
+        if node is None or node.kind != "ef" or node.structure != "linear-fixed":
+            return False
+        index = int(record_number) - 1
+        if index < 0 or index >= len(node.records):
+            return False
+        record_length = len(node.records[index])
+        body = bytes(record or b"")
+        if len(body) > record_length:
+            return False
+        node.records[index] = body + b"\xFF" * (record_length - len(body))
+        return self._persist_card_write(node)
+
+    def _persist_card_write(self, node: SimFileNode) -> bool:
         try:
             self._persist_node_to_active_image(node)
         except Exception:
@@ -4146,7 +4257,7 @@ class EtsiFileSystem:
 
         * At the ADF/DF level we declare the PIN1 / Universal-PIN /
           ADM1 triplet. The bitmap is computed from
-          ``state.chv_references[…].enabled`` so DISABLE PIN /
+          ``state.chv_references[...].enabled`` so DISABLE PIN /
           ENABLE PIN APDUs flip the advertisement on the next FCP
           retrieval.
         """

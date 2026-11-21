@@ -17,7 +17,7 @@ Coverage:
 * :class:`Open5gsSubscriberRepository` -- provisioning produces an
   Open5GS-shaped document with the expected security / slice /
   AMBR layout and the ``_yggdrasim_provisioned`` provenance tag.
-* :meth:`read` redacts K / OPc to a fingerprint.
+* :meth:`read` returns K / OPc as stored, without the Mongo ``_id``.
 * :meth:`remove` and :meth:`purge_yggdrasim` remove only what they
   should.
 """
@@ -126,7 +126,9 @@ class _FakeCollection:
 
 class DetectorTests(unittest.TestCase):
     def test_binary_paths_returned_when_all_present(self) -> None:
-        which = lambda name: f"/usr/bin/{name}" if name in OPEN5GS_5G_SA_BINARIES else None
+        def which(name):
+            return f"/usr/bin/{name}" if name in OPEN5GS_5G_SA_BINARIES else None
+
         detector = Open5gsDetector(which=which, mongo_probe=lambda uri: None)
         result = detector.detect()
         self.assertEqual(result.binaries_missing, ())
@@ -135,7 +137,9 @@ class DetectorTests(unittest.TestCase):
 
     def test_partial_install_lists_missing_binaries(self) -> None:
         present = {"open5gs-amfd", "open5gs-ausfd"}
-        which = lambda name: "/usr/bin/" + name if name in present else None
+        def which(name):
+            return "/usr/bin/" + name if name in present else None
+
         detector = Open5gsDetector(which=which, mongo_probe=lambda uri: None)
         result = detector.detect()
         self.assertEqual(set(result.binaries_present), present)
@@ -146,7 +150,9 @@ class DetectorTests(unittest.TestCase):
         def boom(uri: str) -> None:
             raise RuntimeError("connection refused")
 
-        which = lambda name: None
+        def which(name):
+            return None
+
         detector = Open5gsDetector(which=which, mongo_probe=boom)
         result = detector.detect()
         self.assertEqual(result.mongo_reachable, False)
@@ -154,7 +160,9 @@ class DetectorTests(unittest.TestCase):
         self.assertTrue(result.pymongo_available)
 
     def test_to_dict_is_json_friendly(self) -> None:
-        which = lambda name: None
+        def which(name):
+            return None
+
         detector = Open5gsDetector(which=which, mongo_probe=lambda uri: None)
         snapshot = detector.detect().to_dict()
         for key in (
@@ -259,14 +267,13 @@ class ReadAndPurgeTests(unittest.TestCase):
         record = self.store.upsert(supi=supi, k=_K, opc=_OPC)
         return self.repository.provision(record).imsi
 
-    def test_read_returns_sanitised_document(self) -> None:
+    def test_read_returns_the_document_without_object_id(self) -> None:
         imsi = self._provision(_SUPI)
-        sanitised = self.repository.read(imsi)
-        self.assertIsNotNone(sanitised)
-        # K / OPc are replaced by a fingerprint of the form "ABCD\u2026EFGH (16 bytes)".
-        self.assertNotEqual(sanitised["security"]["k"], _K.hex().upper())
-        self.assertRegex(sanitised["security"]["k"], r"\(16 bytes\)$")
-        self.assertRegex(sanitised["security"]["opc"], r"\(16 bytes\)$")
+        document = self.repository.read(imsi)
+        self.assertIsNotNone(document)
+        self.assertNotIn("_id", document)
+        self.assertEqual(document["security"]["k"], _K.hex().upper())
+        self.assertEqual(document["security"]["opc"], _OPC.hex().upper())
 
     def test_read_unknown_imsi_returns_none(self) -> None:
         self.assertIsNone(self.repository.read("999999999999999"))

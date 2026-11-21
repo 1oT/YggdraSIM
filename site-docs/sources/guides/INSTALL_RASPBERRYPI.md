@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Installation — Raspberry Pi (arm64)
+# Installation -- Raspberry Pi (arm64)
 
 YggdraSIM runs on Raspberry Pi 4 / 5 boards using Raspberry Pi OS 64-bit
 (Debian Bookworm-based). This guide covers both the pre-built clean
@@ -49,7 +49,7 @@ sudo apt-get install --no-install-recommends \
 ```
 
 During `tshark` installation you are asked whether non-root users should
-be allowed to capture — answer **Yes** if you want GSMTAP captures from
+be allowed to capture -- answer **Yes** if you want GSMTAP captures from
 the user you ran the installer as. Afterwards:
 
 ```bash
@@ -59,7 +59,7 @@ sudo usermod -a -G dialout "$USER"   # needed for SIMtrace2
 
 Log out and back in so the new groups take effect.
 
-## 2. Option A — pre-built clean bundle
+## 2. Option A -- pre-built clean bundle
 
 Most Pi use-cases do not need the HIL bridge. Fetch the published
 arm64 clean bundle:
@@ -99,7 +99,7 @@ yggdrasim-gui
 That is it for SCP03, SCP11, SCP11 local, eIM local, SAIP, and SUCI work
 on the Pi. No HIL bridge, no `pyudev`, no `osmo-remsim-client-st2`.
 
-## 3. Option B — pre-built full bundle (HIL on the Pi)
+## 3. Option B -- pre-built full bundle (HIL on the Pi)
 
 As of the flavor-aware CI matrix the `full` bundle is also published
 for `linux-arm64`:
@@ -122,7 +122,7 @@ binary onto `PATH` the same way as the clean bundle. Install the
 `yggdrasim-gui-linux-arm64-full-<version>` companion as
 `/usr/local/bin/yggdrasim-gui` when you want the GUI on the same Pi.
 
-## 4. Option C — source install with optional HIL on the Pi
+## 4. Option C -- source install with optional HIL on the Pi
 
 The source path still works when you want the test suite or want to
 iterate on the launcher. To run HIL on the Pi itself you build from
@@ -198,7 +198,7 @@ sudo apt-get install --no-install-recommends osmo-remsim-client-st2
 ```
 
 If that repository does not publish arm64 packages yet, fall back to a
-source build — `libosmocore` + `osmo-remsim` — against the Pi's native
+source build -- `libosmocore` + `osmo-remsim` -- against the Pi's native
 toolchain. See
 [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) for the SIMtrace2
 firmware story; the build instructions there apply verbatim on arm64.
@@ -244,8 +244,8 @@ workflow uses QEMU emulation to do this under `docker buildx`).
 
 ## Related guides
 
-- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) — general clean-flavor install.
-- [`INSTALL_FULL.md`](INSTALL_FULL.md) — full-flavor Linux install.
-- [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md) — editable install and tests.
-- [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) — flashing / updating SIMtrace2.
-- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) — once the HIL stack is live.
+- [`INSTALL_CLEAN.md`](INSTALL_CLEAN.md) -- general clean-flavor install.
+- [`INSTALL_FULL.md`](INSTALL_FULL.md) -- full-flavor Linux install.
+- [`INSTALL_FROM_SOURCE.md`](INSTALL_FROM_SOURCE.md) -- editable install and tests.
+- [`SIMTRACE2_CARDEM_GUIDE.md`](SIMTRACE2_CARDEM_GUIDE.md) -- flashing / updating SIMtrace2.
+- [`HIL_BRIDGE_GUIDE.md`](HIL_BRIDGE_GUIDE.md) -- once the HIL stack is live.

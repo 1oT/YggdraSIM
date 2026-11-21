@@ -8,20 +8,20 @@ from SCP03.logic.euicc_info2 import format_version_bytes
 from SCP03.logic.euicc_info2 import parse_tlv_nodes
 from SCP03.logic.euicc_info2 import parse_tlv_simple
 from SCP03.logic.euicc_info2 import quote_text
+from SCP03.logic.euicc_info2 import RSP_CAPABILITY_FLAGS
+from SCP11.shared.ber_tlv import encode_ber_length
+from SCP11.shared.ber_tlv import restore_sequence
+from SCP11.shared.iccid import swap_nibbles
+from SCP11.shared.notification_event import decode_notification_operation_contents
+from SCP11.shared.notification_event import NOTIFICATION_EVENT_ASN1_NAME_BY_BIT
+from SCP11.shared.notification_event import record_notification_parse_error
 
 
-# SGP.22 NotificationEvent. The local operations are spelled with
-# "Local" in the ASN.1, and bits 4 to 7 carry the RPM operations.
-NOTIFICATION_EVENT_FLAGS: dict[int, str] = {
-    0: "notificationInstall",
-    1: "notificationLocalEnable",
-    2: "notificationLocalDisable",
-    3: "notificationLocalDelete",
-    4: "notificationRpmEnable",
-    5: "notificationRpmDisable",
-    6: "notificationRpmDelete",
-    7: "loadRpmPackageResult",
-}
+# SGP.22 v3.1 §5.7.9 NotificationEvent. The local operations are spelled with
+# "Local" in the ASN.1, and bits 4 to 7 carry the RPM operations. The names
+# are held once, beside the strict single-bit decoder the SCP11 notification
+# consumers use.
+NOTIFICATION_EVENT_FLAGS: dict[int, str] = dict(NOTIFICATION_EVENT_ASN1_NAME_BY_BIT)
 
 # SGP.22 PprIds defines three bits. Bit 3 is not allocated.
 PPR_FLAGS: dict[int, str] = {
@@ -72,11 +72,38 @@ def decode_euicc_info1_summary(response: bytes) -> Dict[str, Any]:
     sign_items = count_child_tag(root_map.get(0xAA), 0x04)
     summary["ci_pk_verify_entries"] = verify_items
     summary["ci_pk_sign_entries"] = sign_items
+    summary["ci_pk_sign_v3_entries"] = count_child_tag(root_map.get(0xB1), 0x04)
+
+    highest_svn_value = first_bytes(root_map.get(0x93))
+    if highest_svn_value is not None:
+        summary["highest_svn"] = format_version_bytes(highest_svn_value)
+
+    rsp_capability_value = first_bytes(root_map.get(0x88))
+    if rsp_capability_value is not None:
+        summary["rsp_capability_hex"] = rsp_capability_value.hex().upper()
+        try:
+            capabilities = decode_named_bit_string(
+                rsp_capability_value, RSP_CAPABILITY_FLAGS
+            )
+        except ValueError:
+            # A card that answers with a malformed BIT STRING still gets its
+            # bytes reported above; only the bit names are withheld.
+            capabilities = []
+        summary["rsp_capability"] = capabilities
     return summary
 
 
 def decode_notifications_response(response: bytes) -> Dict[str, Any]:
-    """Decode a ListNotifications response body into a list of notification dicts (SGP.32 §5.6.2)."""
+    """Decode a RetrieveNotificationsList response ('BF2B') into notification dicts.
+
+    SGP.22 v3.1 §5.7.10 / SGP.32 v1.3 §5.9.11: ``notificationList`` ('A0') holds
+    PendingNotification items whose NotificationMetadata ('BF2F') is collected
+    wherever it sits; ``notificationsListResultError`` is '81'; SGP.32 adds
+    ``euiccPackageResultList`` ('A2'). Of the four SGP.32 v1.3
+    ``PendingNotification`` alternatives only ``compactProfileInstallationResult``
+    ('A0') carries no NotificationMetadata; it is summarised by
+    :func:`decode_compact_installation_result_entry` instead.
+    """
     result: Dict[str, Any] = {
         "notifications": [],
         "package_results": [],
@@ -94,23 +121,99 @@ def decode_notifications_response(response: bytes) -> Dict[str, Any]:
             result["error"] = error_name
             continue
         if tag == 0xA0:
-            notifications = collect_nested_tag_values(value, 0xBF2F)
-            for item in notifications:
-                result["notifications"].append(decode_notification_entry(item))
+            for entry in decode_pending_notification_list(value):
+                result["notifications"].append(entry)
             continue
         if tag == 0xA2:
-            result["package_results"] = collect_nested_tag_values(value, 0xBF31)
-            if len(result["package_results"]) == 0:
-                result["package_results"] = collect_nested_tag_values(value, 0xBF32)
-            if len(result["package_results"]) == 0:
-                result["package_results"] = collect_nested_tag_values(value, 0xBF33)
+            # SGP.32 v1.3 RetrieveNotificationsListResponse: euiccPackageResultList
+            # is SEQUENCE OF EuiccPackageResult, each tagged [81] ('BF51'). One
+            # complete TLV per item keeps the signed result verifiable.
+            result["package_results"] = split_euicc_package_results(value)
             if len(result["package_results"]) == 0:
                 result["package_results"] = [value]
     return result
 
 
+def split_euicc_package_results(list_value: bytes) -> List[bytes]:
+    """Return each ``EuiccPackageResult`` ('BF51') TLV of a package result list."""
+    results: List[bytes] = []
+    try:
+        nodes = parse_tlv_nodes(list_value)
+    except ValueError:
+        # A list the walker cannot read is reported whole by the caller.
+        return results
+    for tag, value, _constructed in nodes:
+        if tag != 0xBF51:
+            continue
+        results.append(bytes.fromhex("BF51") + _encode_length(len(value)) + value)
+    return results
+
+
+def decode_pending_notification_list(list_value: bytes) -> List[Dict[str, str]]:
+    """Decode every PendingNotification of a notificationList ('A0') value.
+
+    SGP.32 v1.3 ``PendingNotification`` is a CHOICE with textually tagged
+    members, so ITU-T X.680 (02/2021) clause 29.2 keeps automatic tagging off
+    it: profileInstallationResult [55] stays 'BF37', otherSignedNotification
+    keeps the SEQUENCE tag '30', compactProfileInstallationResult [0] is 'A0'
+    and compactOtherSignedNotification [1] is 'A1'. Each alternative is
+    searched for the NotificationMetadata ('BF2F') it carries rather than at a
+    fixed depth; compactProfileInstallationResult carries none and is
+    summarised from its own members. A list the walker cannot split is
+    searched whole, which is how the SGP.22 v3.1 §5.7.9 ListNotificationResponse
+    shape (bare 'BF2F' items) still reads.
+    """
+    entries: List[Dict[str, str]] = []
+    try:
+        items = parse_tlv_nodes(list_value)
+    except ValueError:
+        items = []
+    if len(items) == 0:
+        for metadata in collect_nested_tag_values(list_value, 0xBF2F):
+            entries.append(decode_notification_entry(metadata))
+        return entries
+    for tag, value, _constructed in items:
+        if tag == 0xBF2F:
+            entries.append(decode_notification_entry(value))
+            continue
+        metadata_values = collect_nested_tag_values(value, 0xBF2F)
+        if len(metadata_values) > 0:
+            for metadata in metadata_values:
+                entries.append(decode_notification_entry(metadata))
+            continue
+        if tag == 0xA0:
+            entries.append(decode_compact_installation_result_entry(value))
+    return entries
+
+
+def decode_compact_installation_result_entry(value: bytes) -> Dict[str, str]:
+    """Summarise a ``compactProfileInstallationResult`` ('A0') PendingNotification.
+
+    SGP.32 v1.3 CompactProfileInstallationResultData tags transactionId [0]
+    ('80') and compactFinalResult [2], so automatic tagging is off and its
+    seqNumber keeps the universal INTEGER tag '02'. The alternative carries no
+    NotificationMetadata, hence no operation and no notification address.
+    """
+    entry: Dict[str, str] = {"notificationType": "compactProfileInstallationResult"}
+    try:
+        nodes = parse_tlv_nodes(value)
+    except ValueError:
+        return entry
+    for tag, node_value, constructed in nodes:
+        if tag != 0xA0 or constructed is False:
+            continue
+        data_map = parse_tlv_simple(node_value)
+        transaction_id = first_bytes(data_map.get(0x80))
+        if transaction_id is not None:
+            entry["transactionId"] = transaction_id.hex().upper()
+        seq_value = first_bytes(data_map.get(0x02))
+        if seq_value is not None:
+            entry["seqNumber"] = str(decode_integer(seq_value))
+    return entry
+
+
 def decode_notification_entry(value: bytes) -> Dict[str, str]:
-    """Decode a single NotificationEntry TLV into a structured dict."""
+    """Decode a single NotificationMetadata ('BF2F') TLV into a structured dict."""
     entry_map = parse_tlv_simple(value)
     entry: Dict[str, str] = {}
     seq_value = first_bytes(entry_map.get(0x80))
@@ -118,7 +221,7 @@ def decode_notification_entry(value: bytes) -> Dict[str, str]:
         entry["seqNumber"] = str(decode_integer(seq_value))
     op_value = first_bytes(entry_map.get(0x81))
     if op_value is not None:
-        entry["operation"] = format_named_bit_string(op_value, NOTIFICATION_EVENT_FLAGS)
+        entry["operation"] = _describe_notification_operation(op_value, entry)
     address_value = first_bytes(entry_map.get(0x0C))
     if address_value is not None:
         entry["notificationAddress"] = quote_text(address_value)
@@ -128,8 +231,62 @@ def decode_notification_entry(value: bytes) -> Dict[str, str]:
     return entry
 
 
+def _describe_notification_operation(value: bytes, entry: Dict[str, str]) -> str:
+    """Name the single NotificationEvent bit of a profileManagementOperation.
+
+    SGP.22 v3.1 §5.7.9 states "Only one bit SHALL be set to 1" in the
+    NotificationMetadata member, so the shared strict decoder is the one that
+    applies here rather than the multi-bit filter form the same BIT STRING
+    takes in ListNotificationRequest. A value that sets none or several bits
+    keeps its raw hex and records why it was not named.
+    """
+    hex_text = value.hex().upper()
+    try:
+        code, _short_name = decode_notification_operation_contents(value)
+    except ValueError as error:
+        record_notification_parse_error(entry, error)
+        return hex_text
+    name = NOTIFICATION_EVENT_FLAGS.get(code - 1, f"bit{code - 1}")
+    return f"{hex_text} (set: {name})"
+
+
+def decode_eim_acknowledgements(data: bytes) -> List[int]:
+    """Return the sequence numbers an EimAcknowledgements ('BF53') carries (SGP.32 v1.3 §2.11.1.4).
+
+    EimAcknowledgements ::= [83] SEQUENCE OF SequenceNumber with SequenceNumber
+    ::= [0] INTEGER, so each entry is an '80' INTEGER. A ProvideEimPackageResultResponse
+    ('BF50', §6.3.2.7) is unwrapped first; its emptyResponse and error
+    alternatives acknowledge nothing. Malformed BER, a foreign tag, an empty
+    or negative INTEGER raise ValueError.
+    """
+    nodes = parse_tlv_nodes(data)
+    if len(nodes) == 0:
+        return []
+    if len(nodes) != 1:
+        raise ValueError(f"EimAcknowledgements must be one TLV, got {len(nodes)}.")
+    tag, value, _constructed = nodes[0]
+    if tag == 0xBF50:
+        inner = parse_tlv_nodes(value)
+        if len(inner) != 1 or inner[0][0] != 0xBF53:
+            return []
+        tag, value, _constructed = inner[0]
+    if tag != 0xBF53:
+        raise ValueError(f"EimAcknowledgements must be tag 'BF53', got '{tag:X}'.")
+    sequence_numbers: List[int] = []
+    for item_tag, item_value, _item_constructed in parse_tlv_nodes(value):
+        if item_tag != 0x80:
+            raise ValueError(f"EimAcknowledgements entry must be tag '80', got '{item_tag:X}'.")
+        if len(item_value) == 0:
+            raise ValueError("EimAcknowledgements entry carries an empty INTEGER.")
+        sequence_number = int.from_bytes(item_value, "big", signed=True)
+        if sequence_number < 0:
+            raise ValueError(f"EimAcknowledgements entry carries a negative sequence number ({sequence_number}).")
+        sequence_numbers.append(sequence_number)
+    return sequence_numbers
+
+
 def decode_rat_rules(response: bytes) -> List[Dict[str, Any]]:
-    """Decode a GetRulesAuthorizationTable response into a list of RAT-rule dicts (SGP.22 §5.7.16)."""
+    """Decode a GetRAT response ('BF43') into RAT-rule dicts (SGP.22 v3.1 §5.7.22)."""
     root_value = unwrap_root_tag(response, 0xBF43)
     if root_value is None:
         return []
@@ -194,7 +351,7 @@ def decode_rat_rule(value: bytes) -> Dict[str, Any]:
             operator: Dict[str, str] = {}
             mcc_mnc_value = first_bytes(operator_map.get(0x80))
             if mcc_mnc_value is not None:
-                operator["mccMnc"] = decode_bcd_digits(mcc_mnc_value)
+                operator["mccMnc"] = decode_mcc_mnc(mcc_mnc_value)
             gid1_value = first_bytes(operator_map.get(0x81))
             if gid1_value is not None:
                 operator["gid1"] = gid1_value.hex().upper()
@@ -213,7 +370,7 @@ def decode_rat_rule(value: bytes) -> Dict[str, Any]:
 
 
 def decode_eim_configuration_entries(response: bytes) -> List[Dict[str, Any]]:
-    """Decode a GetEimConfigurationData response into a list of eIM config entry dicts (SGP.32 §6.3.8)."""
+    """Decode a GetEimConfigurationData response ('BF55') into eIM entry dicts (SGP.32 v1.3 §5.9.18)."""
     root_value = unwrap_root_tag(response, 0xBF55)
     if root_value is None:
         return []
@@ -287,19 +444,75 @@ def decode_eim_configuration_entry(value: bytes) -> Dict[str, Any]:
     if 0x89 in entry_map:
         entry["indirect_profile_download"] = "Present"
 
+    # eSipaProprietaryProtocolInformation [10] VendorSpecificExtension ('AA').
+    esipa_info = first_bytes(entry_map.get(0xAA))
+    if esipa_info is not None:
+        entry["esipa_proprietary_protocol_information"] = esipa_info.hex().upper()
+
     eim_pub = first_bytes(entry_map.get(0xA5))
     if eim_pub is not None:
         entry["eim_public_key_data"] = eim_pub
+        kind, der = decode_public_key_data_choice(eim_pub)
+        if len(der) > 0:
+            entry["eim_public_key_kind"] = kind
+            entry["eim_public_key_der"] = der
 
     tls_pub = first_bytes(entry_map.get(0xA6))
     if tls_pub is not None:
         entry["trusted_tls_public_key_data"] = tls_pub
+        kind, der = decode_public_key_data_choice(tls_pub)
+        if len(der) > 0:
+            entry["trusted_tls_public_key_kind"] = kind
+            entry["trusted_tls_public_key_der"] = der
 
     return entry
 
 
+def decode_public_key_data_choice(value: bytes) -> tuple[str, bytes]:
+    """Return ``(kind, der)`` for an eimPublicKeyData / trustedPublicKeyDataTls value.
+
+    SGP.32 v1.3 EimConfigurationData declares both as ``CHOICE {
+    SubjectPublicKeyInfo, Certificate }`` under AUTOMATIC TAGS, so the
+    alternatives travel as ``[0]`` / ``[1]`` IMPLICIT: the context tag
+    replaces the SEQUENCE tag and the value holds the SEQUENCE contents
+    (``A0 <SubjectPublicKeyInfo contents>`` or ``A1 <Certificate contents>``).
+    The DER header is restored here so X.509 tooling can read the result.
+    ``kind`` is ``"publicKey"``, ``"certificate"`` or ``""`` when the shape is
+    not recognised; ``der`` is empty in that last case. An alternative that
+    already wraps a complete SEQUENCE, the shape earlier simulator releases
+    produced, passes through unchanged.
+    """
+    raw = bytes(value or b"")
+    try:
+        nodes = parse_tlv_nodes(raw)
+    except ValueError:
+        return "", b""
+    if len(nodes) != 1:
+        return "", b""
+    tag, contents, _constructed = nodes[0]
+    if tag == 0x30:
+        return "", raw
+    if tag not in (0xA0, 0xA1):
+        return "", b""
+    kind = "publicKey"
+    if tag == 0xA1:
+        kind = "certificate"
+    try:
+        inner = parse_tlv_nodes(contents)
+    except ValueError:
+        inner = []
+    if len(inner) == 1 and inner[0][0] == 0x30:
+        return kind, contents
+    return kind, restore_sequence(contents)
+
+
 def decode_get_certs_response(response: bytes) -> Dict[str, Any]:
-    """Decode a GetCertsResponse TLV into a dict keyed by certificate role (SGP.32 §6.3.6)."""
+    """Decode a GetCertsResponse ('BF56') into a dict keyed by certificate role (SGP.32 v1.3 §5.9.10).
+
+    ``certs`` is the automatic ``[0]`` alternative ('A0') holding
+    ``eumCertificate [5]`` ('A5') and ``euiccCertificate [6]`` ('A6');
+    ``getCertsError`` is '81'.
+    """
     root_value = unwrap_root_tag(response, 0xBF56)
     if root_value is None:
         return {}
@@ -311,14 +524,70 @@ def decode_get_certs_response(response: bytes) -> Dict[str, Any]:
         result["error"] = GET_CERTS_ERROR_NAMES.get(error_code, str(error_code))
         return result
 
-    eum_values = collect_nested_tag_values(root_value, 0xA5)
+    eum_values, euicc_values = _get_certs_choice_values(root_value)
     if len(eum_values) > 0:
-        result["eumCertificate"] = eum_values[0]
-
-    euicc_values = collect_nested_tag_values(root_value, 0xA6)
+        result["eumCertificate"] = certificate_der_from_choice_value(eum_values[0])
     if len(euicc_values) > 0:
-        result["euiccCertificate"] = euicc_values[0]
+        result["euiccCertificate"] = certificate_der_from_choice_value(euicc_values[0])
     return result
+
+
+def _get_certs_choice_values(root_value: bytes) -> tuple[list[bytes], list[bytes]]:
+    """Collect the [5] / [6] values under certs [0], at most one level down.
+
+    The certificate contents behind those tags are not walked: a walk into
+    the signature BIT STRING would read its unused-bits octet as a tag.
+    """
+    eum_values: list[bytes] = []
+    euicc_values: list[bytes] = []
+
+    def take(tag: int, value: bytes) -> None:
+        if tag == 0xA5:
+            eum_values.append(value)
+        elif tag == 0xA6:
+            euicc_values.append(value)
+
+    for tag, value, constructed in parse_tlv_nodes(root_value):
+        take(tag, value)
+        if constructed and tag in (0xA0, 0xA1):
+            for inner_tag, inner_value, _ in parse_tlv_nodes(value):
+                take(inner_tag, inner_value)
+    return eum_values, euicc_values
+
+
+def _looks_like_certificate(candidate: bytes) -> bool:
+    # Certificate ::= SEQUENCE { tbsCertificate SEQUENCE, signatureAlgorithm
+    # SEQUENCE, signature BIT STRING } (RFC 5280 section 4.1).
+    try:
+        nodes = parse_tlv_nodes(candidate)
+        if len(nodes) != 1 or nodes[0][0] != 0x30:
+            return False
+        children = parse_tlv_nodes(nodes[0][1])
+    except ValueError:
+        return False
+    return [child[0] for child in children] == [0x30, 0x30, 0x03]
+
+
+def certificate_der_from_choice_value(value: bytes) -> bytes:
+    """Return the Certificate DER behind an implicitly tagged [5] / [6] value.
+
+    The implicit tag replaces the certificate's SEQUENCE tag, so the value
+    holds the SEQUENCE contents; the header is restored here. A value that
+    already is a complete certificate, the shape earlier simulator releases
+    produced, passes through.
+    """
+    raw = bytes(value or b"")
+    if _looks_like_certificate(raw):
+        return raw
+    restored = restore_sequence(raw)
+    if _looks_like_certificate(restored):
+        return restored
+    return raw
+
+
+def _encode_length(length: int) -> bytes:
+    """Encode a definite BER length (ITU-T X.690 (02/2021) clause 8.1.3)."""
+    return encode_ber_length(length)
 
 
 def unwrap_root_tag(data: bytes, root_tag: int) -> Optional[bytes]:
@@ -351,25 +620,48 @@ def decode_text_or_hex(value: bytes) -> str:
 
 
 def decode_bcd_digits(value: bytes) -> str:
-    """Decode BCD-encoded bytes to a digit string (3GPP TS 24.008 §10.5.1.3)."""
-    digits: List[str] = []
-    for index, byte_value in enumerate(value):
-        low = byte_value & 0x0F
-        high = (byte_value >> 4) & 0x0F
-        # TBCD filler is permitted only in the high nibble of the final
-        # octet. Accepting a low-nibble F used to append the literal string
-        # "15", producing a plausible but incorrect ICCID/MCC-MNC.
-        if low > 9:
-            return value.hex().upper()
-        if high == 0x0F:
-            if index != len(value) - 1:
-                return value.hex().upper()
-        elif high > 9:
-            return value.hex().upper()
-        digits.append(str(low))
-        if high != 0x0F:
-            digits.append(str(high))
-    return "".join(digits)
+    """Decode nibble-swapped BCD to digits (ETSI TS 102 221 v18.4 §13.2 EF ICCID coding)."""
+    raw = bytes(value or b"")
+    if len(raw) == 0:
+        return ""
+    text = swap_nibbles(raw).hex().upper()
+    # TS 102 221 v18.4 §13.2 pads on the right, so the filler can only be the
+    # last nibble of the printed value. Accepting one elsewhere used to append
+    # the literal string "15", producing a plausible but incorrect ICCID.
+    if text.endswith("F"):
+        text = text[:-1]
+    if text.isdigit() is False:
+        return raw.hex().upper()
+    return text
+
+
+def decode_mcc_mnc(value: bytes) -> str:
+    """Decode a 3-octet PLMN identity to its MCC and MNC digits.
+
+    3GPP TS 24.008 v19.5 §10.5.1.3 Figure 10.5.3: octet 1 carries MCC digit 2
+    (b8-b5) and MCC digit 1 (b4-b1), octet 2 MNC digit 3 and MCC digit 3,
+    octet 3 MNC digit 2 and MNC digit 1; a two-digit MNC codes MNC digit 3
+    as 'F'. SGP.22 v3.1 §2.9.2.1 lets any nibble of a RAT ``mccMnc`` be the
+    wildcard 'E', which is kept in the output. Any other non-decimal nibble
+    returns the raw hex instead of a plausible but wrong PLMN.
+    """
+    raw = bytes(value or b"")
+    if len(raw) != 3:
+        return raw.hex().upper()
+    mcc_digits = [raw[0] & 0x0F, (raw[0] >> 4) & 0x0F, raw[1] & 0x0F]
+    mnc_digit_3 = (raw[1] >> 4) & 0x0F
+    mnc_digits = [raw[2] & 0x0F, (raw[2] >> 4) & 0x0F]
+    if mnc_digit_3 != 0x0F:
+        mnc_digits.append(mnc_digit_3)
+    text: List[str] = []
+    for nibble in mcc_digits + mnc_digits:
+        if nibble <= 9:
+            text.append(str(nibble))
+        elif nibble == 0x0E:
+            text.append("E")
+        else:
+            return raw.hex().upper()
+    return "".join(text)
 
 
 def format_named_bit_string(value: bytes, bit_names: Dict[int, str]) -> str:

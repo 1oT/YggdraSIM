@@ -45,6 +45,15 @@ def read_token_file(path: str | Path) -> str:
 
 
 def write_new_token_file(path: str | Path) -> tuple[str, Path]:
+    """Mint a remote-lab token and write it to ``path``.
+
+    No caller in this tree, unlike its ``read_token_file`` counterpart, so a
+    reference count reads it as dead. It is not: it is the only consumer of
+    the ``generate_token`` import, and scripts/release/build_mcp_standalone.py
+    rewrites that import line by literal text match when it vendors this
+    module. Removing the function drops the import and the standalone MCP
+    build fails with "expected source text not found".
+    """
     token = generate_token()
     written = atomic_write_bytes(
         Path(path).expanduser(),

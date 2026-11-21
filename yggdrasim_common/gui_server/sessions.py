@@ -4,20 +4,73 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Final, Optional
 
 
 _LOGGER = logging.getLogger("yggdrasim.gui.sessions")
+
+
+# Idle ceiling for a session that owns a PC/SC handle. The workbench
+# renders a decoded file from its own cache, so an operator reading one
+# never reaches the backend to refresh the clock -- the ceiling covers
+# reading time, not click frequency, and a card left in an unattended
+# reader still frees its handle within it.
+DEFAULT_CARD_SESSION_IDLE_S: Final[float] = 900.0
+
+CARD_SESSION_IDLE_ENV: Final[str] = "YGGDRASIM_GUI_CARD_SESSION_IDLE_SECONDS"
 
 
 # In-memory authoring handles set this flag while they contain unsaved work.
 # The generic session manager deliberately does not inspect subsystem-specific
 # dirty-state shapes; this single opt-in key is the cross-subsystem contract.
 AUTO_CLOSE_PROTECTION_HANDLE_KEY = "__ygg_protect_from_automatic_close__"
+
+
+def _operator_card_session_idle_seconds() -> Optional[float]:
+    """Return the operator's idle ceiling, or None when unset or unusable.
+
+    Resolved per ``open()`` rather than in ``__init__``: the manager is a
+    module singleton built at import, so a value bound there would freeze
+    whatever the process started with and the GUI's Environment ->
+    Configuration view could never move it. The persistence file is read
+    directly because the GUI console scripts do not call
+    ``apply_persisted_env_overrides`` -- ``yggdrasim_common/cli_theme.py``
+    reads its own flag the same way.
+    """
+    raw = str(os.environ.get(CARD_SESSION_IDLE_ENV, "") or "").strip()
+    if len(raw) == 0:
+        try:
+            from yggdrasim_common.env_flags import load_persisted_overrides
+            raw = str(load_persisted_overrides().get(CARD_SESSION_IDLE_ENV, "") or "").strip()
+        except (ImportError, OSError):
+            # Resolving the runtime root touches the filesystem. The
+            # ceiling is housekeeping, so a root that cannot be read
+            # falls back rather than stopping a session from opening.
+            return None
+    if len(raw) == 0:
+        return None
+    try:
+        parsed = float(raw)
+    except ValueError:
+        _LOGGER.warning(
+            "%s=%r is not a number; using the built-in ceiling.",
+            CARD_SESSION_IDLE_ENV,
+            raw,
+        )
+        return None
+    if parsed <= 0.0:
+        _LOGGER.warning(
+            "%s=%r is not positive; using the built-in ceiling.",
+            CARD_SESSION_IDLE_ENV,
+            raw,
+        )
+        return None
+    return parsed
 
 
 @dataclass
@@ -30,8 +83,14 @@ class CardSession:
     last_used_at: float
     idle_timeout_s: float
     metadata: dict[str, Any]
-    _lock: threading.Lock
+    # Reentrant: a dispatcher holding this may call a sibling dispatcher on
+    # the same session (scp03 does so in ~11 places, e.g. enable_profile ->
+    # profile_lifecycle), which a plain Lock would deadlock.
+    _lock: threading.RLock
     protect_from_auto_close: bool = False
+    # A kind that names its own ceiling is counted against it alone and
+    # stays out of the shared pool ``max_sessions`` bounds.
+    max_of_kind: Optional[int] = None
 
     def touch(self) -> None:
         self.last_used_at = time.time()
@@ -48,6 +107,7 @@ class CardSession:
             "last_used_at": self.last_used_at,
             "idle_timeout_s": self.idle_timeout_s,
             "protect_from_auto_close": self.is_auto_close_protected(),
+            "max_of_kind": self.max_of_kind,
             "metadata": dict(self.metadata),
         }
 
@@ -65,14 +125,37 @@ class SessionManager:
         self,
         *,
         max_sessions: int = 8,
-        default_idle_timeout_s: float = 180.0,
+        default_idle_timeout_s: Optional[float] = None,
     ) -> None:
         self._sessions: dict[str, CardSession] = {}
         self._lock = threading.Lock()
         self._max_sessions = int(max_sessions)
-        self._default_idle_timeout_s = float(default_idle_timeout_s)
+        # A caller that names its own ceiling keeps it: the env flag tunes
+        # the shipped default, it does not overrule a deliberate choice.
+        self._default_is_caller_chosen = default_idle_timeout_s is not None
+        self._default_idle_timeout_s = float(
+            DEFAULT_CARD_SESSION_IDLE_S
+            if default_idle_timeout_s is None
+            else default_idle_timeout_s
+        )
 
     # ---- lifecycle ----------------------------------------------------
+
+    def _resolve_idle_timeout(self, requested: Optional[float]) -> float:
+        """Return the ceiling for a session opening now.
+
+        Precedence: the dispatcher's own value (SAIP authoring asks for
+        hours), then a caller-chosen manager default, then the operator's
+        flag, then the shipped default.
+        """
+        if requested is not None:
+            return float(requested)
+        if self._default_is_caller_chosen:
+            return self._default_idle_timeout_s
+        operator_choice = _operator_card_session_idle_seconds()
+        if operator_choice is not None:
+            return operator_choice
+        return self._default_idle_timeout_s
 
     def open(
         self,
@@ -82,34 +165,25 @@ class SessionManager:
         close: Callable[[], None],
         idle_timeout_s: Optional[float] = None,
         protect_from_auto_close: bool = False,
+        max_of_kind: Optional[int] = None,
         metadata: Optional[dict[str, Any]] = None,
     ) -> CardSession:
+        """Register a session and return it.
+
+        ``max_sessions`` bounds the shared pool: every kind that names no
+        ceiling of its own, which is the kinds holding a reader. A kind
+        that passes ``max_of_kind`` is counted against that ceiling alone
+        -- it neither fills the shared pool nor is evicted to make room
+        in it -- and is refused, not evicted, once the ceiling is reached.
+        """
         self._reap_idle_locked_unsafe()  # cheap no-op if no idle peers
         with self._lock:
-            if len(self._sessions) >= self._max_sessions:
-                # Never discard protected authoring work to make room. Prefer
-                # the oldest unprotected session; if every live session is
-                # protected, make the caller ask the operator to close one.
-                candidates = [
-                    entry
-                    for entry in self._sessions.values()
-                    if entry.is_auto_close_protected() is False
-                ]
-                if len(candidates) == 0:
-                    raise RuntimeError(
-                        "session cap reached and every live session contains "
-                        "protected work; save or close a session before opening another."
-                    )
-                oldest = min(candidates, key=lambda entry: entry.last_used_at)
-                _LOGGER.info(
-                    "session cap reached (%d); evicting %s/%s",
-                    self._max_sessions,
-                    oldest.kind,
-                    oldest.id,
-                )
-                self._close_session_locked(oldest)
+            if max_of_kind is None:
+                self._make_room_in_shared_pool_locked()
+            else:
+                self._assert_kind_ceiling_locked(str(kind), int(max_of_kind))
             session_id = secrets.token_hex(8)
-            timeout = idle_timeout_s if idle_timeout_s is not None else self._default_idle_timeout_s
+            timeout = self._resolve_idle_timeout(idle_timeout_s)
             now = time.time()
             session = CardSession(
                 id=session_id,
@@ -120,12 +194,54 @@ class SessionManager:
                 last_used_at=now,
                 idle_timeout_s=float(timeout),
                 protect_from_auto_close=bool(protect_from_auto_close),
+                max_of_kind=None if max_of_kind is None else int(max_of_kind),
                 metadata=dict(metadata or {}),
-                _lock=threading.Lock(),
+                _lock=threading.RLock(),
             )
             self._sessions[session_id] = session
             _LOGGER.info("session opened kind=%s id=%s", kind, session_id)
             return session
+
+    def _make_room_in_shared_pool_locked(self) -> None:
+        pool = [
+            entry for entry in self._sessions.values() if entry.max_of_kind is None
+        ]
+        if len(pool) < self._max_sessions:
+            return
+        # Never discard protected authoring work to make room. Prefer the
+        # oldest unprotected session; if every live session is protected,
+        # make the caller ask the operator to close one.
+        candidates = [
+            entry for entry in pool if entry.is_auto_close_protected() is False
+        ]
+        if len(candidates) == 0:
+            raise RuntimeError(
+                "session cap reached and every live session contains "
+                "protected work; save or close a session before opening another."
+            )
+        oldest = min(candidates, key=lambda entry: entry.last_used_at)
+        _LOGGER.info(
+            "session cap reached (%d); evicting %s/%s",
+            self._max_sessions,
+            oldest.kind,
+            oldest.id,
+        )
+        self._close_session_locked(oldest)
+
+    def _assert_kind_ceiling_locked(self, kind: str, ceiling: int) -> None:
+        """Refuse ``kind`` at its ceiling rather than evict a peer.
+
+        A kind with a ceiling of its own holds documents, not readers. The
+        operator loaded each one on purpose, so a clean peer vanishing to
+        admit the next is the defect the ceiling rules out; the idle
+        reaper still reclaims what a closed page left behind.
+        """
+        live = sum(1 for entry in self._sessions.values() if entry.kind == kind)
+        if live >= ceiling:
+            raise RuntimeError(
+                f"{kind} session ceiling reached ({ceiling} open); "
+                "close one before opening another."
+            )
 
     def close(self, session_id: str) -> bool:
         with self._lock:
@@ -177,7 +293,7 @@ class SessionManager:
             from yggdrasim_common.apdu_recorder import get_recorder
 
             get_recorder().disable_raw_capture(scope)
-        except Exception as cleanup_error:  # noqa: BLE001 — session close must continue
+        except Exception as cleanup_error:  # noqa: BLE001 -- session close must continue
             _LOGGER.warning(
                 "APDU raw-capture cleanup failed kind=%s id=%s (%s)",
                 session.kind,
@@ -208,20 +324,37 @@ class SessionManager:
 
     # ---- reaper -------------------------------------------------------
 
-    def reap_idle(self) -> int:
-        return self._reap_idle_locked_unsafe()
+    def reap_idle(
+        self,
+        *,
+        select: Optional[Callable[[CardSession], bool]] = None,
+    ) -> int:
+        """Close idle sessions, optionally narrowed to ``select``.
 
-    def _reap_idle_locked_unsafe(self) -> int:
+        A caller that owns one subsystem passes a predicate so its own
+        housekeeping cannot decide the lifetime of unrelated work.
+        Without one the sweep covers the whole store, which is what
+        ``open()`` wants before it admits a new session.
+        """
+        return self._reap_idle_locked_unsafe(select=select)
+
+    def _reap_idle_locked_unsafe(
+        self,
+        *,
+        select: Optional[Callable[[CardSession], bool]] = None,
+    ) -> int:
         now = time.time()
         victims: list[CardSession] = []
         with self._lock:
             for session in list(self._sessions.values()):
-                if (
-                    session.is_idle(now=now)
-                    and session.is_auto_close_protected() is False
-                ):
-                    victims.append(session)
-                    self._sessions.pop(session.id, None)
+                if session.is_idle(now=now) is False:
+                    continue
+                if session.is_auto_close_protected():
+                    continue
+                if select is not None and select(session) is False:
+                    continue
+                victims.append(session)
+                self._sessions.pop(session.id, None)
         for session in victims:
             _LOGGER.info("session idle-reaped kind=%s id=%s", session.kind, session.id)
             self._invoke_close(session)

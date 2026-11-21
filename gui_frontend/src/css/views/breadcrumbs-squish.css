@@ -5,12 +5,47 @@
 
 /* --- breadcrumbs squish when the strip is wide ------------------------ */
 
+/* The crumb yields before the status cluster does: it shrinks to an
+   ellipsis instead of being covered by controls that cannot shrink. */
 .topbar > .breadcrumbs {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.topbar > .status-cluster {
+  flex: 0 1 auto;
+}
+
+/* Progressive disclosure for the top bar. Every control keeps its
+   title and aria-label; only the redundant text goes at each step, so
+   a 1280 px laptop still shows the brand and every bridge pill. Below
+   1300 px the suite chip and the crumb go (shell.css). The first step sits
+   at 1760 px: three bridge pills (HIL bridge, Remote, Local eIM) with their
+   values put Classic over the crumbs at 1440 px, and a plugin pill drops
+   its value at the same width; the dot keeps the state, the title the text. */
+@media (max-width: 1760px) {
+  .topbar-card-bridge-value {
+    display: none;
+  }
+
+  .topbar-backend-switch .topbar-control-label {
+    display: none;
+  }
+}
+
+@media (max-width: 1700px) {
+  .topbar-suite-separator,
+  .topbar-suite-active {
+    display: none;
+  }
+
+  .theme-picker label {
+    display: none;
+  }
 }
 
 /* Hide the legacy SCP03 per-tab session strip and left reader pane.

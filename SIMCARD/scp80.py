@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """SMS-PP / SCP80 secured command execution inside the simulator."""
 
@@ -37,7 +36,7 @@ class Scp80Logic:
         self._concat_asm_parts: dict[int, bytes] = {}
 
     def handle_envelope(self, payload: bytes) -> ApduResult:
-        """Handle an OTA ENVELOPE command (ETSI TS 102 225 §7.2) and return (data, SW1, SW2)."""
+        """Handle an OTA ENVELOPE (SMS-PP DOWNLOAD) command (3GPP TS 31.111 v19.4 §7.1.1.2) and return (data, SW1, SW2)."""
         self.state.ota_count += 1
         envelope = bytes(payload or b"")
         fetch_body: bytes

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Bearer-token middleware + rate-limiter for the GUI server.
 
 Implements the security posture defined in ``V2_UNIVERSAL_GUI_PLAN`` §8.3
@@ -11,11 +10,11 @@ Implements the security posture defined in ``V2_UNIVERSAL_GUI_PLAN`` §8.3
 * Comparison is constant-time via :func:`hmac.compare_digest`.
 * Failed auth is throttled per-source-IP with a simple token bucket
   (default: 5 failures / minute; further failures return HTTP 429).
-* The raw token never enters any log line — only its SHA-256 prefix.
+* The raw token never enters any log line -- only its SHA-256 prefix.
 * Requests to ``/`` (SPA index), ``/static/*``, ``/favicon.ico``, and
   ``/healthz`` (liveness) bypass the auth check because they are either
   static assets served on the same origin or cheap liveness probes.
-  All ``/api/*`` endpoints are authenticated — including ``/api/health``.
+  All ``/api/*`` endpoints are authenticated -- including ``/api/health``.
 
 The module holds no FastAPI imports at the module level. It is safe to
 unit-test the rate-limit + token-check helpers without the optional GUI
@@ -55,7 +54,7 @@ DEFAULT_RATE_LIMIT_MAX_FAILURES = 5
 WEBSOCKET_APPLICATION_PROTOCOL = "yggdrasim"
 
 # Request paths that bypass the bearer check. Keep this list narrow on
-# purpose — anything that needs data out of the engine must go through
+# purpose -- anything that needs data out of the engine must go through
 # /api/*.
 _BYPASS_EXACT: frozenset[str] = frozenset({
     "/",
@@ -159,7 +158,11 @@ def compare_tokens(expected: str, provided: str) -> bool:
         pad = max(len(expected_bytes), len(provided_bytes))
         expected_bytes = expected_bytes.ljust(pad, b"\x00")
         provided_bytes = provided_bytes.ljust(pad, b"\x00")
-        return False or hmac.compare_digest(expected_bytes, provided_bytes)  # always False, but timed
+        # Run the compare so the length mismatch costs the same time as a
+        # content mismatch, then discard it: NUL-padding makes b"abc" and
+        # b"abc\x00" compare equal, so the result is not a valid verdict.
+        hmac.compare_digest(expected_bytes, provided_bytes)
+        return False
     return hmac.compare_digest(expected_bytes, provided_bytes)
 
 
@@ -241,7 +244,7 @@ class FailureRateLimiter:
 # that returned a ``dispatch`` coroutine fed into Starlette's
 # :class:`starlette.middleware.base.BaseHTTPMiddleware`. That class buffers
 # the entire response body through an ``anyio`` memory stream and pins a
-# task-group reference per request — a long-standing memory growth source
+# task-group reference per request -- a long-standing memory growth source
 # (encode/starlette#1438, encode/starlette#1715). Every ``/api/health``
 # poll (10 s tick), every reader-pane refresh, and every Command Center
 # action would each leak a few KB into uvicorn's worker memory, which over
@@ -250,7 +253,7 @@ class FailureRateLimiter:
 # The replacement is a thin pure-ASGI middleware: it wraps ``__call__``
 # directly, never wraps the response body, and only allocates the small
 # headers list it needs to inject the hardening headers. WebSocket /
-# lifespan scopes pass through untouched — every WS handler already runs
+# lifespan scopes pass through untouched -- every WS handler already runs
 # its own ``compare_tokens`` check.
 
 
@@ -283,9 +286,9 @@ def _scope_client_source(scope: dict[str, Any]) -> str:
 
 
 # CSP must travel as an HTTP response header for ``frame-ancestors`` to
-# be honoured — browsers silently ignore that directive when delivered
+# be honoured -- browsers silently ignore that directive when delivered
 # via ``<meta http-equiv="Content-Security-Policy">``. The other source
-# directives (script-src, style-src, …) work either way, but unifying
+# directives (script-src, style-src, ...) work either way, but unifying
 # delivery on the header keeps the policy in one place.
 _CSP_HEADER: bytes = (
     b"default-src 'self'; "

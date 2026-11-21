@@ -118,5 +118,5 @@ def test_frontend_exposes_cancel_control_for_generic_action_streams() -> None:
 
     assert 'streamSocket.send(JSON.stringify({ type: "cancel" }))' in javascript
     assert "cc-action-stream-cancel" in javascript
-    assert 'action.id !== "scp11.download_profile"' in javascript
+    assert "scp11.download_profile" not in javascript
     assert ".cc-action-stream-cancel" in stylesheet

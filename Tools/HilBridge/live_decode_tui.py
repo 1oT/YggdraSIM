@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge live-decode TUI: Textual app displaying a real-time decoded APDU transcript with protocol annotations."""
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -233,6 +233,7 @@ _LIGHT_THEME_NAMES = frozenset({
 })
 
 _SUMMARY_GROUP_ORDER = (
+    "ATR",
     "Channels",
     "OTA SMS",
     "SMS",
@@ -321,6 +322,13 @@ _SUMMARY_FS_MARKERS = (
     "UPDATE RECORD",
     "GET RESPONSE",
     "STATUS",
+    "INCREASE",
+    "SET DATA",
+    "RETRIEVE DATA",
+    "ACTIVATE FILE",
+    "DEACTIVATE FILE",
+    "CREATE FILE",
+    "DELETE FILE",
 )
 
 _SUMMARY_EUICC_MARKERS = (
@@ -356,6 +364,16 @@ _SUMMARY_AUTHENTICATION_MARKERS = (
     "ENABLE CHV",
     "DISABLE CHV",
     "UNBLOCK CHV",
+    "VERIFY PIN",
+    "CHANGE PIN",
+    "CHANGE REFERENCE DATA",
+    "ENABLE PIN",
+    "DISABLE PIN",
+    "ENABLE VERIFICATION REQUIREMENT",
+    "DISABLE VERIFICATION REQUIREMENT",
+    "UNBLOCK PIN",
+    "RESET RETRY COUNTER",
+    "MANAGE SECURE CHANNEL",
     "MSE",
     "PSO",
 )
@@ -506,7 +524,7 @@ def _summary_grouping_text(
     protocol_text = str(row.protocol or "").strip()
     if len(protocol_text) > 0:
         parts.append(protocol_text)
-    return " | ".join(parts).upper()
+    return " | ".join(parts).upper().replace("_", " ")
 
 
 def _summary_matches_marker(summary_text: str, markers: tuple[str, ...]) -> bool:
@@ -535,10 +553,22 @@ def _summary_telephony_group_name(summary_text: str) -> str | None:
     return None
 
 
+def _summary_row_is_atr(row: PacketSummary) -> bool:
+    """True for the Answer To Reset that opens a card session.
+
+    TS 102 221 v18.4 clause 6.3. It carries no CLA/INS, so it matches no
+    command marker and would otherwise sit in the uncategorised tail
+    beside genuinely unrecognised APDUs.
+    """
+    return re.search(r"\bATR\b", str(row.info or "").upper()) is not None
+
+
 def _summary_group_name(
     row: PacketSummary,
     annotation: StatefulFrameAnnotation | None,
 ) -> str:
+    if _summary_row_is_atr(row):
+        return "ATR"
     if _summary_channel_session_id(row, annotation) is not None:
         return "Channels"
     fs_context = _summary_fs_context(annotation)
@@ -1183,10 +1213,16 @@ def _summary_card_session_title(
     card_session_index: int,
     reset_reason: str,
     iccid: str = "",
+    imsi: str = "",
 ) -> str:
     parts: list[str] = [f"Card Session {int(card_session_index)}"]
     normalized_iccid = str(iccid or "").strip()
-    if len(normalized_iccid) > 0:
+    normalized_imsi = str(imsi or "").strip()
+    if len(normalized_iccid) > 0 and len(normalized_imsi) > 0:
+        parts.append(f"[{normalized_iccid} / {normalized_imsi}]")
+    elif len(normalized_imsi) > 0:
+        parts.append(f"[IMSI {normalized_imsi}]")
+    elif len(normalized_iccid) > 0:
         parts.append(f"[{normalized_iccid}]")
     normalized_reason = str(reset_reason or "").strip()
     if len(normalized_reason) > 0:
@@ -1201,17 +1237,19 @@ def _summary_partition_rows_by_card_session(
     list[tuple[int, list[PacketSummary]]],
     dict[int, str],
     dict[int, str],
+    dict[int, str],
 ]:
     # Walk the rows once in capture order, grouping by card_session_index
     # (defaults to 1 when an annotation is missing or the field is unset
     # on legacy traces). We also surface the reset reason recorded on
-    # the first frame of each new session and the ICCID backfilled onto
-    # every frame of the session so the wrapper can be captioned with
-    # both pieces.
+    # the first frame of each new session, and the ICCID and IMSI
+    # backfilled onto every frame of the session so the wrapper can be
+    # captioned with all of them.
     rows_by_session: dict[int, list[PacketSummary]] = {}
     ordered_session_indices: list[int] = []
     reset_reasons: dict[int, str] = {}
     iccids: dict[int, str] = {}
+    imsis: dict[int, str] = {}
     for row in rows:
         annotation = annotations.get(int(row.number))
         card_session_index = int(
@@ -1237,11 +1275,20 @@ def _summary_partition_rows_by_card_session(
             and card_session_index not in iccids
         ):
             iccids[card_session_index] = iccid_text
+        imsi_text = str(
+            getattr(annotation, "card_session_imsi", "") or ""
+        ).strip()
+        if (
+            len(imsi_text) > 0
+            and card_session_index not in imsis
+        ):
+            imsis[card_session_index] = imsi_text
     ordered_session_indices.sort()
     return (
         [(idx, rows_by_session[idx]) for idx in ordered_session_indices],
         reset_reasons,
         iccids,
+        imsis,
     )
 
 
@@ -1610,6 +1657,14 @@ def _summary_partition_channel_poll_rows(
     return ordered_polls
 
 
+def _summary_frame_count_caption(frame_count: int) -> str:
+    """Return the " (N frames)" caption the structural summary nodes carry."""
+    count = int(frame_count)
+    if count == 1:
+        return " (1 frame)"
+    return f" ({count} frames)"
+
+
 def _summary_partition_group_poll_rows(
     session_buckets: list[tuple[int, list[PacketSummary]]],
     annotations: dict[int, StatefulFrameAnnotation],
@@ -1774,6 +1829,8 @@ def _summary_secondary_text(
 ) -> str | None:
     base_info = _summary_base_info_text(row, annotation)
     if base_info is not None:
+        if _summary_display_label_text(base_info) == _summary_primary_text(row, annotation):
+            return None
         return base_info
     route_text = _packet_route_text(row)
     if route_text is not None:
@@ -1869,6 +1926,10 @@ def _filter_summary_rows(
 
 def _summary_group_color(group_name: str, palette: TuiThemePalette) -> str:
     return {
+        # The same stroke the card-session wrapper is drawn in: the ATR is
+        # the frame that opens one. palette.context matches ETSI FS, which
+        # would have made the two indistinguishable in the tree.
+        "ATR": palette.timer,
         "Channels": palette.bip,
         "BIP": palette.bip,
         "OTA SMS": palette.security,
@@ -3229,7 +3290,7 @@ def _populate_summary_tree(
             poll_node = root.add(
                 Text.assemble(
                     (poll_title, f"bold {palette.frame}"),
-                    (f" ({len(poll_rows)} frames)", f"dim {palette.secondary}"),
+                    (_summary_frame_count_caption(len(poll_rows)), f"dim {palette.secondary}"),
                 ),
                 data={
                     "kind": "poll_cycle",
@@ -3326,7 +3387,7 @@ def _populate_summary_tree(
             poll_root_node = parent_node.add(
                 Text.assemble(
                     (_summary_poll_root_title(), f"bold {palette.bip}"),
-                    (f" ({poll_root_frame_count} frames)", f"dim {palette.secondary}"),
+                    (_summary_frame_count_caption(poll_root_frame_count), f"dim {palette.secondary}"),
                 ),
                 data={
                     "kind": "poll_group",
@@ -3356,7 +3417,7 @@ def _populate_summary_tree(
             poll_node = (poll_root_node or parent_node).add(
                 Text.assemble(
                     (poll_title, f"bold {palette.bip}"),
-                    (f" ({poll_frame_count} frames)", f"dim {palette.secondary}"),
+                    (_summary_frame_count_caption(poll_frame_count), f"dim {palette.secondary}"),
                 ),
                 data={
                     "kind": "poll",
@@ -3379,7 +3440,7 @@ def _populate_summary_tree(
                 target_node = poll_node.add(
                     Text.assemble(
                         (target_title, f"bold {palette.bip}"),
-                        (f" ({target_frame_count} frames)", f"dim {palette.secondary}"),
+                        (_summary_frame_count_caption(target_frame_count), f"dim {palette.secondary}"),
                     ),
                     data={
                         "kind": "poll_target",
@@ -3397,7 +3458,7 @@ def _populate_summary_tree(
                     session_node = target_node.add(
                         Text.assemble(
                             (session_title, f"bold {palette.bip}"),
-                            (f" ({len(session_rows)} frames)", f"dim {palette.secondary}"),
+                            (_summary_frame_count_caption(len(session_rows)), f"dim {palette.secondary}"),
                         ),
                         data={
                             "kind": "session",
@@ -3509,6 +3570,7 @@ def _populate_summary_tree(
         card_session_rows,
         card_session_reasons,
         card_session_iccids,
+        card_session_imsis,
     ) = _summary_partition_rows_by_card_session(rows, annotations)
     if len(card_session_rows) <= 1:
         if len(card_session_rows) == 0:
@@ -3521,13 +3583,14 @@ def _populate_summary_tree(
         session_key = _summary_card_session_key(card_session_index)
         session_reason = card_session_reasons.get(int(card_session_index), "")
         session_iccid = card_session_iccids.get(int(card_session_index), "")
+        session_imsi = card_session_imsis.get(int(card_session_index), "")
         session_title = _summary_card_session_title(
-            card_session_index, session_reason, session_iccid
+            card_session_index, session_reason, session_iccid, session_imsi
         )
         wrapper_node = root.add(
             Text.assemble(
                 (session_title, f"bold {palette.timer}"),
-                (f" ({len(session_rows_subset)} frames)", f"dim {palette.secondary}"),
+                (_summary_frame_count_caption(len(session_rows_subset)), f"dim {palette.secondary}"),
             ),
             data={
                 "kind": "card_session",
@@ -4654,12 +4717,27 @@ def run_live_decode_tui(
             self._refresh_status_line()
             self.call_after_refresh(self._apply_split_sizes)
             self.call_after_refresh(self._ensure_valid_focus)
-            self.set_interval(0.35, self._schedule_summary_refresh)
-            self.set_interval(0.35, self._tick_status_refresh)
-            self.set_interval(0.15, self._drain_live_stream_tick)
-            self.set_interval(1.0, self._ensure_live_stream_started)
+            self.set_interval(0.35, self._while_running(self._schedule_summary_refresh))
+            self.set_interval(0.35, self._while_running(self._tick_status_refresh))
+            self.set_interval(0.15, self._while_running(self._drain_live_stream_tick))
+            self.set_interval(1.0, self._while_running(self._ensure_live_stream_started))
             self.call_after_refresh(self._schedule_summary_refresh)
             self.call_after_refresh(self._ensure_live_stream_started)
+
+        def _while_running(self, tick: Callable[[], None]) -> Callable[[], None]:
+            """Skip an interval tick once the app has stopped running.
+
+            ``App._shutdown`` clears ``is_running`` and prunes the screens
+            before it stops the app's timers, and ``on_unmount`` sets
+            ``_shutdown_event`` after both, so a tick in between found no
+            ``#summary_tree`` or ``#status_line`` and raised ``NoMatches``.
+            """
+
+            def guarded() -> None:
+                if self.is_running:
+                    tick()
+
+            return guarded
 
         def on_unmount(self) -> None:
             self._shutdown_event.set()
@@ -5917,7 +5995,7 @@ def run_live_decode_tui(
             if len(breakdown_parts) == 0:
                 return ""
             if len(ranked) > max_buckets:
-                breakdown_parts.append("…")
+                breakdown_parts.append("...")
             return " ".join(breakdown_parts)
 
         def pause_telemetry_snapshot(self) -> dict[str, int | float]:

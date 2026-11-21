@@ -7,11 +7,13 @@ Covers the four ProfileElement consumers added in the round closing
 out the round-trip from a SAIP-encoded BPP into a runtime
 ``SimCardState``:
 
-* ``pinCodes`` (SAIP §5.6.1)         -> ``SimProfileImage.pin_codes``
-* ``pukCodes`` (SAIP §5.6.2)         -> ``SimProfileImage.puk_codes``
-* ``securityDomain`` (SAIP §5.5)     -> ``SimProfileImage.security_domains``
-* ``rfm`` (SAIP §5.7)                -> ``SimProfileImage.rfm_instances``
-* ``genericFileManagement`` (§5.4)   -> ``SimProfileImage.nodes``
+* ``pinCodes`` (TCA SAIP v3.4.1 §8.5.1 Pin Code PE)     -> ``SimProfileImage.pin_codes``
+* ``pukCodes`` (TCA SAIP v3.4.1 §8.5.2 PUK Code PE)     -> ``SimProfileImage.puk_codes``
+* ``securityDomain`` (TCA SAIP v3.4.1 §8.6.1 Security Domain PE)
+  -> ``SimProfileImage.security_domains``
+* ``rfm`` (TCA SAIP v3.4.1 §8.8 RFM Parameters)         -> ``SimProfileImage.rfm_instances``
+* ``genericFileManagement`` (TCA SAIP v3.4.1 §8.3.5 Generic File management PE)
+  -> ``SimProfileImage.nodes``
 
 Plus the runtime-projection step in ``rebuild_runtime_filesystem``
 that lights up ``state.chv_references`` / ``state.gp_apps`` /
@@ -85,7 +87,7 @@ class SaipPinCodesConsumerTests(unittest.TestCase):
     def test_global_pin1_is_disabled_and_unblock_target_links_back(self) -> None:
         image = _load_image_or_skip(self)
         global_pin = next(entry for entry in image.pin_codes if entry.key_reference == 0x01)
-        # SAIP §5.6.1 attribute byte bit 0 = "PIN enabled". The
+        # TCA SAIP v3.4.1 §8.5.1 Pin Code PE: pinAttributes b1 = "PIN enabled". The
         # operator profile under test ships PIN1 disabled at the
         # MF level (modem unlocks freely, app-local PIN takes over).
         self.assertEqual(global_pin.attributes & 0x01, 0x00)
@@ -309,9 +311,10 @@ class SaipGenericFileManagementConsumerTests(unittest.TestCase):
     def test_gfm_introduces_legacy_gsm_and_pkcs15_dfs(self) -> None:
         image = _load_image_or_skip(self)
         df_paths = self._df_paths(image)
-        # SAIP §5.4 GFM streams in this BPP register both DF.GSM
-        # (legacy 7F20 hierarchy) and DF.PKCS-15 (7F50 with the
-        # PKCS-15 AID) on top of the standard MF/ADF tree.
+        # TCA SAIP v3.4.1 §8.3.5 Generic File management (GFM) streams in
+        # this BPP register both DF.GSM (legacy 7F20 hierarchy) and
+        # DF.PKCS-15 (7F50 with the PKCS-15 AID) on top of the standard
+        # MF/ADF tree.
         self.assertIn("MF/DF.GSM", df_paths)
         self.assertIn("MF/DF.PKCS-15", df_paths)
         self.assertIn("MF/DF.TELECOM", df_paths)

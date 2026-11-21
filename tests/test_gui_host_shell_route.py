@@ -3,7 +3,7 @@
 
 """Route-level tests for ``/api/host-shell/*``.
 
-WebSocket coverage for the actual PTY bridge is intentionally light —
+WebSocket coverage for the actual PTY bridge is intentionally light --
 spinning a real shell up in a route test is brittle and the spawn helper
 has its own dedicated coverage in
 ``tests/test_gui_host_shell_resolver.py``. What we exercise here is the
@@ -34,7 +34,7 @@ except ImportError:
 
 _needs_gui_stack = pytest.mark.skipif(
     not _FASTAPI_AVAILABLE,
-    reason="FastAPI / Starlette not installed — gui extra missing.",
+    reason="FastAPI / Starlette not installed -- gui extra missing.",
 )
 
 
@@ -118,7 +118,7 @@ class TestDevices:
 
 
 # ---------------------------------------------------------------------------
-# WS handshake — auth + disabled refusal
+# WS handshake -- auth + disabled refusal
 # ---------------------------------------------------------------------------
 
 
@@ -147,3 +147,51 @@ class TestWebSocket:
         assert "YGGDRASIM_GUI_HOST_SHELL" in payload["message"]
         assert websocket.close_code == 1008
         assert websocket.close_reason == "disabled"
+
+
+def test_typed_input_decodes_as_tx_even_though_enter_sends_a_bare_cr() -> None:
+    """A terminal sends CR on Enter; the accumulator completes a line on LF.
+
+    Feeding the typed bytes straight through left the tx line
+    unterminated forever, so the only decode of an operator's command was
+    the modem echoing it back CRLF -- credited to the modem, on the rx
+    side. Wiring the tx path is not enough without this.
+    """
+    from unittest import mock
+
+    from yggdrasim_common.gui_server import at_decoder
+    from yggdrasim_common.gui_server.routes import host_shell as routes
+
+    typed = b'AT+CRSM=176,12258,0,0,10\r'
+
+    # The bare CR the terminal actually sends decodes to nothing.
+    bare = at_decoder.LineAccumulator()
+    assert list(at_decoder.feed_and_decode(bare, typed, "tx")) == []
+
+    emitted = []
+
+    def _capture(_ws, accumulator, chunk, direction, _tasks):
+        emitted.extend(at_decoder.feed_and_decode(accumulator, chunk, direction))
+
+    class _Decoder:
+        enabled = True
+        tx_accumulator = at_decoder.LineAccumulator()
+        tasks = set()
+
+    with mock.patch.object(routes, "_emit_decoded", _capture):
+        routes._decode_client_input(object(), _Decoder(), typed)
+
+    assert len(emitted) == 1, "typed input must complete a line and decode"
+    assert emitted[0]["direction"] == "tx"
+    assert emitted[0]["kind"] == "crsm_request"
+
+    # A disabled decoder and an empty chunk stay no-ops.
+    class _Off(_Decoder):
+        enabled = False
+
+    emitted.clear()
+    with mock.patch.object(routes, "_emit_decoded", _capture):
+        routes._decode_client_input(object(), _Off(), typed)
+        routes._decode_client_input(object(), _Decoder(), b"")
+        routes._decode_client_input(None, _Decoder(), typed)
+    assert emitted == []

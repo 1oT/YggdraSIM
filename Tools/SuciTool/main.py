@@ -25,13 +25,13 @@ def entry() -> None:
     shell.run()
 
 
-def entry_cmd(cmd_line: str) -> None:
+def entry_cmd(cmd_line: str) -> bool:
     workspace_root = _workspace_root()
     shell = SuciToolShell(workspace_root=workspace_root)
-    shell.run_commands(cmd_line)
+    return shell.run_commands(cmd_line)
 
 
-def entry_stdin() -> None:
+def entry_stdin() -> bool:
     command_lines: list[str] = []
     for raw_line in sys.stdin.read().splitlines():
         command_text = str(raw_line or "").strip()
@@ -40,7 +40,7 @@ def entry_stdin() -> None:
         if command_text.startswith("#"):
             continue
         command_lines.append(command_text)
-    entry_cmd("; ".join(command_lines))
+    return entry_cmd("; ".join(command_lines))
 
 
 def run_standalone() -> None:
@@ -61,11 +61,14 @@ def run_standalone() -> None:
     )
     args = parser.parse_args()
     set_global_debug(bool(getattr(args, "debug", False)))
+    # A batch in which a command failed ends with exit code 1.
     if args.cmd:
-        entry_cmd(args.cmd)
+        if not entry_cmd(args.cmd):
+            sys.exit(1)
         return
     if args.stdin:
-        entry_stdin()
+        if not entry_stdin():
+            sys.exit(1)
         return
     entry()
 

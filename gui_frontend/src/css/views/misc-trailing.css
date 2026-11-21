@@ -17,8 +17,8 @@
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
   padding: 12px 14px 14px;
   font-size: 13px;
   display: flex;
@@ -54,7 +54,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--fg-muted);
@@ -81,7 +81,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg-deep);
   border: 1px solid var(--border);
 }
@@ -114,7 +114,7 @@
   font-size: 11px;
   background: var(--bg-deep);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   color: var(--fg);
   word-break: break-all;
@@ -149,7 +149,7 @@
   padding: 7px 10px;
   font-size: 12.5px;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   border: 1px solid var(--border);
   transition: background 120ms ease, border-color 120ms ease,
@@ -158,7 +158,7 @@
 
 .topbar-reader-popover-actions .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 
@@ -208,7 +208,7 @@
   border-radius: var(--radius-lg);
   padding: 16px 20px;
   margin-bottom: 16px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   min-width: 0;
 }
 
@@ -285,7 +285,7 @@
 .cb-status-summary {
   margin-top: 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--bg);
   border: 1px dashed var(--border);
   font-size: 0.85rem;
@@ -295,6 +295,47 @@
 
 .cb-rig-panel {
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+/* Remote Bridge sections: Host, Rig, Status, one at a time. */
+.cb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cb-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cb-tab:hover {
+  color: var(--fg);
+}
+
+.cb-tab[aria-selected="true"] {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cb-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cb-tabpanel[hidden] {
+  display: none;
 }
 
 .cb-rig-grid {
@@ -310,6 +351,9 @@
 .cb-rig-field {
   display: flex;
   flex-direction: column;
+  /* .form-row centres its items, which centred each label over its input
+     and the Add host button under the field. */
+  align-items: flex-start;
   gap: 5px;
   margin: 0;
 }
@@ -345,9 +389,6 @@
   margin: 14px 0 10px;
 }
 
-.cb-rig-primary-actions .btn {
-  min-height: 36px;
-}
 
 .cb-rig-manual {
   margin-top: 8px;
@@ -364,10 +405,56 @@
   margin: 14px 0;
 }
 
-.cb-rig-actions .btn {
-  min-height: 32px;
+
+.cb-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
+.cb-steps li + li {
+  margin-top: 3px;
+}
+
+.cb-steps li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cb-rig-manual .hint {
+  margin: 8px 0 10px;
+}
+
+.cb-rig-action-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.cb-rig-action-group-label {
+  margin-right: 2px;
+  color: var(--fg-dim);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+}
+
+.cb-subhead {
+  margin: 18px 0 8px;
+  color: var(--fg-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .cb-rig-status-grid {
   display: grid;
   grid-template-columns: repeat(
@@ -414,7 +501,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -428,7 +515,7 @@
   content: "";
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--cb-badge-status);
   opacity: 0.85;
 }
@@ -465,7 +552,7 @@
   color: var(--fg-dim);
 }
 
-/* Manual probe override panel — collapsed by default so the common
+/* Manual probe override panel -- collapsed by default so the common
  * case (no overrides) keeps the panel compact.
  */
 .cb-override {
@@ -473,7 +560,7 @@
   padding: 10px 14px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cb-override summary {
@@ -523,14 +610,14 @@
 .cb-probe-card {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   padding: 10px 12px;
 }
 
 .cb-probe-label {
-  font-size: 0.72rem;
+  font-size: var(--legend-size);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--legend-track);
   color: var(--fg-dim);
   margin-bottom: 4px;
 }
@@ -539,6 +626,21 @@
   color: var(--fg);
   font-size: 0.92rem;
   word-break: break-all;
+}
+
+/* A URL keeps its line: shortened with an ellipsis, whole in its title.
+   Its card takes two grid tracks so a loopback URL fits whole. */
+.cb-probe-card--wide {
+  grid-column: span 2;
+}
+
+.cb-probe-value.cb-url,
+.cb-status-value.cb-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .cb-probe-value.cb-probe-bridge-fp--match {
@@ -556,7 +658,7 @@
 .cb-probe-reason {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   background: var(--fail-soft);
   border: 1px solid color-mix(in oklab, var(--fail) 34%, var(--border));
   color: var(--fail);
@@ -564,8 +666,8 @@
   line-height: 1.4;
 }
 
-/* Latency history sparkline. Two polylines — ``--cb-history-ping``
- * and ``--cb-history-status`` — share the same SVG. We plot from the
+/* Latency history sparkline. Two polylines -- ``--cb-history-ping``
+ * and ``--cb-history-status`` -- share the same SVG. We plot from the
  * left so the freshest sample is on the right edge, matching the
  * convention of the SCP03 throughput chart.
  */
@@ -574,7 +676,7 @@
   height: 140px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   display: block;
 }
 
@@ -617,10 +719,6 @@
   font-family: var(--font-mono);
 }
 
-.btn-small {
-  padding: 4px 10px;
-  font-size: 0.78rem;
-}
 
 @media (max-width: 640px) {
   .cb-panel {

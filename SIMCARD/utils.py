@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""SIM utility primitives: BER-TLV builder/parser, BCD nibble-swap, EF.ICCID and EF.IMSI encoders."""
+"""SIM utility primitives: BER-TLV builder/parser, BCD nibble-swap, EF.ICCID, EF.IMSI and EF.IMPI codecs."""
 from __future__ import annotations
 
 from typing import Any
@@ -38,6 +37,32 @@ def tlv(tag: bytes | str, value: bytes) -> bytes:
     if isinstance(tag, str):
         tag_bytes = bytes.fromhex(tag)
     return bytes(tag_bytes) + encode_length(len(value)) + bytes(value)
+
+
+def encode_oid_value(dotted: str) -> bytes:
+    """Content octets of an OBJECT IDENTIFIER (ITU-T X.690 §8.19).
+
+    The first two arcs combine into one subidentifier ``arc0 * 40 + arc1``; every
+    subidentifier is base-128 with the continuation bit on all but its last octet.
+    """
+    parts = [segment for segment in str(dotted or "").split(".") if len(segment) > 0]
+    if len(parts) < 2:
+        raise ValueError(f"OID {dotted!r} needs at least two arcs.")
+    try:
+        arcs = [int(segment) for segment in parts]
+    except ValueError as exc:
+        raise ValueError(f"OID {dotted!r} has a non-numeric arc.") from exc
+    if any(arc < 0 for arc in arcs) or arcs[0] > 2 or (arcs[0] < 2 and arcs[1] > 39):
+        raise ValueError(f"OID {dotted!r} is outside the X.660 arc ranges.")
+    body = bytearray()
+    for subidentifier in [arcs[0] * 40 + arcs[1], *arcs[2:]]:
+        chunk = [subidentifier & 0x7F]
+        subidentifier >>= 7
+        while subidentifier > 0:
+            chunk.append((subidentifier & 0x7F) | 0x80)
+            subidentifier >>= 7
+        body.extend(reversed(chunk))
+    return bytes(body)
 
 
 def read_tlv(data: bytes, offset: int = 0) -> tuple[bytes, bytes, bytes, int]:
@@ -186,11 +211,14 @@ def encode_iccid_ef(iccid_digits: str) -> bytes:
 
 
 def encode_imsi_ef(imsi_digits: str) -> bytes:
-    """Encode an IMSI digit string into the 9-byte EF.IMSI body (3GPP TS 31.102 §4.2.2).
+    """Encode an IMSI digit string into the 9-byte EF.IMSI body (3GPP TS 31.102 v19.5 §4.2.2).
 
-    The first byte is the fixed EF payload length (8), followed by the
-    parity/type nibble and BCD-packed digits padded with ``0xF``. IMSIs
-    are limited to 15 digits and the result is always exactly nine bytes.
+    Byte 1 is "the number of significant bytes, not including this
+    length byte, required for the IMSI": one byte for the
+    parity/type octet carrying digit 1 plus one byte per further pair
+    of digits, so a 15- or 14-digit IMSI gives '08' and shorter ones
+    give less. The file is 9 bytes whatever the length, with the
+    unused nibbles and bytes set to 'F'.
     """
     digits = str(imsi_digits or "").strip().replace(" ", "").replace("-", "")
     if len(digits) == 0 or digits.isdigit() is False:
@@ -208,8 +236,9 @@ def encode_imsi_ef(imsi_digits: str) -> bytes:
         high_text = remaining[offset + 1]
         high_nibble = 0x0F if high_text == "F" else int(high_text)
         body.append((high_nibble << 4) | low_nibble)
+    significant_bytes = len(body)
     body.extend(b"\xFF" * (8 - len(body)))
-    encoded = b"\x08" + bytes(body)
+    encoded = bytes([significant_bytes]) + bytes(body)
     if len(encoded) != 9:  # Defensive invariant for future layout changes.
         raise ValueError("EF.IMSI encoding must be exactly 9 bytes.")
     return encoded
@@ -242,6 +271,27 @@ def decode_imsi_ef(value: bytes) -> str:
         return ""
     # EF.IMSI stores the odd/even indicator in the first decoded nibble.
     return digits[1:]
+
+
+def encode_impi_ef(nai: str) -> bytes:
+    """EF.IMPI body: the NAI TLV data object, tag '80', UTF-8 value (TS 31.103 v19 §4.2.2)."""
+    return tlv("80", str(nai or "").strip().encode("utf-8"))
+
+
+def decode_impi_ef(value: bytes) -> str:
+    """The NAI an EF.IMPI body carries (TS 31.103 v19 §4.2.2).
+
+    Bytes after the TLV (an 'FF' pad) are ignored. Raises ``ValueError`` when
+    the body does not start with a complete tag-'80' TLV holding UTF-8.
+    """
+    raw = bytes(value or b"")
+    tag, nai, _raw_tlv, _next_offset = read_tlv(raw)
+    if tag != b"\x80":
+        raise ValueError(f"EF.IMPI starts with tag {tag.hex().upper()}, not the NAI tag 80.")
+    try:
+        return nai.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("EF.IMPI NAI is not UTF-8.") from exc
 
 
 def parse_apdu(apdu: bytes) -> dict[str, Any]:

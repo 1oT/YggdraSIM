@@ -1,21 +1,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PE-AKAParameter ``algoConfiguration`` CHOICE switch.
 
-TCA SAIP §A.2 / 3GPP TS 31.102 §7.1.2 model the AKA configuration of a
+TCA SAIP v3.4.1 §8.4.2 / 3GPP TS 31.102 §7.1.2 model the AKA configuration of a
 NAA as a CHOICE between two alternatives:
 
-* ``algoParameter``    — algorithm-id plus algorithm-specific keys
+* ``algoParameter``    -- algorithm-id plus algorithm-specific keys
                          (MILENAGE / TUAK / USIM Test).
-* ``mappingParameter`` — reuse another NAA's authentication
+* ``mappingParameter`` -- reuse another NAA's authentication
                          configuration via that NAA's instance AID
-                         and a one-byte mapping-options bitmask.
+                         and a one-byte ``mappingOptions``.
 
-The operator-facing toggle in the editor uses this module so the
-underlying tagged-tuple flips cleanly between the two CHOICE branches
-without losing the algorithm payload when the operator switches back.
+The operator-facing toggle in the editor uses this module so the CHOICE
+flips cleanly between the two branches without losing the algorithm
+payload when the operator switches back. A session document holds the
+CHOICE as a ``(alternative, payload)`` tuple with ``bytes`` members, which
+is what the writers produce; the readers also accept the JSON transport
+form (``__ygg_saip_tuple__`` / ``__ygg_saip_bytes__``).
 """
 
 from __future__ import annotations
@@ -34,28 +36,25 @@ _TAG_BYTES = "__ygg_saip_bytes__"
 _LEGACY_TAG_BYTES = "hex"
 
 
-# Mapping-options bitmask layout per TCA SAIP §A.2 ``MappingOptions``:
-# the eight bits select which AKA outputs are inherited from the
-# referenced NAA. The names below are the TCA-defined member names; we
-# expose them as a stable catalog so the GUI can render labelled
-# checkboxes without the editor having to know the bit positions.
-_MAPPING_OPTION_BITS: tuple[tuple[int, str], ...] = (
-    (0x80, "share-K"),
-    (0x40, "share-OPc"),
-    (0x20, "share-rotationConstants"),
-    (0x10, "share-xoringConstants"),
-    (0x08, "share-sqnInit"),
-    (0x04, "share-sqnDelta"),
-    (0x02, "share-sqnAgeLimit"),
-    (0x01, "share-authCounterMax"),
+# TCA SAIP v3.4.1 §8.4.2 (page 49): ``mappingOptions`` carries one 2-bit value
+# in b3-b2 naming the SQN parameters and values the NAA takes from the
+# application ``mappingSource`` references; every other bit is RFU.
+# algorithmID, algorithmOptions, key, opc, rotationConstants, xoringConstants
+# and numberOfKeccak are always shared when the mapping is used.
+_MAPPING_SQN_MASK = 0x06
+_MAPPING_SQN_MODES: tuple[tuple[int, str, str], ...] = (
+    (0x00, "share-no-sqn", "Do not share SQN parameters or values"),
+    (0x02, "share-sqn-init-and-parameters", "Share sqnInit, sqnOptions, sqnDelta and sqnAgeLimit"),
+    (0x04, "share-sqn-parameters", "Share sqnOptions, sqnDelta and sqnAgeLimit"),
+    (0x06, "share-sqn-parameters-and-array", "Share sqnOptions, sqnDelta, sqnAgeLimit and the SQN array"),
 )
 
 
 def mapping_option_catalog() -> list[dict[str, Any]]:
-    """Catalog of mapping-option flags for the GUI checkbox group."""
+    """The four ``mappingOptions`` values with their names and meanings."""
     return [
-        {"name": name, "bit_mask": bit_mask, "hex": f"{bit_mask:02X}"}
-        for bit_mask, name in _MAPPING_OPTION_BITS
+        {"name": name, "hex": f"{value:02X}", "label": label}
+        for value, name, label in _MAPPING_SQN_MODES
     ]
 
 
@@ -63,11 +62,9 @@ def _strip_separators(value: Any) -> str:
     return re.sub(r"\s+|0x|0X|-|:", "", str(value or ""))
 
 
-def _tagged_bytes(hex_value: str) -> dict[str, str]:
-    return {_TAG_BYTES: hex_value.upper()}
-
-
 def _hex_from_tagged(value: Any) -> str | None:
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex().upper()
     if isinstance(value, dict) is False:
         return None
     for key in (_TAG_BYTES, _LEGACY_TAG_BYTES):
@@ -79,6 +76,8 @@ def _hex_from_tagged(value: Any) -> str | None:
 
 
 def _unwrap_tuple(value: Any) -> tuple[str, Any] | None:
+    if isinstance(value, (tuple, list)) and len(value) == 2 and isinstance(value[0], str):
+        return (value[0], value[1])
     if isinstance(value, dict) is False:
         return None
     for key in (_TAG_TUPLE, _LEGACY_TAG_TUPLE):
@@ -89,10 +88,6 @@ def _unwrap_tuple(value: Any) -> tuple[str, Any] | None:
                 if isinstance(tag, str):
                     return (tag, payload[1])
     return None
-
-
-def _wrap_tuple(field_name: str, value: Any) -> dict[str, Any]:
-    return {_TAG_TUPLE: [str(field_name), value]}
 
 
 def _normalise_aid(value: Any) -> str:
@@ -115,12 +110,19 @@ def _normalise_aid(value: Any) -> str:
     return text.upper()
 
 
+def _mapping_mode(value: int) -> tuple[str, str]:
+    for mode_value, name, label in _MAPPING_SQN_MODES:
+        if mode_value == value & _MAPPING_SQN_MASK:
+            return (name, label)
+    return ("", "")
+
+
 def _normalise_mapping_options(
     value: Any,
     *,
     flags: list[str] | None,
 ) -> str:
-    """Normalise either an explicit hex byte or a flag-name list into a 1-byte hex string."""
+    """One ``mappingOptions`` byte from explicit hex or a single mode name."""
     text = _strip_separators(value) if value is not None else ""
     if len(text) > 0:
         if _HEX_RE.fullmatch(text) is None:
@@ -132,33 +134,30 @@ def _normalise_mapping_options(
             )
         if flags is not None and len(list(flags)) > 0:
             raise ValueError(
-                "supply mappingOptions hex OR flags list, not both.",
+                "supply mappingOptions hex OR a mode name, not both.",
+            )
+        if int(text, 16) & ~_MAPPING_SQN_MASK & 0xFF:
+            raise ValueError(
+                f"mappingOptions {text.upper()} sets RFU bits; only b3-b2 carry a "
+                "value (TCA SAIP v3.4.1 §8.4.2).",
             )
         return text.upper()
     if flags is None:
-        # Default: every bit cleared. The GUI flips bits via the
-        # checkbox group; an empty toggle means "use only the AID
-        # reference, no parameter inheritance".
         return "00"
     if isinstance(flags, (list, tuple)) is False:
-        raise ValueError("flags must be a list of mapping-option names.")
-    by_name = {name: bit_mask for bit_mask, name in _MAPPING_OPTION_BITS}
-    accumulator = 0
-    seen: set[str] = set()
-    for raw in flags:
-        name = str(raw or "").strip()
-        if len(name) == 0:
-            continue
-        if name in seen:
-            continue
-        seen.add(name)
-        if name not in by_name:
-            raise ValueError(
-                f"unknown mapping-option flag {name!r}; allowed: "
-                + ", ".join(label for _bit, label in _MAPPING_OPTION_BITS),
-            )
-        accumulator |= by_name[name]
-    return f"{accumulator & 0xFF:02X}"
+        raise ValueError("flags must be a list holding one mapping mode name.")
+    names = [str(raw or "").strip() for raw in flags if str(raw or "").strip()]
+    if len(set(names)) > 1:
+        raise ValueError("the mapping modes exclude each other; name one.")
+    if not names:
+        return "00"
+    by_name = {name: mode_value for mode_value, name, _label in _MAPPING_SQN_MODES}
+    if names[0] not in by_name:
+        raise ValueError(
+            f"unknown mapping mode {names[0]!r}; allowed: "
+            + ", ".join(name for _value, name, _label in _MAPPING_SQN_MODES),
+        )
+    return f"{by_name[names[0]]:02X}"
 
 
 def get_choice(pe_value: dict[str, Any]) -> dict[str, Any]:
@@ -172,8 +171,8 @@ def get_choice(pe_value: dict[str, Any]) -> dict[str, Any]:
          "mapping_options_hex": <str>,
          "mapping_options_flags": [<flag-name>, ...]}
 
-    The flags list is decoded from ``mappingOptions`` against the
-    bitmap catalog so the GUI can render the checkbox group directly.
+    ``mapping_options_flags`` holds the one SQN-sharing mode ``mappingOptions``
+    names, also given as ``mapping_options_mode`` with its label.
     """
     if isinstance(pe_value, dict) is False:
         raise ValueError("PE-AKAParameter value must be a dict.")
@@ -207,20 +206,19 @@ def get_choice(pe_value: dict[str, Any]) -> dict[str, Any]:
         if isinstance(payload, dict):
             aid_hex = _hex_from_tagged(payload.get("mappingSource")) or ""
             opt_hex = _hex_from_tagged(payload.get("mappingOptions")) or "00"
-        flags: list[str] = []
         try:
             opt_int = int(opt_hex, 16)
         except ValueError:
             opt_int = 0
-        for bit_mask, name in _MAPPING_OPTION_BITS:
-            if opt_int & bit_mask:
-                flags.append(name)
+        mode, label = _mapping_mode(opt_int)
         return {
             "choice": "mappingParameter",
             "algorithm_id": None,
             "mapping_source_aid_hex": aid_hex.upper(),
             "mapping_options_hex": opt_hex.upper(),
-            "mapping_options_flags": flags,
+            "mapping_options_flags": [mode] if mode else [],
+            "mapping_options_mode": mode,
+            "mapping_options_label": label,
         }
     return {
         "choice": "absent",
@@ -258,11 +256,11 @@ def set_mapping_parameter(
         existing = _unwrap_tuple(pe_value.get("algoConfiguration"))
         if existing is not None and existing[0] == "algoParameter":
             pe_value["_ygg_algo_parameter_stash"] = copy.deepcopy(existing[1])
-    pe_value["algoConfiguration"] = _wrap_tuple(
+    pe_value["algoConfiguration"] = (
         "mappingParameter",
         {
-            "mappingOptions": _tagged_bytes(opt_hex),
-            "mappingSource": _tagged_bytes(aid_hex),
+            "mappingOptions": bytes.fromhex(opt_hex),
+            "mappingSource": bytes.fromhex(aid_hex),
         },
     )
     return {
@@ -294,7 +292,7 @@ def set_algo_parameter(
         payload = copy.deepcopy(stash)
     if algorithm_id is not None:
         payload["algorithmID"] = int(algorithm_id)
-    pe_value["algoConfiguration"] = _wrap_tuple("algoParameter", payload)
+    pe_value["algoConfiguration"] = ("algoParameter", payload)
     return {
         "choice": "algoParameter",
         "algorithm_id": payload.get("algorithmID"),

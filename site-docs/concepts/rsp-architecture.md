@@ -140,6 +140,33 @@ LPA/IPA must read them from the card, forward them to SM-DP+ via
 transactional flows and surface it under `NOTIF-*` verbs when a manual retry
 is needed.
 
+An SGP.32 eUICC also keeps each signed eUICC Package Result until the IPA
+deletes it (SGP.32 v1.3 §2.11.2.1). The eIM answers
+`ESipa.ProvideEimPackageResult` with the sequence numbers of the results and
+notifications it processed (`EimAcknowledgements`, tag `BF53`), and the eSIM
+Management shell removes each acknowledged one with
+`RemoveNotificationFromList` (§3.3.1 steps 13 and 15). A result the eIM did
+not acknowledge stays on the card, where `RetrieveNotificationsList` with
+`euiccPackageResults` (§5.9.11) can still read it.
+
+The result of an eIM-triggered profile download, the
+ProfileDownloadTriggerResult, goes to the eIM with `ESipa.HandleNotification`
+instead (§3.2.3.1 step 13). That function has no response, so the eIM
+acknowledges nothing; the ProfileInstallationResult inside it leaves the card
+once the SM-DP+ has taken it through `ES9+.HandleNotification` (§3.7).
+
+In an indirect download (§3.2.3.2) the IPA never reaches the SM-DP+: it runs
+the same eUICC steps and sends `ESipa.InitiateAuthentication`,
+`AuthenticateClient`, `GetBoundProfilePackage`, `CancelSession` and the
+ProfileInstallationResult in `HandleNotification` to the eIM, which runs each
+as the `ES9+'` function against the SM-DP+. A ProfileDownloadTriggerRequest
+without profileDownloadData starts it; SGP.32 v1.3 §2.11.1.3 gives one only to
+an IPA declaring `eimDownloadDataHandling`, and the eIM then holds the
+Activation Code and returns its Matching ID in the InitiateAuthentication
+answer. The eSIM Management IPA declares that capability and takes such a
+trigger as an indirect download; with `YGGDRASIM_IPA_INDIRECT_DOWNLOAD` set it
+also routes an Activation Code trigger through the eIM.
+
 ## eIM identity and BF55
 
 The BF55 row in `EUICCInfo2` advertises the eIM identity set an eUICC

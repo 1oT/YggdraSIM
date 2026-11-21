@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
 
@@ -42,7 +41,7 @@ class Round2Sweep03HandWrittenFillAnchors(unittest.TestCase):
 
 
 class Round2Sweep04PeDispatchHygiene(unittest.TestCase):
-    """Angle 4: no duplicate ``} else if (t === …)`` PE branch in ``renderSaipPeEditor``."""
+    """Angle 4: no duplicate ``} else if (t === ...)`` PE branch in ``renderSaipPeEditor``."""
 
     def test_no_duplicate_else_if_dispatch(self) -> None:
         self.assertEqual(render_saip_pe_editor_duplicate_dispatch_types(), [])

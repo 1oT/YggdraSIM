@@ -5,7 +5,7 @@
 
 
 /* ----------------------------------------------------------------------
-   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / …)
+   FS-Admin guided wizards (CREATE FILE / lifecycle / resize / ...)
    ---------------------------------------------------------------------- */
 
 .cc-fs-mode-bar {
@@ -15,7 +15,7 @@
   padding: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
@@ -25,7 +25,7 @@
 .cc-fs-mode-bar .btn {
   padding: 5px 14px;
   font-size: 12.5px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-muted);
@@ -50,7 +50,7 @@
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-ms);
 }
 
 .cc-fs-wizard-row {
@@ -71,7 +71,7 @@
   padding: 12px 14px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   margin-top: 6px;
 }
 
@@ -116,7 +116,7 @@
   font-size: 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -156,7 +156,7 @@
   padding: 8px 10px;
   border-left: 3px solid var(--accent);
   background: var(--bg-elev);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   color: var(--fg);
 }

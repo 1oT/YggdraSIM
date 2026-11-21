@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder: renders pasted BER/DER hex as JSON and value notation."""
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 import hashlib
 import json
 from pathlib import Path
@@ -123,7 +122,7 @@ _FALLBACK_TAGS: dict[str, tuple[str, str]] = {
     "BF4F": ("GET_EIM_PACKAGE", "SGP.32"),
     "BF50": ("PROVIDE_EIM_PACKAGE_RESULT", "SGP.32"),
     "BF51": ("EUICC_PACKAGE", "SGP.32 §6.3.2.6/§6.3.2.7"),
-    "BF52": ("PACKAGE_DATA", "SGP.32"),
+    "BF52": ("IPA_EUICC_DATA", "SGP.32 v1.3 §2.11.1.2/§2.11.2.2"),
     "BF53": ("EIM_ACKNOWLEDGEMENTS", "SGP.32"),
     "BF54": ("PROFILE_DOWNLOAD_TRIGGER", "SGP.32"),
     "BF55": ("GET_EIM_CONFIGURATION_DATA", "SGP.32"),
@@ -151,6 +150,9 @@ _FALLBACK_ALIASES: dict[str, tuple[str, ...]] = {
     # still resolves. BF51 is the eUICC package -- the eIM packages are
     # BF4E/BF4F/BF50 -- so naming it "EIM" pointed at the wrong entity.
     "BF51": ("EIM_PACKAGE",),
+    # BF52 is IpaEuiccDataRequest / IpaEuiccDataResponse; the earlier
+    # PACKAGE_DATA name stays searchable the same way.
+    "BF52": ("PACKAGE_DATA",),
 }
 
 
@@ -162,6 +164,13 @@ class ApduCommandInfo:
 
 
 _APDU_COMMANDS: dict[tuple[int | None, int], ApduCommandInfo] = {
+    (None, 0x04): ApduCommandInfo("DEACTIVATE_FILE", "ISO 7816-4 / ETSI TS 102 221"),
+    (None, 0x32): ApduCommandInfo("INCREASE", "ETSI TS 102 221"),
+    (None, 0x44): ApduCommandInfo("ACTIVATE_FILE", "ISO 7816-4 / ETSI TS 102 221"),
+    (None, 0x73): ApduCommandInfo("MANAGE_SECURE_CHANNEL", "ETSI TS 102 221"),
+    (None, 0x75): ApduCommandInfo("TRANSACT_DATA", "ETSI TS 102 221"),
+    (None, 0x89): ApduCommandInfo("AUTHENTICATE", "ETSI TS 102 221 / 3GPP TS 31.102"),
+    (None, 0xA2): ApduCommandInfo("SEARCH_RECORD", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xA4): ApduCommandInfo("SELECT", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xB0): ApduCommandInfo("READ_BINARY", "ISO 7816-4 / ETSI TS 102 221"),
     (None, 0xD6): ApduCommandInfo("UPDATE_BINARY", "ISO 7816-4 / ETSI TS 102 221"),
@@ -178,12 +187,18 @@ _APDU_COMMANDS: dict[tuple[int | None, int], ApduCommandInfo] = {
     (None, 0xCA): ApduCommandInfo("GET_DATA", "ISO 7816-4 / GlobalPlatform"),
     (None, 0xCB): ApduCommandInfo("GET_DATA_ODD", "ISO 7816-4"),
     (None, 0xDA): ApduCommandInfo("PUT_DATA", "ISO 7816-4 / GlobalPlatform"),
+    (None, 0xDB): ApduCommandInfo("SET_DATA", "ETSI TS 102 221"),
     (0x00, 0x70): ApduCommandInfo("MANAGE_CHANNEL", "ISO 7816-4 / GlobalPlatform"),
     (0x01, 0x70): ApduCommandInfo("MANAGE_CHANNEL", "ISO 7816-4 / GlobalPlatform"),
     (0x00, 0xE0): ApduCommandInfo("CREATE_FILE", "ETSI TS 102 222"),
     (0x00, 0xE4): ApduCommandInfo("DELETE_FILE", "ETSI TS 102 222"),
     (0x80, 0x10): ApduCommandInfo("TERMINAL_PROFILE", "ETSI TS 102 223"),
     (0x80, 0x12): ApduCommandInfo("FETCH", "ETSI TS 102 223"),
+    # '78' and '7A' are deliberately absent: TS 102 221 table 10.5 note 2
+    # records that GlobalPlatform uses the same two INS values for END and
+    # BEGIN R-MAC SESSION, so either name would be wrong half the time.
+    (0x80, 0x76): ApduCommandInfo("SUSPEND_UICC", "ETSI TS 102 221"),
+    (0x80, 0x7C): ApduCommandInfo("MANAGE_LSI", "ETSI TS 102 221"),
     (0x80, 0x14): ApduCommandInfo("TERMINAL_RESPONSE", "ETSI TS 102 223"),
     (0x80, 0x50): ApduCommandInfo("INITIALIZE_UPDATE", "GlobalPlatform Card Spec / SCP02 / SCP03"),
     (0x80, 0x82): ApduCommandInfo("EXTERNAL_AUTHENTICATE", "GlobalPlatform Card Spec / SCP02 / SCP03"),
@@ -252,6 +267,33 @@ def run_cli(argv: list[str] | None = None, *, stdout: TextIO | None = None, stde
         return 2
     try:
         raw_input = _read_input(args)
+        if args.each:
+            each_registry = TagRegistry.load()
+            # --each writes JSON, so only an explicit --color always paints its notations.
+            each_paint = _cli_painter("always", out_stream) if args.color == "always" else None
+            lines = [line for line in raw_input.splitlines() if line.strip()]
+            for index, line in enumerate(lines, 1):
+                out_stream.write(json.dumps(_decode_each_line(index, line, each_registry, each_paint)) + "\n")
+            return 0
+        if args.context:
+            from .context import decode_context_text
+
+            context_result = decode_context_text(raw_input, hint=str(args.domain))
+            if _interactive_stdout(out_stream):
+                out_stream.write("\n")
+            if str(args.format) == "json":
+                out_stream.write(json.dumps(context_result, indent=2, sort_keys=False) + "\n")
+            else:
+                context_paint = _cli_painter(str(args.color), out_stream)
+                if context_paint is not None:
+                    from .context import render_context_notation
+
+                    out_stream.write(render_context_notation(context_result, context_paint) + "\n")
+                else:
+                    out_stream.write(str(context_result["notation"]) + "\n")
+                if str(args.format) == "both":
+                    out_stream.write("\n" + json.dumps(context_result, indent=2, sort_keys=False) + "\n")
+            return 0
         data = normalise_hex(raw_input)
         tag_registry = TagRegistry.load()
         result = decode_bytes(
@@ -267,7 +309,7 @@ def run_cli(argv: list[str] | None = None, *, stdout: TextIO | None = None, stde
         if output_format == "json":
             out_stream.write(json.dumps(result, indent=2, sort_keys=False) + "\n")
         elif output_format == "asn1":
-            out_stream.write(str(result["asn1Notation"]) + "\n")
+            out_stream.write(_painted_reading(result, _cli_painter(str(args.color), out_stream), bool(args.ber)) + "\n")
         else:
             out_stream.write(json.dumps(result, indent=2, sort_keys=False) + "\n")
             out_stream.write("\nASN.1 value notation\n")
@@ -304,7 +346,12 @@ def decode_bytes(
     schema_result = None
     if schema_paths and type_name:
         schema_result = _decode_with_asn1tools(schema_paths, type_name=type_name, data=data, codec=codec)
-    return {
+    rsp_reading, rsp_error = _rsp_schema_reading(data)
+    ber_notation = asn1_notation
+    if rsp_reading is not None:
+        # The typed reading is the notation; the BER structure stays in berNotation.
+        asn1_notation = str(rsp_reading["notation"])
+    result: dict[str, Any] = {
         "format": "BER/DER TLV",
         "inputHex": data.hex().upper(),
         "byteCount": len(data),
@@ -317,6 +364,30 @@ def decode_bytes(
             "sources": tag_registry.sources,
         },
     }
+    if rsp_reading is not None:
+        result["berNotation"] = ber_notation
+        result["rspSchema"] = {
+            key: rsp_reading.get(key) for key in ("title", "spec", "schemaType", "schemaSource", "schema", "schemaJson")
+        }
+    if rsp_error:
+        result["rspSchemaError"] = rsp_error
+    return result
+
+
+def _rsp_schema_reading(data: bytes) -> tuple[dict[str, Any] | None, str]:
+    """The GSMA RSP schema reading of ``data`` and, when the reading broke, why.
+
+    The single-file copy of this module in the standalone MCP build has no
+    ``context`` module beside it and keeps the BER reading alone.
+    """
+    try:
+        from .context import decode_rsp_object
+    except ImportError:
+        return None, ""
+    try:
+        return decode_rsp_object(data), ""
+    except Exception as error:  # noqa: BLE001 - the BER reading stands whatever the schema side raised
+        return None, f"{type(error).__name__}: {error}"
 
 
 def decode_apdu(data: bytes, *, registry: "TagRegistry | None" = None) -> dict[str, Any]:
@@ -406,6 +477,11 @@ class TagRegistry:
             for source_name, loaded in _load_spec_tag_entries(spec_root).items():
                 sources.append(source_name)
                 for info in loaded:
+                    if _is_one_byte_context_tag(info.tag):
+                        # '81' or 'A0' means what the enclosing type says, so a
+                        # table row for one type names it wrongly for all others;
+                        # such a tag keeps its BER class name or its fallback.
+                        continue
                     existing = entries.get(info.tag)
                     if existing is None:
                         entries[info.tag] = info
@@ -435,6 +511,17 @@ class TagRegistry:
 
     def lookup_exact(self, tag_hex: str) -> TagInfo | None:
         return self._entries.get(tag_hex.upper())
+
+
+def _is_one_byte_context_tag(tag_hex: str) -> bool:
+    """A context-specific tag number below 31, whose meaning depends on the enclosing type."""
+    if len(tag_hex) != 2:
+        return False
+    try:
+        first = int(tag_hex, 16)
+    except ValueError:
+        return False
+    return first & 0xC0 == 0x80 and first & 0x1F != 0x1F
 
 
 def normalise_hex(raw_text: str) -> bytes:
@@ -804,6 +891,8 @@ def render_apdu_notation(apdu: dict[str, Any]) -> str:
 
 
 def _parse_apdu_body(data: bytes) -> dict[str, Any]:
+    if len(data) < 4:
+        raise DecodeError("APDU input must be at least 4 bytes")
     if len(data) == 4:
         return {
             "case": "1",
@@ -1064,12 +1153,138 @@ def _build_parser() -> argparse.ArgumentParser:
         default="der",
         help="asn1tools codec for schema decode, default: der.",
     )
+    parser.add_argument(
+        "--context",
+        action="store_true",
+        help=(
+            "Context-aware decode: classify each APDU by CLA/INS and decode the "
+            "payload against that specification; accepts a whole exchange trace."
+        ),
+    )
+    parser.add_argument(
+        "--domain",
+        default="auto",
+        choices=("auto", "apdu", "response", "es10", "gp", "uicc", "cat", "tlv", "sw", "ef"),
+        help=(
+            "With --context: force the decode domain instead of detecting it; apdu reads every row as a command, "
+            "response every row as an answer, ef takes the file on the first line and its content below."
+        ),
+    )
+    parser.add_argument(
+        "--ber",
+        action="store_true",
+        help="After the schema reading of a GSMA RSP object, print its BER-TLV tree as well.",
+    )
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="Colour the text: auto colours a terminal unless NO_COLOR is set. Default: auto.",
+    )
+    parser.add_argument(
+        "--each",
+        action="store_true",
+        help=(
+            "Decode every input line on its own and print one JSON object per line. "
+            "A line is hex, or a label, a tab and hex; a label that names a GSMA RSP "
+            "type (an ES9+ or ESipa JSON member such as smdpSigned2) is tried first."
+        ),
+    )
     return parser
+
+
+def _cli_painter(choice: str, stream: TextIO) -> Any:
+    """The terminal painter when ``--color`` and the stream ask for colour, else None."""
+    if choice == "never":
+        return None
+    if choice == "auto":
+        try:
+            from yggdrasim_common.terminal_output import should_use_color
+        except ImportError:
+            return None
+        if not should_use_color(stream):
+            return None
+    try:
+        from .context import terminal_painter
+    except ImportError:
+        return None
+    return terminal_painter()
+
+
+def _painted_generic(text: str, paint: Any) -> str:
+    if paint is None:
+        return text
+    from .context import paint_generic_notation
+
+    return paint_generic_notation(text, paint)
+
+
+def _painted_reading(result: dict[str, Any], paint: Any, ber: bool) -> str:
+    """decode_bytes' notation for a terminal: the schema reading painted, the BER tree on request."""
+    reading = result.get("rspSchema")
+    if reading is None:
+        return _painted_generic(str(result["asn1Notation"]), paint)
+    text = str(result["asn1Notation"])
+    if paint is not None:
+        from .context import render_rsp_reading
+
+        text = render_rsp_reading(reading, paint)
+    if ber:
+        heading = paint("punct", "-- BER-TLV") if paint is not None else "-- BER-TLV"
+        text += f"\n\n{heading}\n" + _painted_generic(str(result.get("berNotation") or ""), paint)
+    return text
+
+
+def _decode_each_line(index: int, line: str, registry: "TagRegistry", paint: Any = None) -> dict[str, Any]:
+    """One --each line: the schema reading, else the BER reading, else neither."""
+    label, tab, hex_text = line.partition("\t")
+    if not tab:
+        label, hex_text = "", line
+    entry: dict[str, Any] = {"index": index, "label": label.strip()}
+    try:
+        data = normalise_hex(hex_text)
+    except DecodeError as error:
+        entry.update(kind="error", error=str(error))
+        return entry
+    entry["byteCount"] = len(data)
+    reading = None
+    try:
+        from .context import decode_rsp_object
+    except ImportError:
+        decode_rsp_object = None
+    if decode_rsp_object is not None:
+        reading = decode_rsp_object(data, type_hint=entry["label"])
+    if reading is not None:
+        notation = str(reading.get("notation", ""))
+        if paint is not None:
+            from .context import render_rsp_reading
+
+            notation = render_rsp_reading(reading, paint)
+        entry.update(kind="schema", schemaType=reading.get("schemaType"), notation=notation)
+        return entry
+    # Never the APDU reading decode_bytes falls back to: four bytes of
+    # anything parse as a case 1 command.
+    try:
+        items, offset = _parse_ber_stream(data, 0, registry, depth=0, allow_eoc=False)
+    except DecodeError:
+        items, offset = [], -1
+    if items and offset == len(data):
+        entry.update(kind="tlv", notation=_painted_generic(render_asn1_notation(items), paint))
+    else:
+        entry["kind"] = "none"
+    return entry
+
+
+def _decode_text_file(raw: bytes) -> str:
+    """The text of an input file: UTF-8, or UTF-16 by its byte order mark, which a Windows shell redirect writes."""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8-sig")
 
 
 def _read_input(args: argparse.Namespace) -> str:
     if args.file is not None:
-        return Path(args.file).read_text(encoding="utf-8")
+        return _decode_text_file(Path(args.file).read_bytes())
     if args.hex_data is not None:
         return str(args.hex_data)
     return sys.stdin.read()
@@ -1160,7 +1375,7 @@ def _parse_tag_table(path: Path, *, root: Path) -> list[TagInfo]:
                 if name not in {"NAME", "DATA NAME", "DATA OBJECT", "LENGTH"}:
                     entries.append(TagInfo(tag=tag, name=name, source=source))
                     continue
-        match = re.search(r"['‘`]([0-9A-Fa-f]{2,6})['’`]\s+(?:to\s+['‘`][0-9A-Fa-f]{2,6}['’`]\s+)?(.+)", line)
+        match = re.search(r"[''`]([0-9A-Fa-f]{2,6})[''`]\s+(?:to\s+[''`][0-9A-Fa-f]{2,6}[''`]\s+)?(.+)", line)
         if match is None:
             continue
         tag = _clean_tag(match.group(1))
@@ -1599,8 +1814,9 @@ def _decode_with_asn1tools(
 
 
 def _json_safe(value: Any) -> Any:
-    if isinstance(value, bytes):
-        return {"hex": value.hex().upper()}
+    # asn1tools hands some BIT STRING contents over as bytearray.
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"hex": bytes(value).hex().upper()}
     if isinstance(value, tuple):
         if len(value) == 2 and isinstance(value[0], str):
             return {"choice": value[0], "value": _json_safe(value[1])}
@@ -1609,6 +1825,9 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (datetime, date, time)):
+        # asn1tools reads UTCTime and GeneralizedTime (a certificate's validity) as datetime.
+        return value.isoformat()
     return value
 
 
@@ -1625,18 +1844,74 @@ def _render_item_notation(item: dict[str, Any], *, indent: int, assignment: bool
             operator = "::=" if assignment else "="
             return [f"{prefix}{label} {operator} {{}}"]
         first_line = f"{prefix}{label} ::= {{" if assignment else f"{prefix}{label} {{"
-        lines = [first_line]
-        for index, child in enumerate(children):
-            child_lines = _render_item_notation(child, indent=indent + 2, assignment=False)
-            if index < len(children) - 1:
-                child_lines[-1] = child_lines[-1] + ","
-            lines.extend(child_lines)
-        lines.append(f"{prefix}}}")
-        return lines
-    value = item.get("decoded")
-    rendered_value = _render_value(value, indent) if "decoded" in item else f"'{item.get('raw', '')}'H"
+        return [first_line, *_render_child_lines(children, indent + 2), f"{prefix}}}"]
+    encapsulated = _encapsulated_items(item)
+    if encapsulated is not None:
+        keyword = "::= encapsulates" if assignment else "encapsulates"
+        return [f"{prefix}{label} {keyword} {{", *_render_child_lines(encapsulated, indent + 2), f"{prefix}}}"]
     operator = "::=" if assignment else "="
-    return [f"{prefix}{label} {operator} {rendered_value}"]
+    if "decoded" not in item:
+        return [f"{prefix}{label} {operator} {_raw_value(str(item.get('raw', '')))}"]
+    value = item["decoded"]
+    if isinstance(value, dict) and set(value) == {"tags"} and isinstance(value["tags"], list):
+        return [f"{prefix}{label} {operator} {_render_tag_list(value['tags'])}"]
+    if isinstance(value, dict) and "embeddedAsn1" in value:
+        # A TLV reading that _encapsulated_items turned down; the other fields carry the value.
+        value = {key: entry for key, entry in value.items() if key != "embeddedAsn1"}
+    return [f"{prefix}{label} {operator} {_render_value(value, indent)}"]
+
+
+def _render_tag_list(tags: list[dict[str, Any]]) -> str:
+    """'{ A0, 81, BF20 EUICC_INFO_1 }': each tag, named only when the tag has a name of its own.
+
+    Which member a one-byte context tag selects depends on the request the
+    list belongs to; the schema reading names those.
+    """
+    shown = []
+    for tag in tags:
+        name = str(tag.get("name") or "")
+        if not name or re.fullmatch(r"(?:CONTEXT|APPLICATION|PRIVATE|UNIVERSAL)_\d+", name):
+            shown.append(str(tag.get("tag", "")))
+        else:
+            shown.append(f"{tag.get('tag', '')} {name}")
+    return "{ " + ", ".join(shown) + " }" if shown else "{}"
+
+
+def _render_child_lines(children: list[dict[str, Any]], indent: int) -> list[str]:
+    lines: list[str] = []
+    for index, child in enumerate(children):
+        child_lines = _render_item_notation(child, indent=indent, assignment=False)
+        if index < len(children) - 1:
+            child_lines[-1] = child_lines[-1] + ","
+        lines.extend(child_lines)
+    return lines
+
+
+def _encapsulated_items(item: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The DER an OCTET STRING or BIT STRING carries, when it is shown as nested items."""
+    decoded = item.get("decoded")
+    if not isinstance(decoded, dict):
+        return None
+    embedded = decoded.get("embeddedAsn1")
+    if not isinstance(embedded, list) or len(embedded) == 0 or "text" in decoded:
+        return None
+    # A BIT STRING usually holds a key or a signature. Only a constructed first element (an RSA
+    # key, an ECDSA signature) is read as DER, so an EC point that happens to parse as a TLV keeps
+    # its payload hex.
+    if "payloadHex" in decoded and not embedded[0].get("constructed"):
+        return None
+    return embedded
+
+
+def _raw_value(raw_hex: str) -> str:
+    """'...'H for an undecoded primitive, with its text when every byte is printable ASCII."""
+    try:
+        value = bytes.fromhex(raw_hex)
+    except ValueError:
+        return f"'{raw_hex}'H"
+    if len(value) >= 4 and all(0x20 <= byte <= 0x7E for byte in value):
+        return f"'{raw_hex}'H ({json.dumps(value.decode('ascii'))})"
+    return f"'{raw_hex}'H"
 
 
 def _render_value(value: Any, indent: int) -> str:

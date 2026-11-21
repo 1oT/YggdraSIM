@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Filesystem tree for SAIP sections that carry MF/DF/EF tuples.
 
 Renders an MF/DF tree from ``document["sections"]``. The detail column
@@ -40,6 +39,8 @@ _PE_SECTION_TO_DF_LABEL = {
     "df-5gprose": "DF.5GPROSE (5FB0)",
     "usim": "ADF.USIM",
     "opt-usim": "ADF.USIM (optional)",
+    "iot": "MF + ADF.USIM (IoT Minimal Profile)",
+    "opt-iot": "ADF.USIM (IoT optional files)",
     "isim": "ADF.ISIM",
     "opt-isim": "ADF.ISIM (optional)",
     "csim": "ADF.CSIM",
@@ -358,7 +359,7 @@ class FileSystemView(Vertical):
                             with Horizontal(classes="fs_record_toolbar", id="fs_record_toolbar"):
                                 yield Button("◀", id="fs_record_prev", classes="fs_record_nav")
                                 yield Select(
-                                    [("—", 0)],
+                                    [("--", 0)],
                                     id="fs_record_select",
                                     allow_blank=False,
                                     disabled=True,
@@ -450,7 +451,7 @@ class FileSystemView(Vertical):
         pe_key = str(data.get("pe_key") or "")
         ef_key = str(data.get("ef_key") or "")
         if len(ef_key) == 0:
-            fcp_body.update(f"PE: {pe_key} — pick a file under this DF/ADF.")
+            fcp_body.update(f"PE: {pe_key} -- pick a file under this DF/ADF.")
             data_body.update("(choose an EF leaf in the tree)")
             toolbar.display = False
             return
@@ -554,7 +555,7 @@ class FileSystemView(Vertical):
     def _render_file_data_text(self) -> str:
         records = self._fill_records
         if len(records) == 0:
-            return "(no fillFileContent in this EF — nothing to show as file data)"
+            return "(no fillFileContent in this EF -- nothing to show as file data)"
         if self._record_nav_visible:
             idx = max(0, min(self._record_index, len(records) - 1))
             return self._format_one_record_block(records[idx], idx + 1, len(records))
@@ -587,7 +588,7 @@ class FileSystemView(Vertical):
         self._fs_record_syncing = True
         try:
             if self._record_nav_visible is False or n <= 1:
-                select.set_options([("—", 0)])
+                select.set_options([("--", 0)])
                 select.disabled = True
                 prev_btn.disabled = True
                 next_btn.disabled = True

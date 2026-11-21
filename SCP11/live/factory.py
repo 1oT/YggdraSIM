@@ -40,10 +40,22 @@ except ImportError:
 
 
 def build_apdu_channel(cfg):
-    """Construct and return the direct PC/SC APDU channel for this session variant."""
+    """Construct and return the APDU channel for this session variant: PC/SC, or the relay for a named remote reader."""
     if cfg.TRANSPORT_MODE == TRANSPORT_MODE_PCSC:
+        remote_name = str(getattr(cfg, "READER_NAME", "") or "").strip()
+        if remote_name:
+            try:
+                from SCP11.transport import RemoteApduChannel
+            except ImportError:
+                from transport import RemoteApduChannel
+            try:
+                return RemoteApduChannel(remote_name, quiet_apdu_logging=True)
+            except Exception as error:
+                raise RuntimeError(
+                    f"remote reader {remote_name!r} is not connected: {error}"
+                ) from error
         try:
-            return PcscApduChannel(reader_index=cfg.READER_INDEX)
+            return PcscApduChannel(reader_index=cfg.READER_INDEX, quiet_apdu_logging=True)
         except Exception as error:
             raise RuntimeError(
                 f"PC/SC transport startup failed on reader index {cfg.READER_INDEX}: {error}"

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Personalisation-data CSV interop for the token sidecar.
 
 These tests exercise ``parse_csv_personalisation``, ``load_sidecar_from_csv``

@@ -12,9 +12,14 @@ from Tools.ProfilePackage.saip_json_codec import (
     build_decoded_document_from_sequence,
 )
 from yggdrasim_common.gui_server.actions import saip as saip_actions
+from yggdrasim_common.gui_server.actions.registry import ActionContext
 from yggdrasim_common.gui_server.sessions import get_manager
 
 _TEST_SCOPE = "TEST_GENERATED_AUTHORING"
+_REFERENCE_PROFILE = (
+    Path(__file__).resolve().parents[1]
+    / "Workspace/SAIP/profile/transcoded/1oT_test_profile.transcode.der"
+)
 
 
 def _guarded_document() -> dict:
@@ -256,3 +261,34 @@ def test_invalid_history_snapshot_leaves_authoring_state_and_stacks_unchanged() 
         assert handle["history"]["redo"] == []
     finally:
         get_manager().close(session_id)
+
+
+def test_authoring_sessions_outlive_the_card_idle_default() -> None:
+    """A package an operator is only reading must not be reaped.
+
+    Authoring sessions hold a decoded document, not a reader, and the GUI
+    renders the PE list, FS tree and AID directory from its own cache --
+    so browsing a package never reaches the backend to refresh the idle
+    clock. The manager's short default is for PC/SC handles.
+    """
+    manager = get_manager()
+    default_timeout = manager._default_idle_timeout_s
+    generated = saip_actions.open_saip_document_session(_guarded_document())
+    scaffold = saip_actions._dispatch_create_package(ActionContext())
+    session_ids = [generated["session_id"], scaffold["session_id"]]
+    # The reported failure came from the file-open path, so pin that one
+    # too whenever the reference profile is present.
+    if _REFERENCE_PROFILE.exists():
+        opened = saip_actions._dispatch_open_package(
+            ActionContext(),
+            path=str(_REFERENCE_PROFILE),
+        )
+        session_ids.append(opened["session_id"])
+    try:
+        for session_id in session_ids:
+            timeout = manager.get(session_id).idle_timeout_s
+            assert timeout == saip_actions._AUTHORING_SESSION_IDLE_TIMEOUT_S
+            assert timeout > default_timeout
+    finally:
+        for session_id in session_ids:
+            manager.close(session_id)

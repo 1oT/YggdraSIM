@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -137,7 +138,7 @@ class VarderConcreteExportGuardTests(unittest.TestCase):
             finally:
                 get_manager().close(session_id)
 
-    def test_opened_inline_template_materializes_in_live_workbench(self) -> None:
+    def test_opened_inline_template_keeps_placeholders_and_exports_stored_values(self) -> None:
         placeholder_seed = "01234567890123456789"
         pes = _new_empty_pes(iccid_hex=placeholder_seed)
         template = bytes(pes.to_der()).hex().upper().replace(placeholder_seed, "{ICCIDICCID10}", 1)
@@ -152,15 +153,30 @@ class VarderConcreteExportGuardTests(unittest.TestCase):
                 self.assertEqual(listed["count"], 1)
                 self.assertEqual(listed["variables"][0]["name"], "ICCID")
                 self.assertEqual(listed["variables"][0]["source"], "inline_varder")
+                self.assertEqual(listed["variables"][0]["status"], "BOUND_INLINE_UNRESOLVED")
+                self.assertEqual(listed["inline_template"]["unresolved_variables"], ["ICCID"])
+                self.assertFalse(listed["inline_template"]["complete_export_ready"])
 
                 applied = _dispatch_set_variable(
                     None,
                     session_id=session_id,
                     name="ICCID",
-                    value="8947000000000000001",
+                    value="8988201234567890123",
                 )
+                # The value is stored; the placeholder occurrence stays.
                 self.assertEqual(applied["remaining_inline_placeholder_count"], 0)
+                self.assertEqual(applied["inline_placeholder_count"], 1)
                 self.assertEqual(applied["materialization_source"], "inline_varder")
+                self.assertTrue(applied["inline_template"]["complete_export_ready"])
+
+                handle = get_manager().claim(session_id)
+                self.assertEqual(len(handle["inline_placeholder_records"]), 1)
+                sentinel = bytes.fromhex(handle["inline_placeholder_records"][0].sentinel_hex)
+                self.assertIn(sentinel, bytes(handle["pes"].to_der()))
+
+                listed = _dispatch_list_variables(None, session_id=session_id)
+                self.assertEqual(listed["variables"][0]["status"], "BOUND_INLINE_RESOLVED")
+                self.assertEqual(listed["variables"][0]["value"], "8988201234567890123")
 
                 output = Path(temp_dir) / "materialized.der"
                 saved = _dispatch_save_package(
@@ -170,19 +186,34 @@ class VarderConcreteExportGuardTests(unittest.TestCase):
                     format="der",
                 )
                 self.assertEqual(saved["format"], "der")
-                self.assertEqual(
-                    saved["remaining_inline_placeholder_count"],
-                    0,
-                )
-                self.assertTrue(output.is_file())
+                self.assertTrue(saved["materialized"])
+                self.assertEqual(saved["materialized_variables"], ["ICCID"])
+                self.assertFalse(saved["session_source_rebound"])
+                self.assertEqual(saved["remaining_inline_placeholder_count"], 0)
+                self.assertEqual(saved["inline_placeholder_count"], 1)
+                der = output.read_bytes()
+                self.assertIn(bytes.fromhex("8988201234567890123F"), der)
+                self.assertNotIn(sentinel, der)
+                # The session still holds the template and its source.
+                live = get_manager().claim(session_id)
+                self.assertEqual(live["source_path"], str(source.resolve()))
+                self.assertEqual(len(live["inline_placeholder_records"]), 1)
 
-                with self.assertRaisesRegex(ValueError, "unresolved inline-template"):
-                    _dispatch_save_package(
-                        None,
-                        session_id=session_id,
-                        output_path=str(Path(temp_dir) / "materialized-template"),
-                        format="varder",
-                    )
+                template_out = _dispatch_save_package(
+                    None,
+                    session_id=session_id,
+                    output_path=str(Path(temp_dir) / "materialized-template"),
+                    format="varder",
+                )
+                self.assertTrue(template_out["output_path"].endswith(".varder"))
+                varder_text = Path(template_out["output_path"]).read_text(encoding="utf-8-sig")
+                self.assertIn("{ICCIDICCID10}", varder_text)
+                sidecar = Path(template_out["variable_sidecar_path"])
+                self.assertTrue(sidecar.is_file())
+                self.assertEqual(
+                    json.loads(sidecar.read_text(encoding="utf-8"))["values"],
+                    {"ICCID": "8988201234567890123"},
+                )
             finally:
                 get_manager().close(session_id)
 

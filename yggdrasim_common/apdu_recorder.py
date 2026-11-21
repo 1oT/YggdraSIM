@@ -25,7 +25,7 @@ display the full live trace without each call site having to opt in.
 Subscribers may be either:
 
 * **synchronous callables** invoked on the recorder thread (typically
-  the FastAPI worker thread that dispatched the action) — keep them
+  the FastAPI worker thread that dispatched the action) -- keep them
   fast, they run inside the same lock that the wire-level transmit
   call holds; or
 * **asyncio.Queue** instances attached via :meth:`attach_queue`, used
@@ -167,7 +167,7 @@ class _ApduRecorder:
         for fn in sync_subs:
             try:
                 fn(safe_exchange)
-            except Exception:  # noqa: BLE001 — never trust subscribers
+            except Exception:  # noqa: BLE001 -- never trust subscribers
                 dropped += 1
 
         for queue, loop, requested_scope in async_queues:
@@ -207,7 +207,7 @@ class _ApduRecorder:
         try:
             queue.put_nowait(exchange)
         except asyncio.QueueFull:
-            # Slow consumer — drop oldest by pulling and re-pushing.
+            # Slow consumer -- drop oldest by pulling and re-pushing.
             try:
                 _ = queue.get_nowait()
                 queue.put_nowait(exchange)
@@ -421,8 +421,8 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
     """Monkey-patch ``connection.transmit`` to record every APDU.
 
     The wrapper is idempotent (calling it twice on the same connection
-    is a no-op). It preserves the original ``transmit`` semantics —
-    return value, raised exceptions, kwargs — and adds a single side
+    is a no-op). It preserves the original ``transmit`` semantics --
+    return value, raised exceptions, kwargs -- and adds a single side
     effect: every successful response and every raised exception
     appends one :class:`ApduExchange` to the global recorder.
 
@@ -445,7 +445,7 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
     def _traced(apdu, *args, **kwargs):
         try:
             apdu_bytes = bytes(apdu)
-        except Exception:  # noqa: BLE001 — exotic apdu shapes
+        except Exception:  # noqa: BLE001 -- exotic apdu shapes
             apdu_bytes = b""
 
         start = time.perf_counter()
@@ -477,7 +477,7 @@ def wrap_connection(connection: Any, *, source: str = "card") -> Any:
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         try:
             data_bytes = bytes(data) if data else b""
-        except Exception:  # noqa: BLE001 — pyscard returns list[int]
+        except Exception:  # noqa: BLE001 -- pyscard returns list[int]
             data_bytes = bytes(list(data)) if data else b""
         raw_capture = _RECORDER.raw_capture_enabled(source)
         exchange = ApduExchange(

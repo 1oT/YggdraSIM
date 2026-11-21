@@ -883,7 +883,8 @@ def test_profile_adapter_realistic_info_dump_remove_and_extract_parity(
     assert "A0000000620301" in info
     assert "Security domains: 1" in info
     assert "A000000151000000" in info
-    assert "(data redacted)" in info
+    assert "(data redacted)" not in info
+    assert "data=1122334455667788AABBCCDDEEFF0011" in info
     assert "RFM instances: 1" in info
 
     result, apps_info, error = _run(["info", "--apps"])

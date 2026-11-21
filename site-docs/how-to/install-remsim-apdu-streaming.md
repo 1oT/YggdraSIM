@@ -21,7 +21,7 @@ YggdraSIM HIL bridge, Osmocom RemSIM client for SIMtrace2, GSMTAP capture,
 and optional Card Bridge remote-card input.
 
 Use this page before [Run a HIL Capture](run-hil-capture.md) or
-[Remote APDU Streaming](remote-apdu-streaming.md).
+[Card Bridge over SSH](remote-apdu-streaming.md).
 
 ## Supported hosts
 
@@ -216,7 +216,7 @@ the GUI:
 
 ```bash
 python main/main.py
-# choose [CB] Card Bridge / Remote APDU Streaming
+# choose [CB] Card Bridge / Card Bridge over SSH
 ```
 
 The `[CB]` menu can start or stop the local Card Bridge, print SSH tunnel
@@ -240,6 +240,12 @@ Edit:
 - reader selector or remote-card flags
 - `--remsim-binary` if needed
 - `--usb-vidpid`
+
+Leave the ordering alone. A unit that is `WantedBy=default.target` must not
+also be `After=default.target`: that closes an ordering cycle, and systemd
+breaks a cycle by deleting one of the start jobs, so a unit silently never
+starts at boot. Order against a concrete unit when one service needs another
+first, as `yggdrasim-lab-agent.service.example` does with the Card Bridge.
 
 Then:
 
@@ -269,7 +275,7 @@ loginctl enable-linger "$USER"
 
 ## Related pages
 
-- [Remote APDU Streaming](remote-apdu-streaming.md)
+- [Card Bridge over SSH](remote-apdu-streaming.md)
 - [Run a HIL Capture](run-hil-capture.md)
 - [Universal GUI Command Center](../subsystems/gui-command-center.md)
 - [HIL Bridge](../subsystems/hil-bridge.md)

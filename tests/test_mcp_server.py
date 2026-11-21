@@ -973,6 +973,9 @@ def test_runtime_status_is_read_only(server) -> None:
         ("SET-TOKEN a b", "write"), ("DIFF-TUI", "interactive"),
         ("NEW-PROFILE-WIZARD", "interactive"), ("WATCH-SIMCARD", "interactive"),
         ("RM -rf /", "unknown"), ("", "empty"),
+        # --log appends the command's output to a file on this host.
+        ("INFO --log /tmp/info.log", "write"), ("--log info.log INFO", "write"),
+        ("INFO --log", "write"), ("REMOVE-NAA x --log y.log", "destructive"),
     ],
 )
 def test_shell_command_classification(server, command: str, risk: str) -> None:
@@ -1003,6 +1006,16 @@ def test_write_verbs_are_refused_without_the_opt_in(server, monkeypatch) -> None
     payload = json.loads(server.shell_run("profile_package", "GENERATE-BATCH a b c; EXIT"))
     assert server.ACCESS_ENV in payload["error"]
     assert payload["risk"] == "write"
+
+
+def test_a_log_modifier_makes_a_read_verb_a_write(server, monkeypatch) -> None:
+    """A read-only server must not append a command's output to a file."""
+
+    monkeypatch.delenv(server.ACCESS_ENV, raising=False)
+    payload = json.loads(server.shell_run("profile_package", "INFO --log /tmp/info.log; EXIT"))
+    assert payload["verb"] == "INFO"
+    assert payload["risk"] == "write"
+    assert "output" not in payload
 
 
 def test_interactive_verbs_are_always_refused(server, monkeypatch) -> None:
@@ -1403,13 +1416,13 @@ class _Registry:
     def scp11_eim(cls) -> set:
         return cls._dicts_named(
             "SCP11/eim_local/main.py", {"self._commands", "self._command_aliases"}
-        )
+        ) | cls._dicts_named("SCP11/eim_local/engine_shell.py", {"DOCS"})
 
     @classmethod
     def scp11_relay(cls) -> set:
-        # SCP11/relay/console.py re-exports SCP11/console.py, which is a
-        # separate older console rather than an alias of the live one.
-        return cls._add_command_calls("SCP11/console.py")
+        # SCP11/relay/console.py is an alias of the live console, so the
+        # relay shell registers exactly the verbs the live shell does.
+        return cls._add_command_calls("SCP11/live/console.py")
 
     @classmethod
     def suci_tool(cls) -> set:
@@ -1846,3 +1859,305 @@ def test_akma_derive_keys_formats_a_kid_with_the_home_network_identifier(server)
 def test_akma_derive_keys_omits_a_kid_without_the_network_parts(server) -> None:
     payload = json.loads(_call(server.akma_derive_keys("00" * 32, "imsi-001010000000001")))
     assert "a_kid" not in payload
+
+
+# --- Remote Lab readers ----------------------------------------------------
+#
+# A reader published by a Remote Lab link is served by a relay, never by
+# PC/SC. The card tools resolve it by its registered name, before any
+# enumeration, and never by substring.
+
+
+class _FakeRelayConnection:
+    def __init__(self) -> None:
+        self.sent: list[bytes] = []
+        self.closed = 0
+
+    def connect(self, protocol=None) -> None:
+        return None
+
+    def transmit(self, apdu):
+        self.sent.append(bytes(apdu))
+        return [0x6F, 0x00], 0x90, 0x00
+
+    def disconnect(self) -> None:
+        self.closed += 1
+
+    def getATR(self):  # noqa: N802 -- pyscard API name
+        return [0x3B, 0x9F]
+
+
+@pytest.fixture()
+def remote_reader(monkeypatch):
+    from yggdrasim_common import card_backend, remote_readers
+
+    remote_readers.clear_remote_readers()
+    remote_readers.register_remote_reader(
+        "Remote Lab: Site A", relay_url="http://127.0.0.1:1/apdu", device_id="site-a"
+    )
+    opened: list[dict] = []
+    connection = _FakeRelayConnection()
+
+    def fake_create(**kwargs):
+        opened.append(dict(kwargs))
+        return connection
+
+    monkeypatch.setattr(card_backend, "create_card_connection", fake_create)
+    monkeypatch.setattr(card_backend, "is_simulated_card_backend", lambda: False)
+    yield opened, connection
+    remote_readers.clear_remote_readers()
+
+
+def test_pcsc_transmit_serves_a_remote_reader_without_pcsc(server, monkeypatch, remote_reader) -> None:
+    opened, connection = remote_reader
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setattr(server, "_load_pcsc", lambda: (_ for _ in ()).throw(AssertionError("PC/SC touched")))
+    payload = json.loads(_call(server.pcsc_transmit("00A4040000", reader_name="Remote Lab: Site A")))
+    assert payload["reader"] == "Remote Lab: Site A"
+    assert payload["SW1"] == "0x90"
+    assert payload["response_data"] == "6F00"
+    assert opened == [{"reader_index": -1, "reader_name": "Remote Lab: Site A"}]
+    assert connection.sent == [bytes.fromhex("00A4040000")]
+    assert connection.closed == 1
+
+
+def test_pcsc_transmit_remote_reader_still_needs_the_card_gate(server, remote_reader) -> None:
+    opened, _connection = remote_reader
+    payload = json.loads(_call(server.pcsc_transmit("00A4040000", reader_name="Remote Lab: Site A")))
+    assert "error" in payload
+    assert opened == []
+
+
+def test_card_session_open_binds_a_remote_reader(server, monkeypatch, remote_reader) -> None:
+    opened, _connection = remote_reader
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    monkeypatch.setattr(server, "_load_pcsc", lambda: (_ for _ in ()).throw(AssertionError("PC/SC touched")))
+    payload = json.loads(_call(server.card_session_open(reader_name="Remote Lab: Site A")))
+    assert payload["reader"] == "Remote Lab: Site A"
+    assert opened and opened[0]["reader_name"] == "Remote Lab: Site A"
+    assert opened[0]["reader_index"] == -1
+    _call(server.card_session_close(payload["session_id"]))
+
+
+def _write_library_page(root: Path, slug: str, page: str, *lines: str) -> None:
+    pages = root / slug / "pages"
+    pages.mkdir(parents=True, exist_ok=True)
+    (pages / page).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@pytest.fixture()
+def spec_library(server, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A miniature converted library: two TS 102 221 editions, TS 31.102, TS 33.501."""
+
+    _write_library_page(
+        tmp_path,
+        "ts_102221v18.4",
+        "page-002.md",
+        "650 Route des Lucioles",
+        "1 presented to TC SET for information;",
+        "11.1.1          SELECT .......................................... 60",
+    )
+    _write_library_page(tmp_path, "ts_102221v18.4", "page-014.md", "1           Scope")
+    _write_library_page(tmp_path, "ts_102221v18.4", "page-060.md", "11.1.1          SELECT")
+    _write_library_page(tmp_path, "ts_102221v160200p", "page-058.md", "11.1.1          SELECT")
+    _write_library_page(tmp_path, "ts_131102v19.5", "page-206.md", "4.4.11     Contents of files at the DF5GS level")
+    _write_library_page(
+        tmp_path, "ts_133501v19.7", "page-255.md", "C.3           Elliptic Curve Integrated Encryption Scheme (ECIES)"
+    )
+    monkeypatch.setattr(server, "SPEC_LIBRARY_ROOT", tmp_path)
+    return tmp_path
+
+
+def test_spec_lookup_cites_the_newest_library_edition(server, spec_library) -> None:
+    found = json.loads(server.spec_section_lookup("TS 102 221", "11.1.1"))
+    assert found["source"] == "library"
+    assert found["document"] == "ts_102221v18.4"
+    assert found["title"] == "SELECT"
+    assert found["page_file"] == "ts_102221v18.4/pages/page-060.md"
+    assert found["citation"] == "TS 102 221 v18.4 §11.1.1"
+
+
+def test_spec_lookup_honours_a_requested_version(server, spec_library) -> None:
+    found = json.loads(server.spec_section_lookup("TS 102 221 v16.2", "§11.1.1"))
+    assert found["document"] == "ts_102221v160200p"
+    assert found["citation"] == "TS 102 221 v16.2.0 §11.1.1"
+
+
+def test_spec_lookup_names_3gpp_numbers_and_annexes(server, spec_library) -> None:
+    assert json.loads(server.spec_section_lookup("TS 31.102", "4.4.11"))["citation"] == "TS 31.102 v19.5 §4.4.11"
+    assert json.loads(server.spec_section_lookup("3GPP TS 33.501", "C.3"))["citation"] == "TS 33.501 v19.7 Annex C.3"
+
+
+def test_spec_lookup_reports_a_clause_the_document_lacks(server, spec_library) -> None:
+    missing = json.loads(server.spec_section_lookup("TS 102 221", "99.9"))
+    assert missing == {"error": "Clause 99.9 not found in ts_102221v18.4.", "document": "ts_102221v18.4"}
+
+
+def test_spec_lookup_reads_a_title_that_opens_with_digits(server, tmp_path, monkeypatch) -> None:
+    # TS 24.501 v19.7 §9.11.3.4 is "5GS mobile identity". A top-level value row
+    # of a coding table and a hex dump under a dotted number are not headings.
+    heading = {"clause": "9.11.3.4", "title": "5GS mobile identity"}
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-901.md", f"{heading['clause']}         {heading['title']}")
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-950.md", "1     5GS encryption algorithm 5G-EA1 supported")
+    _write_library_page(tmp_path, "ts_124501v19.7", "page-951.md", "3.1     8A 01 05 //life cycle")
+    monkeypatch.setattr(server, "SPEC_LIBRARY_ROOT", tmp_path)
+    assert json.loads(server.spec_section_lookup("TS 24.501", heading["clause"]))["title"] == heading["title"]
+    assert "error" in json.loads(server.spec_section_lookup("TS 24.501", "1"))
+    assert "error" in json.loads(server.spec_section_lookup("TS 24.501", "3.1"))
+
+
+def test_spec_lookup_outline_skips_front_matter_and_contents(server, spec_library) -> None:
+    outline = json.loads(server.spec_section_lookup("TS 102 221"))["outline"]
+    assert [entry["clause"] for entry in outline] == ["1"]
+    assert outline[0]["page_file"] == "ts_102221v18.4/pages/page-014.md"
+
+
+def test_spec_lookup_never_reads_outside_the_library(server, tmp_path, monkeypatch) -> None:
+    _write_library_page(tmp_path / "lib", "ts_102221v18.4", "page-060.md", "11.1.1          SELECT")
+    _write_library_page(tmp_path, "outside", "page-001.md", "1           Secret")
+    monkeypatch.setattr(server, "SPEC_LIBRARY_ROOT", tmp_path / "lib")
+    for spec_id in ("../outside", "..", "lib/../outside", str(tmp_path / "outside")):
+        answer = json.loads(server.spec_section_lookup(spec_id, "1"))
+        assert answer.get("source") != "library", spec_id
+        assert "Secret" not in json.dumps(answer), spec_id
+    assert json.loads(server.spec_section_lookup("ts_102221v18.4", "11.1.1"))["title"] == "SELECT"
+
+
+def test_spec_lookup_falls_back_to_the_verified_index(server, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "SPEC_LIBRARY_ROOT", tmp_path / "absent")
+    indexed = json.loads(server.spec_section_lookup("TS 102 221"))
+    assert indexed["source"].startswith("verified index")
+    assert indexed["version"] == "v18.4"
+    assert "§11.1.1 SELECT" in indexed["key_sections"]
+    assert "note" in json.loads(server.spec_section_lookup("TS 102 221 v18.4", "11.1.1"))
+    assert "error" in json.loads(server.spec_section_lookup("ISO 7816-4"))
+    for key, row in server.SPEC_SECTIONS.items():
+        assert set(row) == {"title", "version", "key_sections"}, key
+
+
+def test_identifier_examples_satisfy_their_own_ranges(server) -> None:
+    for kind, entry in server.TEST_IDENTIFIER_RANGES.items():
+        assert json.loads(server.validate_identifier(kind, entry["example"]))["valid"] is True, kind
+
+
+def test_eid_range_is_32_digits(server) -> None:
+    sgp26_test_eid = "89049032123451234512345678901235"
+    assert json.loads(server.validate_identifier("eid", sgp26_test_eid))["valid"] is True
+    assert json.loads(server.validate_identifier("eid", sgp26_test_eid[:-1]))["valid"] is False
+    assert "error" in json.loads(server.validate_identifier("imei", "0" * 15))
+
+
+class _FakeLocalReader:
+    """A local PC/SC reader whose connection reports what another process sees mid-APDU."""
+
+    def __init__(self, name: str, on_transmit=None) -> None:
+        self.name = name
+        self.on_transmit = on_transmit
+        self.connections: list[object] = []
+
+    def __str__(self) -> str:
+        return self.name
+
+    def createConnection(self):  # noqa: N802 -- pyscard API name
+        reader = self
+
+        class _Connection:
+            def connect(self, mode=None) -> None:
+                del mode
+
+            def transmit(self, apdu):
+                if reader.on_transmit is not None:
+                    reader.on_transmit()
+                return [0x6F, 0x00], 0x90, 0x00
+
+            def disconnect(self) -> None:
+                pass
+
+            def getATR(self):  # noqa: N802 -- pyscard API name
+                return [0x3B, 0x9F]
+
+        connection = _Connection()
+        self.connections.append(connection)
+        return connection
+
+
+@pytest.fixture()
+def local_reader_lock(server, monkeypatch, tmp_path):
+    """One local reader, the card gate open, and reader locks in a scratch directory."""
+    from tests.reader_lock_support import READER
+    from yggdrasim_common import card_backend, reader_locks
+
+    lock_dir = tmp_path / "reader-locks"
+    monkeypatch.setattr(reader_locks, "_DIRECTORY", lock_dir)
+    monkeypatch.setenv(server.CARD_ACCESS_ENV, "1")
+    reader = _FakeLocalReader(READER)
+    monkeypatch.setattr(server, "_load_pcsc", lambda: ((lambda: [reader]), 1, None))
+    opened: list[dict] = []
+
+    def fake_create(**kwargs):
+        opened.append(dict(kwargs))
+        return reader.createConnection()
+
+    monkeypatch.setattr(card_backend, "create_card_connection", fake_create)
+    monkeypatch.setattr(card_backend, "is_simulated_card_backend", lambda: False)
+    return lock_dir, reader, opened
+
+
+def test_card_session_open_holds_a_local_reader_until_closed(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, _reader, _opened = local_reader_lock
+    payload = json.loads(_call(server.card_session_open()))
+    session_id = payload["session_id"]
+    assert probe(lock_dir)["holder"].startswith(f"MCP card session {session_id} (pid ")
+    _call(server.card_session_close(session_id))
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_card_session_open_is_refused_a_reader_another_process_keeps(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import CONSOLE_HOLDER, OtherProcess
+
+    lock_dir, _reader, opened = local_reader_lock
+    other = OtherProcess(lock_dir, long_running=True)
+    try:
+        payload = json.loads(_call(server.card_session_open()))
+        assert payload["error"].startswith(f"reader busy: {CONSOLE_HOLDER} (pid {other.pid}) has held ")
+        assert opened == []
+        assert server._CARD_SESSIONS == {}
+    finally:
+        other.close()
+
+
+def test_an_idle_card_session_gives_its_reader_back(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, _reader, _opened = local_reader_lock
+    session_id = json.loads(_call(server.card_session_open()))["session_id"]
+    server._CARD_SESSIONS[session_id]["touched"] = float("-inf")
+    assert server._expire_idle_sessions() == [session_id]
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_pcsc_transmit_holds_the_reader_for_its_one_apdu(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import probe
+
+    lock_dir, reader, _opened = local_reader_lock
+    seen: list[dict] = []
+    reader.on_transmit = lambda: seen.append(probe(lock_dir))
+    payload = json.loads(_call(server.pcsc_transmit("00A4040000")))
+    assert payload["SW1"] == "0x90"
+    assert seen[0]["holder"].startswith("MCP pcsc_transmit (pid ")
+    assert probe(lock_dir) == {"held": True}
+
+
+def test_pcsc_transmit_is_refused_a_reader_another_process_keeps(server, local_reader_lock) -> None:
+    from tests.reader_lock_support import CONSOLE_HOLDER, OtherProcess
+
+    lock_dir, reader, _opened = local_reader_lock
+    other = OtherProcess(lock_dir, long_running=True)
+    try:
+        payload = json.loads(_call(server.pcsc_transmit("00A4040000")))
+        assert payload["error"].startswith(f"reader busy: {CONSOLE_HOLDER} (pid {other.pid}) has held ")
+        assert reader.connections == []
+    finally:
+        other.close()

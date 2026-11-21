@@ -9,9 +9,9 @@ default_md = sha256
 req_extensions = v3_req
 
 [ req_dn ]
-C = SE
-ST = Stockholm
-L = Stockholm
+C = XX
+ST = TestState
+L = TestLocality
 O = YggdraSIM
 OU = eSIM Simulator
 CN = YggdraSIM.eSIM.Simulator.Cert.Chain

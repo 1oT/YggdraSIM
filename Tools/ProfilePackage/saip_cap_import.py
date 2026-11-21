@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""Java Card CAP / IJC inspector — package, applet and import AIDs.
+"""Java Card CAP / IJC inspector -- package, applet and import AIDs.
 
 The PE-Application editor offers an "Import from CAP" button that
 needs to extract the package AID, every applet AID and every import
@@ -12,7 +11,7 @@ tooling. This module is the parser behind that button.
 
 References:
 
-* JCVM Spec §6 (CAP file format) — Header, Applet and Import
+* JCVM Spec §6 (CAP file format) -- Header, Applet and Import
   components.
 * GP Amd B §11 (CAP file packaging on the card).
 
@@ -23,7 +22,7 @@ component is itself a length-prefixed structure beginning with a
 3 = applet, 4 = import, ...).
 
 An IJC (Installable Java Card) file is the same components
-concatenated in directory order — i.e. a flat byte stream that starts
+concatenated in directory order -- i.e. a flat byte stream that starts
 with the Header component (tag 0x01).
 """
 
@@ -52,7 +51,7 @@ def _read_aid(buf: bytes, offset: int) -> tuple[str, int] | None:
 
 
 def _parse_header_component(buf: bytes) -> dict[str, Any]:
-    """JCVM §6.3 Header component — magic, version, flags, package AID."""
+    """JCVM §6.3 Header component -- magic, version, flags, package AID."""
     out: dict[str, Any] = {}
     if len(buf) < 8:
         return out
@@ -76,7 +75,7 @@ def _parse_header_component(buf: bytes) -> dict[str, Any]:
 
 
 def _parse_applet_component(buf: bytes) -> list[str]:
-    """JCVM §6.5 Applet component — count(1) || (length(1) || AID || install_method_offset(2))*."""
+    """JCVM §6.5 Applet component -- count(1) || (length(1) || AID || install_method_offset(2))*."""
     if len(buf) == 0:
         return []
     count = buf[0]
@@ -96,7 +95,7 @@ def _parse_applet_component(buf: bytes) -> list[str]:
 
 
 def _parse_import_component(buf: bytes) -> list[str]:
-    """JCVM §6.4 Import component — count(1) || (package_minor || package_major || length(1) || AID)*."""
+    """JCVM §6.4 Import component -- count(1) || (package_minor || package_major || length(1) || AID)*."""
     if len(buf) == 0:
         return []
     count = buf[0]
@@ -163,7 +162,7 @@ def _read_zip_components(raw: bytes) -> dict[str, bytes] | None:
 
 
 def parse_cap_or_ijc(raw: bytes) -> dict[str, Any]:
-    """Public entry point — accepts CAP-as-JAR or flat IJC bytes.
+    """Public entry point -- accepts CAP-as-JAR or flat IJC bytes.
 
     Returns ``{"format": "cap" | "ijc",
               "package_aid_hex": <str | "">,
@@ -191,7 +190,7 @@ def parse_cap_or_ijc(raw: bytes) -> dict[str, Any]:
     if "Header" in components:
         header_payload = _parse_header_component(components["Header"])
     else:
-        warnings.append("Header component missing — package AID unavailable.")
+        warnings.append("Header component missing -- package AID unavailable.")
     applet_aids: list[str] = []
     if "Applet" in components:
         applet_aids = _parse_applet_component(components["Applet"])

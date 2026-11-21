@@ -16,7 +16,7 @@ decoding any of the body fields:
   The two Address TLVs in the envelope (RP-DA destination first,
   RP-OA SC second per §7.3.2.2) plus Location Information are
   decoded into ``state.toolkit``.
-* 3GPP TS 31.111 §7.3.3 ``USSD Download`` (``D9``). The USSD
+* 3GPP TS 31.111 v19.4 §7.6.2 ``USSD Data Download`` (``D9``). The USSD
   String TLV (``8A`` / ``0A``) is split into DCS + raw bytes +
   best-effort decoded text. The tag is ``D9`` per clause 9.1;
   ``D8`` is reserved for intra-UICC communication.
@@ -168,7 +168,7 @@ class MoSmsControlEnvelopeTests(_ToolkitHarness):
 
 
 class UssdDownloadEnvelopeTests(_ToolkitHarness):
-    """3GPP TS 31.111 §7.3.3 USSD Download (D9).
+    """3GPP TS 31.111 v19.4 §7.6.2 USSD Data Download envelope (D9).
 
     Clause 9.1 assigns USSD download to 'D9'; 'D8' is reserved for
     intra-UICC communication, and a 'D8' envelope must not be answered

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""Command Center actions (R2-004 Phase C).
+"""Command Center actions.
 
 Actions are small, structured wrappers around existing engine entry points
 so the GUI can render task-oriented panels (buttons + forms) instead of
@@ -12,14 +12,14 @@ leaving the user to drive a raw CLI. Each action declares:
 * ``title``        : short, human-facing label
 * ``description``  : one-paragraph help text
 * ``inputs``       : typed form-field list (used by the UI to draw a form)
-* ``output_kind``  : hint for the UI result renderer (``tree`` / ``fcp`` / ``log_stream`` / …)
+* ``output_kind``  : hint for the UI result renderer (``tree`` / ``fcp`` / ``log_stream`` / ...)
 * ``dispatcher``   : callable that runs the action (sync) or coroutine
   (async / streaming). Dispatchers receive a kwargs dict matching the
   declared inputs (already type-coerced) plus a short ``ActionContext``
   handle.
 
 The registry lives in :mod:`.registry`; per-subsystem modules register
-their actions eagerly on import. Importing this package is cheap — the
+their actions eagerly on import. Importing this package is cheap -- the
 dispatchers themselves use lazy imports so FastAPI / pywebview stay
 optional.
 """

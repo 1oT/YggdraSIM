@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """POSIX PTY bridge for Milestone B-2 (interactive CLI modules).
 
-The GUI launches a registered CLI module — e.g. ``python -m SCP03`` —
+The GUI launches a registered CLI module -- e.g. ``python -m SCP03`` --
 inside a pseudo-terminal so the existing interactive shells
 (``yggdrasim`` main menu, SCP03 shell, etc.) can run unmodified. The
 caller is responsible for wiring the PTY to a transport (a FastAPI
@@ -18,7 +17,7 @@ Design notes
   exposes. Nothing here calls ``shell=True`` or accepts user-supplied
   argv.
 * Module names are matched against
-  :data:`yggdrasim_common.registry.CLI_MODULES` — the allow-list is
+  :data:`yggdrasim_common.registry.CLI_MODULES` -- the allow-list is
   the same one the launcher help prints, so the GUI cannot spawn
   anything the CLI cannot.
 * Windows is not supported in this iteration. The :func:`is_supported`

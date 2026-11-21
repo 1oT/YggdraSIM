@@ -4,7 +4,7 @@
  */
 
 
-/* Legacy card styling — still referenced by a handful of callers that
+/* Legacy card styling -- still referenced by a handful of callers that
  * haven't migrated yet. Harmless: if no ``.cc-wb-extras-card`` ever gets
  * created, these rules have no effect. */
 .cc-wb-extras-card {

@@ -1,25 +1,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 CLI entry point for ``yggdrasim-eum-diag``.
 
 Sub-commands:
 
-* ``inject-keys`` — build a session-key repository JSON from
+* ``inject-keys`` -- build a session-key repository JSON from
   ``--iccid / --shs-enc / --shs-mac / --dek`` arguments (optionally
   read from ``--bundle-file``) and invoke tshark with the bundled
   Lua dissector. Use this when an EUM operator has a PCAP from the
   network capture and the keys pulled from their server database.
 
-* ``store-keys`` — same as ``inject-keys`` but skips the tshark
+* ``store-keys`` -- same as ``inject-keys`` but skips the tshark
   invocation. Useful for batch builds that feed multiple PCAPs off
   the same key set.
 
-* ``decode-bpp`` — offline decode of a Bound Profile Package byte
-  string via pySim's SAIP ASN.1 machinery. Falls back to a clear
-  error message when pySim is not importable.
+* ``decode-bpp`` -- offline summary of a Bound Profile Package byte
+  string: its BF36 layout and the ES10b segments it is sent in. No
+  session keys are needed; the protected contents stay unread.
 
 The CLI never writes outside ``--output-dir`` (default ``reports/eum``
 under the workspace root).
@@ -91,7 +90,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     # decode-bpp
     decoder = subparsers.add_parser(
         "decode-bpp",
-        help="Offline decode a Bound Profile Package binary via pySim.",
+        help="Summarise a Bound Profile Package binary: BF36 layout and ES10b segments.",
     )
     decoder.add_argument("--bpp", required=True, help="Path to BF36 DER bytes.")
     decoder.add_argument(
@@ -243,23 +242,16 @@ def _cmd_decode_bpp(args: argparse.Namespace, workspace_root: Path) -> int:
         sys.stderr.write(f"[-] BPP file not found: {bpp_path}\n")
         return 3
     try:
-        from Tools.ProfilePackage.saip_json_codec import (
-            ensure_workspace_pysim_on_path,
-        )
-
-        ensure_workspace_pysim_on_path(workspace_root)
-        from pySim.esim.saip import bpp  # type: ignore[import-not-found]
+        from SCP11.local_access.session import LocalIsdrSession
     except ImportError as error:
-        sys.stderr.write(
-            "[-] offline BPP decode needs pySim. Install the PyPI wheel "
-            "(`pip install pySim`) or clone the upstream tree "
-            "(`git clone https://gitlab.com/osmocom/pysim.git pysim`) "
-            f"into {workspace_root}. Underlying error: {error}\n"
-        )
+        sys.stderr.write(f"[-] offline BPP summary needs the SCP11 package: {error}\n")
         return 4
     raw_bytes = bpp_path.read_bytes()
+    # Layout and segmentation are pure functions of the bytes. The session
+    # is built without a channel, so no reader is opened.
+    reader = LocalIsdrSession(apdu_channel=None)
     try:
-        parsed = bpp.BoundProfilePackage.from_der(raw_bytes)
+        segments = reader._segment_bound_profile_package(raw_bytes)
     except Exception as error:
         sys.stderr.write(
             f"[-] BPP decode failed: {error.__class__.__name__}: {error}\n"
@@ -268,8 +260,8 @@ def _cmd_decode_bpp(args: argparse.Namespace, workspace_root: Path) -> int:
     summary = {
         "pathname": str(bpp_path),
         "byte_length": len(raw_bytes),
-        "iccid": getattr(parsed, "iccid", ""),
-        "segment_count": len(getattr(parsed, "segments", []) or []),
+        "segment_count": len(segments),
+        "layout": reader._describe_bpp_layout(raw_bytes),
     }
     sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     return 0

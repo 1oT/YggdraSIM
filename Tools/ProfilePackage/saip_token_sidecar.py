@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Token sidecar I/O.
 
 A *token sidecar* is a small JSON file that carries the
@@ -267,7 +266,7 @@ def write_sidecar(
 # fully blank lines separate independent personalisation-data sets for
 # different profile packages stored together in one file. YggdraSIM
 # sidecars use a JSON shape, but operators routinely receive CSV personal-
-# isation data straight from issuance tooling — these helpers let the two
+# isation data straight from issuance tooling -- these helpers let the two
 # round-trip without losing variable values.
 
 _CSV_COMMENT_PREFIXES = ("#", ";")
@@ -593,7 +592,7 @@ def read_token_defs_from_file(
     ``None`` if the file is missing, not JSON, or does not contain the
     ``__ygg_token_defs__`` key. Sidecar files and full template files
     are both acceptable inputs; only the two metadata keys are read.
-    Never raises on malformed input — missing/invalid data yields
+    Never raises on malformed input -- missing/invalid data yields
     ``None`` so callers can treat "no usable defs found" as an explicit
     case.
     """
@@ -921,7 +920,7 @@ def retokenise_template_lengths(
     ``__ygg_token_defs__`` entry for ``NAME``. Short-form (``LL``) and
     long-form (``81 LL``, ``82 LL LL`` ...) prefixes are both recognised.
 
-    Passing ``only_tokens`` restricts the rewrite to the named tokens —
+    Passing ``only_tokens`` restricts the rewrite to the named tokens --
     useful for the TUI's "auto-migrate length companion for the token I
     just edited" prompt. ``None`` (default) means every defined token.
 
@@ -1020,7 +1019,7 @@ def find_unmigrated_length_candidates(
     represents a spot where the hex nibbles immediately before ``{token_name}``
     already encode the BER-TLV length of ``token_name``. Candidates are
     exactly the sites that :func:`retokenise_template_lengths(only_tokens=
-    {token_name})` would rewrite — the function does not mutate ``document``.
+    {token_name})` would rewrite -- the function does not mutate ``document``.
     """
 
     defs, style = _resolve_token_defs_container(document)

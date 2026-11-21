@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Correctness and usability regressions for SCP03 terminal wizards."""
 
 from __future__ import annotations
@@ -302,7 +303,7 @@ def test_file_system_delete_requires_explicit_confirmation() -> None:
     assert "aborted by user" in output.getvalue()
 
 
-def test_linear_fixed_fcp_contains_record_count_in_file_descriptor() -> None:
+def test_linear_fixed_fcp_descriptor_uses_create_file_four_byte_form() -> None:
     answers = iter(
         [
             "3",  # Linear fixed
@@ -318,7 +319,10 @@ def test_linear_fixed_fcp_contains_record_count_in_file_descriptor() -> None:
         with contextlib.redirect_stdout(io.StringIO()):
             result = ShellInteractiveWizards._build_fcp_template()
 
-    assert "82054221002604" in result["fcp"]
+    # TS 102 222 v17.1 §6.3.2.2.2 Table 4: '82' '04' descriptor, coding byte
+    # and two-byte record length; the record count is carried by tag 80.
+    assert "820442210026" in result["fcp"]
+    assert "80020098" in result["fcp"]
     assert result["file_size"] == 0x26 * 4
     assert result["rec_len"] == 0x26
     assert result["num_rec"] == 4
@@ -345,7 +349,6 @@ def _fs_controller() -> tuple[FileSystemController, _RecordingTransport]:
     [
         ("create_file", "00E00000"),
         ("resize_file", "80D40000"),
-        ("search_record", "00A20104"),
     ],
 )
 def test_fs_writes_use_extended_case3_lc_above_255_bytes(
@@ -358,6 +361,29 @@ def test_fs_writes_use_extended_case3_lc_above_255_bytes(
     getattr(controller, method_name)(payload)
 
     assert transport.apdus == [f"{header}000100{payload}"]
+
+
+def test_search_record_carries_a_short_le(capsys) -> None:
+    """TS 102 221 v18.4 §11.1.7.2: Le decides whether record numbers come back."""
+
+    controller, transport = _fs_controller()
+
+    controller.search_record("AABB")
+
+    assert transport.apdus == ["00A2010402AABB00"]
+    assert "no record matched" in capsys.readouterr().out
+
+
+def test_search_record_uses_a_two_byte_le_with_an_extended_lc(capsys) -> None:
+    """ISO/IEC 7816-4: a three-byte Lc pairs with a two-byte Le."""
+
+    controller, transport = _fs_controller()
+    payload = "AA" * 256
+
+    controller.search_record(payload)
+
+    assert transport.apdus == [f"00A20104000100{payload}0000"]
+    capsys.readouterr()
 
 
 def test_fs_write_uses_short_lc_at_255_bytes() -> None:

@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 -->
 
-# Installation — Clean Flavor
+# Installation -- Clean Flavor
 
 The **clean** flavor is the default distribution of YggdraSIM. It targets
 operators who need the normal CLI, GUI, Card Bridge, and remote APDU
@@ -45,7 +45,7 @@ yggdrasim-gui-<os>-<arch>-clean-<version>[.exe]
 | macOS Apple Silicon  | `yggdrasim-macos-arm64-clean-<version>`, `yggdrasim-gui-macos-arm64-clean-<version>` |
 | macOS Intel          | no prebuilt release bundle; use `scripts/install/install-macos.sh --mode source` |
 | Linux x86_64         | `yggdrasim-linux-x86_64-clean-<version>`, `yggdrasim-gui-linux-x86_64-clean-<version>` |
-| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>`, `yggdrasim-gui-linux-arm64-clean-<version>` — see the Raspberry Pi guide |
+| Linux arm64 / RPi OS | `yggdrasim-linux-arm64-clean-<version>`, `yggdrasim-gui-linux-arm64-clean-<version>` -- see the Raspberry Pi guide |
 
 Download the artefact that matches your OS and CPU, then make the file
 executable (Linux / macOS):
@@ -110,10 +110,10 @@ intentionally unavailable:
 ```text
 [+] Build flavor: clean (no local SIMtrace2 HIL bridge) (source: build-stamp)
 [*] Local HIL bridge readiness: The local SIMtrace2/RemSIM HIL bridge is not bundled in this clean build. ...
-[*] Remote card bridge: Not configured — set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.
+[*] Remote card bridge: Not configured -- set YGGDRASIM_CARD_RELAY_URL or pass --remote-card-url to talk to a Card Bridge over SSH.
 ```
 
-Use `[CB] Card Bridge / Remote APDU Streaming` to publish a local PC/SC
+Use `[CB] Card Bridge / Card Bridge over SSH` to publish a local PC/SC
 reader or configure a tunneled remote reader. If the user opens the
 `[B] Local SIMtrace2 HIL Bridge Session` entry, the launcher prints a
 pointer to [`INSTALL_FULL.md`](INSTALL_FULL.md) and

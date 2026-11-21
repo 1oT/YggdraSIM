@@ -144,7 +144,7 @@ pipx inject yggdrasim mcp                                    # add an extra late
 `pipx install yggdrasim` (the bare name, resolved from PyPI) does not
 work today, and no packaging change in this repository can make it
 work on its own. Two base dependencies are PEP 508 direct references --
-the pinned `asn1tools` loop-fix fork and Osmocom `pySim`, neither of
+the pinned `asn1tools` loop-fix fork and the pinned `pySim` fork, neither of
 which publishes wheels -- and PyPI rejects uploads whose `Requires-Dist`
 carries a direct reference. pip honours direct references when it
 builds from a local path or a git URL, which is why the specifiers

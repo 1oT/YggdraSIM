@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/health`` — liveness + build-flavor + uptime summary.
+"""``/api/health`` -- liveness + build-flavor + uptime summary.
 
 Matches the V2 plan §6.3 surface. Side-effect-free; safe to poll from a
 supervisor or from the SPA's connection-status badge.

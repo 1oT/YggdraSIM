@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """PE-GenericFileManagement single-DF-context helpers.
 
 Design contract (YggdraSIM): one PE-GFM owns exactly one DF context.
@@ -12,9 +11,11 @@ context).
 
 Wire-level layout: ``decoded["fileManagementCMD"]`` is a list of
 "transactions" where each transaction is a list of
-``(opcode, value)`` pairs. ETSI TS 102 226 §6.6.5 / pySim
+``(opcode, value)`` pairs. TCA SAIP v3.4.1 §8.3.5 / pySim
 ``ProfileElementGFM.pe2files`` permit any interleaving of ``filePath``
-selects and ``createFCP`` / ``updateFCP`` / ``deleteFile`` operations.
+selects and the file operations (``createFCP``, ``fillFileOffset``,
+``fillFileContent``); ``updateFCP`` / ``deleteFile`` are counted as
+file operations here but are not FileManagement members in that version.
 The canonical YggdraSIM shape is::
 
     fileManagementCMD = [
@@ -22,15 +23,15 @@ The canonical YggdraSIM shape is::
             ("filePath",  <DF path bytes, '' = MF root>),
             ("createFCP", <FCP dict for child #1>),
             ("createFCP", <FCP dict for child #2>),
-            …
+            ...
         ]
     ]
 
 Imported / legacy GFMs that mix multiple ``filePath`` selects are
-normalised on first access — the *first* select wins as the DF
+normalised on first access -- the *first* select wins as the DF
 context, anything after it that doesn't share the same path is moved
-out into a sibling transaction (mirroring TCA SAIP §A.2 transaction
-boundaries) and surfaced as a warning so the operator can decide
+out into a sibling transaction (mirroring the fileManagementCMD
+boundaries of TCA SAIP v3.4.1 §8.3.5) and surfaced as a warning so the operator can decide
 whether to split the PE.
 """
 
@@ -50,8 +51,9 @@ def _strip(value: Any) -> str:
 def normalise_df_path(value: Any) -> str:
     """Validate / canonicalise a DF path expressed as concatenated FIDs.
 
-    TS 102 221 §8.3.5: the path is an even-length string of 16-bit
-    file identifiers. The MF (3F00) prefix is stripped because pySim
+    TS 102 221 v18.4 §8.3: the path is a concatenation of 16-bit
+    file identifiers (even length; empty selects the MF, TCA SAIP
+    v3.4.1 §8.3.5). The MF (3F00) prefix is stripped because pySim
     re-prepends it on encode (``ProfileElementGFM.pe2files``); the
     empty string is the canonical "MF root" marker.
     """
@@ -284,7 +286,7 @@ def reorder_files(
     src_pos = file_positions[from_index]
     item = transaction.pop(src_pos)
     # Recompute target position because the pop may have shifted
-    # indices — rebuild the file_positions list around the modified
+    # indices -- rebuild the file_positions list around the modified
     # transaction and insert at the recomputed slot.
     file_positions_after = [
         idx for idx, entry in enumerate(transaction)

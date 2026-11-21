@@ -219,6 +219,50 @@ class StreamCancellationTests(unittest.TestCase):
         self.assertFalse(terminal.get("ok"))
         self.assertFalse(console.finished.is_set())
 
+    def test_a_command_returning_after_its_loop_closed_ends_its_worker_quietly(self) -> None:
+        # The stopped run's stream closes, and asyncio.run closes its loop,
+        # before the deaf command returns. Its worker then posts the rest of
+        # the run to the closed loop; that used to end the daemon thread on
+        # "RuntimeError: Event loop is closed". pytest records an unhandled
+        # thread exception only as a warning, which --disable-warnings
+        # hides, so the recorder below makes it a failure.
+        console = _DeafConsole()
+        self.addCleanup(console.release.set)
+        event = threading.Event()
+
+        def _cancel_once_running() -> None:
+            console.started.wait(timeout=10)
+            event.set()
+
+        waiter = threading.Thread(target=_cancel_once_running, daemon=True)
+        waiter.start()
+        events = self._drain(event, console)
+        waiter.join(timeout=5)
+        self.assertTrue(events[-1].get("cancelled"))
+
+        workers = [
+            thread
+            for thread in threading.enumerate()
+            if thread.name == "scp11_live-stream-_cmd_forever"
+        ]
+        self.assertTrue(workers)
+        unhandled: list[BaseException | None] = []
+        pytest_hook = threading.excepthook
+
+        def _record(args: Any) -> None:
+            if args.thread in workers:
+                unhandled.append(args.exc_value)
+                return
+            pytest_hook(args)
+
+        with mock.patch.object(threading, "excepthook", _record):
+            console.release.set()
+            for worker in workers:
+                worker.join(timeout=10)
+                self.assertFalse(worker.is_alive())
+        self.assertTrue(console.finished.is_set())
+        self.assertEqual(unhandled, [])
+
     def test_the_console_receives_the_flag_so_a_loop_can_honour_it(self) -> None:
         console = _LoopingConsole()
         event = threading.Event()

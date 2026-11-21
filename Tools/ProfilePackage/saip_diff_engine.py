@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Pure-function diff over two SAIP profile documents.
 
@@ -19,7 +18,7 @@ Design goals:
 * Stable ordering: entries are emitted in a depth-first, key-sorted
   walk so two diff runs on the same inputs produce byte-identical
   reports (critical for CI comparisons).
-* The walker never materialises a full list of paths in memory — it
+* The walker never materialises a full list of paths in memory -- it
   yields ``DiffEntry`` on demand so TB-sized profile packages (very
   unlikely, but the codebase already uses streaming discipline) do not
   blow up the heap.
@@ -50,7 +49,7 @@ class DiffEntry:
     ``path`` is the dotted jq-style path into the jsonified tree, with
     list indices rendered as ``[n]`` segments (e.g.
     ``sections.genericFileManagement[3].file.fileDescriptor``). The
-    caller should treat ``path`` as a display token — it is NOT a valid
+    caller should treat ``path`` as a display token -- it is NOT a valid
     Python or JSONPath expression, just a stable identifier.
     """
 
@@ -204,7 +203,7 @@ def diff_documents(
 ) -> DiffSummary:
     """Compare two jsonified SAIP documents.
 
-    The caller is responsible for feeding in the **same** shape — e.g.
+    The caller is responsible for feeding in the **same** shape -- e.g.
     both sides jsonified, or both sides raw ``{"intro": [...], "sections": {...}}``
     dicts. Mixing shapes is a caller error and the result will flag
     every node as changed.

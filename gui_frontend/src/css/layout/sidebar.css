@@ -8,8 +8,8 @@
 
 .sidebar {
   grid-area: sidebar;
-  background: var(--bg-elev);
-  border-right: 1px solid var(--border);
+  background: var(--nav-bg);
+  border-right: 1px solid var(--nav-rule);
   overflow-y: auto;
   overscroll-behavior: contain;
   min-width: 0;
@@ -33,7 +33,7 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+  background: var(--title-rule);
 }
 
 .subsystem-list {
@@ -49,14 +49,14 @@
   position: relative;
   display: block;
   width: 100%;
-  min-height: 38px;
-  padding: 9px 12px 9px 16px;
+  min-height: var(--nav-item-h);
+  padding: var(--nav-item-pad);
   border: 0;
   background: transparent;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--nav-item-size);
   color: var(--fg);
   border-radius: var(--radius-md);
   transition: background-color var(--transition-fast),
@@ -73,8 +73,8 @@
   width: 3px;
   height: 60%;
   border-radius: var(--radius-pill);
-  background: var(--gradient-accent);
-  box-shadow: 0 0 10px 0 var(--accent-glow);
+  background: var(--accent-fill);
+  box-shadow: 0 0 var(--glow-size) 0 var(--glow);
   transition: transform var(--transition-mid) var(--ease-out-bounce),
     opacity var(--transition-fast);
   opacity: 0;
@@ -82,7 +82,7 @@
 
 .subsystem-entry:hover {
   background: var(--bg-hover);
-  transform: translateX(2px);
+  transform: translateX(var(--hover-shift));
 }
 
 .subsystem-entry:focus-visible {
@@ -92,14 +92,14 @@
 }
 
 .subsystem-entry.active {
-  background: var(--accent-soft);
-  color: var(--fg);
+  background: var(--nav-current-bg);
+  color: var(--nav-current-fg);
   font-weight: 600;
 }
 
 .subsystem-entry.active::before {
   transform: translateY(-50%) scaleY(1);
-  opacity: 1;
+  opacity: var(--nav-current-mark);
 }
 
 .subsystem-entry .subsystem-name {
@@ -116,13 +116,181 @@
   white-space: nowrap;
 }
 
+/* Rail: the sidebar collapsed to a column of short-legend keys
+   (`data-sidebar-mode="rail"`, trailing.js). Every leaf keeps its
+   button; the label is hidden visually but stays the accessible name,
+   and the key shows the leaf's `data-cc-rail` legend. Group headers
+   become rules, and every group's keys show whatever its open state. */
+.app-shell[data-sidebar-mode="rail"] {
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-collapse-glyph {
+  transform: rotate(180deg);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar {
+  padding: 6px 5px 16px;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-title {
+  height: 1px;
+  padding: 0;
+  margin: 8px 4px;
+  overflow: hidden;
+  color: transparent;
+  background: var(--border-strong);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar-title::after {
+  content: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .subsystem-list {
+  padding: 0;
+  gap: 3px;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-group-header {
+  height: 1px;
+  min-height: 0;
+  margin: 6px 4px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-group-header > * {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-children {
+  display: flex;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border-left: 0;
+}
+
+.app-shell[data-sidebar-mode="rail"] .cc-nav-subchildren,
+.app-shell[data-sidebar-mode="rail"] .cc-nav-subtoggle {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry,
+.app-shell[data-sidebar-mode="rail"] #command-center-nav .cc-nav-leaf {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry::before {
+  content: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry > :not(.cc-nav-name) {
+  display: none;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry > .cc-nav-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-shell[data-sidebar-mode="rail"] .sidebar .subsystem-entry::after {
+  content: attr(data-cc-rail) / "";
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+}
+
+@media (max-width: 760px) {
+  .app-shell[data-sidebar-mode="rail"] .sidebar {
+    width: var(--rail-w);
+  }
+}
+
+/* Pane keys in the status line, lit while their pane is open. */
+.status-panekeys {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.status-panekey {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: var(--font-sans);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.status-panekey:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.status-panekey[aria-pressed="true"] {
+  background: var(--seg-on-bg);
+  border-color: var(--seg-on-border);
+  color: var(--seg-on-fg);
+}
+
+.status-panekey:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-dim);
+}
+
+/* The card readout: what the last overview of the active reader read. */
+.status-card {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.status-card-value {
+  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.status-panekey-n {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  opacity: 0.8;
+}
+
 .main {
   grid-area: main;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 28px 36px 44px;
+  padding: var(--main-pad);
   position: relative;
 }
 
@@ -132,8 +300,9 @@
 
 .statusbar {
   grid-area: statusbar;
-  background: var(--bg-elev);
-  border-top: 1px solid var(--border);
+  background: var(--status-bg);
+  border-top: 1px solid var(--bar-rule);
+  font-family: var(--status-font);
   padding: 0 20px;
   display: flex;
   align-items: center;

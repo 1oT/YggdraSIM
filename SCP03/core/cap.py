@@ -22,6 +22,14 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 
+class CapFormatError(ValueError):
+    """A CAP load file does not match the Java Card CAP format.
+
+    Derived from ``ValueError`` so the callers that already guard the parser
+    with ``except ValueError`` keep catching it.
+    """
+
+
 @dataclass
 class CapComponentRecord:
     name: str
@@ -60,6 +68,9 @@ class CapFileParser:
     # complete uncompressed contents into memory.
     MAX_COMPONENT_BLOB_SIZE = 0xFFFF
 
+    # JCVM 3.1 §6.3 reference component install order (Debug is not loaded
+    # and StaticResources only exists in the Extended format, which this
+    # parser does not accept).
     ORDER = [
         "Header.cap",
         "Directory.cap",
@@ -73,6 +84,7 @@ class CapFileParser:
         "RefLocation.cap",
         "Descriptor.cap",
     ]
+    # JCVM 3.1 Table 6-1 component tags with the Table 6-2 file names.
     TAG_NAMES = {
         0x01: "Header.cap",
         0x02: "Directory.cap",
@@ -86,7 +98,18 @@ class CapFileParser:
         0x0A: "Export.cap",
         0x0B: "Descriptor.cap",
         0x0C: "Debug.cap",
+        0x0D: "StaticResources.capx",
     }
+
+    # JCVM 3.1 Table 6-3: ACC_EXTENDED marks a CAP file in Extended format,
+    # whose header, Method and RefLocation layouts differ from the Compact
+    # ones decoded here.
+    ACC_EXTENDED = 0x08
+
+    # JCVM 3.1 §6.4: the magic item of header_component identifies the Java
+    # Card CAP file format. A load file that does not open with it is not a
+    # CAP file, whatever its component tags happen to say.
+    HEADER_MAGIC = 0xDECAFFED
 
     @staticmethod
     def parse(cap_path: str) -> Tuple[bytes, bytes, List[bytes]]:
@@ -468,6 +491,14 @@ class CapFileParser:
                 component_map: Dict[str, str] = {}
                 for member in cap_zip.infolist():
                     file_name = member.filename
+                    if file_name.lower().endswith(".capx"):
+                        # JCVM 3.1 §6.2.1: ".capx" is an Extended-format
+                        # component; dropping it silently would load an
+                        # incomplete package.
+                        raise ValueError(
+                            f"{file_name!r} is an Extended-format component "
+                            "(.capx); only Compact-format CAP files are supported."
+                        )
                     if file_name.lower().endswith(".cap"):
                         # ZIP member names are specified with '/', but a few
                         # Windows-produced archives contain backslashes.
@@ -523,8 +554,22 @@ class CapFileParser:
 
     @staticmethod
     def _extract_pkg_aid(data: bytes) -> bytes:
+        # JCVM 3.1 §6.4 header_component_compact: tag (1), size (2), magic
+        # (4), CAP format minor and major (1 each), flags (1), then the
+        # package_info of minor, major, AID_length and AID.
         if len(data) < 13:
             raise ValueError("Header.cap is truncated before the package AID length.")
+        magic = int.from_bytes(data[3:7], "big")
+        if magic != CapFileParser.HEADER_MAGIC:
+            raise CapFormatError(
+                f"Header.cap magic is {magic:08X}; JCVM 3.1 §6.4 requires "
+                f"{CapFileParser.HEADER_MAGIC:08X}."
+            )
+        if data[9] & CapFileParser.ACC_EXTENDED:
+            raise ValueError(
+                "Header.cap flags ACC_EXTENDED; Extended-format CAP files are "
+                "not supported."
+            )
         aid_len = data[12]
         if not 5 <= aid_len <= 16:
             raise ValueError(
@@ -537,6 +582,8 @@ class CapFileParser:
 
     @staticmethod
     def _extract_applet_aids(data: bytes) -> List[bytes]:
+        # JCVM 3.1 §6.6 applet_component_compact: count (1), then per applet
+        # AID_length (1), AID and a two-byte install_method_offset.
         if len(data) < 4:
             raise ValueError("Applet.cap is truncated before the applet count.")
 

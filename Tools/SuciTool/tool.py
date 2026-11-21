@@ -18,6 +18,10 @@ class SuciCommandResult:
     stderr: str
 
 
+# The setting that names the suci-keytool command; the env-flag registry lists it.
+SUCI_TOOL_ENV = "YGGDRASIM_SUCI_TOOL"
+
+
 class SuciKeyToolBridge:
     def __init__(
         self,
@@ -53,7 +57,7 @@ class SuciKeyToolBridge:
         if self._tool_command is not None:
             return list(self._tool_command)
 
-        configured_value = os.environ.get("YGGDRASIM_SUCI_TOOL", "").strip()
+        configured_value = os.environ.get(SUCI_TOOL_ENV, "").strip()
         if len(configured_value) > 0:
             self._tool_command = shlex.split(configured_value)
             return list(self._tool_command)
@@ -65,7 +69,7 @@ class SuciKeyToolBridge:
                 return list(self._tool_command)
 
         raise RuntimeError(
-            "suci-keytool was not found. Install pySim suci-keytool or set YGGDRASIM_SUCI_TOOL."
+            f"suci-keytool was not found. Install pySim suci-keytool or set {SUCI_TOOL_ENV}."
         )
 
     def describe_status(self) -> str:

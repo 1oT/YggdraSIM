@@ -5,18 +5,18 @@
 
 Round-10 closes the following:
 
-* ETSI TS 102 222 §6.3 CREATE FILE (`INS 0xE0`) and §6.4 RESIZE
+* ETSI TS 102 222 v17.1 §6.3 CREATE FILE (`INS 0xE0`) and §6.10 RESIZE
   FILE (`INS 0xD4`). Both are admin commands gated behind an
   authenticated SCP03 session. CREATE FILE accepts a TS 102 221
   §11.1.1.4 FCP TLV (root tag ``62``) and supports transparent
   EFs, linear-fixed EFs and cyclic EFs.
-* ETSI TS 102 223 §6.4.36 SET FRAMES (proactive type ``0x60``)
-  and §6.4.37 GET FRAMES STATUS (``0x61``). The TR-side latch
+* ETSI TS 102 223 v18.3 §6.4.35 SET FRAMES (proactive type ``0x50``)
+  and §6.4.36 GET FRAME STATUS (``0x51``). The TR-side latch
   caches the negotiated frame layout and the Frames Information
   TLV (``49`` / ``C9``) into ``state.toolkit``.
-* ETSI TS 102 223 §7.4.20 Contactless State Request (event
-  ``0x16``) plus 3GPP TS 31.111 §7.5.16 IMS Registration (event
-  ``0x18``) and §7.5.17 IMS Incoming Data (event ``0x19``)
+* ETSI TS 102 223 v18.3 §7.5.19 Contactless state request (event
+  ``0x16``) plus 3GPP TS 31.111 v19.4 §7.5.21 IMS Registration Event
+  (event ``0x17``) and §7.5.20 Incoming IMS Data event (event ``0x18``)
   decoders. All three latch into ``state.toolkit``.
 """
 
@@ -145,7 +145,7 @@ class CreateFileTests(_AdminEngineHarness):
 
 
 class ResizeFileTests(_AdminEngineHarness):
-    """ETSI TS 102 222 §6.4 RESIZE FILE."""
+    """ETSI TS 102 222 v17.1 §6.10 RESIZE FILE."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -204,7 +204,7 @@ class _ToolkitHarness(unittest.TestCase):
 
 
 class SetFramesTests(_ToolkitHarness):
-    """ETSI TS 102 223 §6.4.36 SET FRAMES (proactive 0x60)."""
+    """ETSI TS 102 223 v18.3 §6.4.35 SET FRAMES (proactive 0x50)."""
 
     def test_set_frames_caches_layout_and_default_id(self) -> None:
         layout = bytes.fromhex("00010A0F")
@@ -251,7 +251,7 @@ class SetFramesTests(_ToolkitHarness):
 
 
 class GetFramesStatusTests(_ToolkitHarness):
-    """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS (proactive 0x61)."""
+    """ETSI TS 102 223 v18.3 §6.4.36 GET FRAME STATUS (proactive 0x51)."""
 
     def test_get_frames_status_latches_information_blob(self) -> None:
         result = self.toolkit.queue_get_frames_status()

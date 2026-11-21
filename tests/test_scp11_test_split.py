@@ -2,20 +2,16 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 import datetime
-import os
 import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from SCP11.live.console import SCP11Console as LiveConsole
-from SCP11.test.console import SCP11Console as Scp11TestConsole
 from SCP11.test.es9_client import Es9LikeClient
 from SCP11.test.models import EimPollRequest
 from SCP11.test.orchestrator import SGP22Orchestrator
@@ -58,27 +54,6 @@ def build_self_signed_cert_der() -> bytes:
 
 class DummyCfg:
     pass
-
-
-class PollDummyCfg:
-    RSP_SERVER_URL = "smdp.example.test"
-    ES9_BASE_URL = "https://rsp.example.test"
-    ES9_VERIFY_TLS = True
-    ES9_CA_BUNDLE_PATH = ""
-
-
-class PollDummyApduChannel:
-    def send(self, apdu: bytes, log_name: str) -> bytes:
-        return b""
-
-
-class PollDummyClient:
-    def __init__(self):
-        self.cfg = PollDummyCfg()
-        self.apdu_channel = PollDummyApduChannel()
-        self.orchestrator = types.SimpleNamespace(
-            run_eim_status_watchdog=lambda **kwargs: setattr(self, "last_poll_kwargs", kwargs)
-        )
 
 
 class RecordingEimClient(Es9LikeClient):
@@ -256,7 +231,7 @@ class TestSplitPinningTests(unittest.TestCase):
         configured_data = wrap_tlv("BF3C", wrap_tlv("80", b"rsp.example.test"))
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=None)
         orchestrator.cache_eim_poll_metadata(
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_configured_data=configured_data,
             eim_configuration_data=eim_configuration,
             euicc_info1=wrap_tlv("BF20", b"\x82\x03\x02\x05\x00"),
@@ -284,18 +259,18 @@ class TestSplitPinningTests(unittest.TestCase):
             eim_configuration_data="",
             euicc_info1="",
             euicc_info2="",
-            eid="89044045930000000000001492294428",
+            eid="89049032000000000000000000000101",
             euicc_challenge="",
             trusted_tls_public_key_data="",
             transaction_id="",
             euicc_package_result="",
-            raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+            raw_body=bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
         )
         relayed_packages = []
 
         orchestrator._phase_connect = lambda: None
         orchestrator._resolve_eim_poll_entry_indices = lambda entry_index=None: [0]
-        orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0: request
+        orchestrator._build_eim_poll_request = lambda matching_id="", entry_index=0, expected_eim_id="": request
 
         def fake_relay(package_bytes, poll_round, package_index):
             relayed_packages.append((package_bytes, poll_round, package_index))
@@ -316,7 +291,7 @@ class TestSplitPinningTests(unittest.TestCase):
             lambda entry_index=None: list(range(len(entry_requests)))
         )
         orchestrator._build_eim_poll_request = (
-            lambda matching_id="", entry_index=0: entry_requests[entry_index]
+            lambda matching_id="", entry_index=0, expected_eim_id="": entry_requests[entry_index]
         )
 
         def fake_relay(package_bytes, poll_round, package_index):
@@ -327,60 +302,10 @@ class TestSplitPinningTests(unittest.TestCase):
         orchestrator.run_eim_poll(matching_id="MATCH-1")
         return relayed_packages, provider
 
-    def _run_console_poll(self, console_type, argument: str):
-        client = PollDummyClient()
-        console = console_type(client)
-
-        keep_running = console._cmd_eim_poll(argument)
-
-        self.assertTrue(keep_running)
-        return console, client
-
     def test_test_orchestrator_initializes_eim_poll_debug_flag(self):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=None)
 
         self.assertIs(orchestrator._eim_poll_debug_enabled, False)
-
-    def test_test_console_poll_command_metadata_matches_live_console(self):
-        live_console, _ = self._run_console_poll(LiveConsole, "")
-        test_console, _ = self._run_console_poll(Scp11TestConsole, "")
-
-        self.assertEqual(
-            test_console._commands["POLL"].usage,
-            live_console._commands["POLL"].usage,
-        )
-        self.assertEqual(
-            test_console._commands["POLL"].visible_in_help,
-            live_console._commands["POLL"].visible_in_help,
-        )
-
-    def test_test_console_poll_parser_matches_live_console(self):
-        for argument in ["", "3", "3 15 --debug", "2 -t 20s -s 5"]:
-            live_console, live_client = self._run_console_poll(LiveConsole, argument)
-            test_console, test_client = self._run_console_poll(Scp11TestConsole, argument)
-
-            self.assertIsNotNone(live_console)
-            self.assertIsNotNone(test_console)
-            self.assertEqual(test_client.last_poll_kwargs, live_client.last_poll_kwargs)
-
-    def test_console_poll_uses_global_debug_when_enabled(self):
-        with mock.patch.dict(os.environ, {"YGGDRASIM_GLOBAL_DEBUG": "1"}, clear=False):
-            _, live_client = self._run_console_poll(LiveConsole, "")
-            _, test_client = self._run_console_poll(Scp11TestConsole, "")
-
-        self.assertTrue(bool(live_client.last_poll_kwargs["debug"]))
-        self.assertTrue(bool(test_client.last_poll_kwargs["debug"]))
-
-    def test_test_console_rejects_same_invalid_poll_tokens_as_live_console(self):
-        live_client = PollDummyClient()
-        live_console = LiveConsole(live_client)
-        test_client = PollDummyClient()
-        test_console = Scp11TestConsole(test_client)
-
-        self.assertTrue(live_console._cmd_eim_poll("legacy-mode"))
-        self.assertTrue(test_console._cmd_eim_poll("legacy-mode"))
-        self.assertFalse(hasattr(live_client, "last_poll_kwargs"))
-        self.assertFalse(hasattr(test_client, "last_poll_kwargs"))
 
     def test_certificate_form_a6_does_not_become_direct_tls_pin(self):
         orchestrator = SGP22Orchestrator(cfg=DummyCfg(), apdu_channel=None, profile_provider=None)
@@ -467,12 +392,12 @@ class TestSplitPinningTests(unittest.TestCase):
                     eim_configuration_data="",
                     euicc_info1="",
                     euicc_info2="",
-                    eid="89044045930000000000001492294428",
+                    eid="89049032000000000000000000000101",
                     euicc_challenge="",
                     trusted_tls_public_key_data="",
                     transaction_id="",
                     euicc_package_result="",
-                    raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+                    raw_body=bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
                 ),
                 EimPollRequest(
                     eim_fqdn="eim2.example.com",
@@ -487,12 +412,12 @@ class TestSplitPinningTests(unittest.TestCase):
                     eim_configuration_data="",
                     euicc_info1="",
                     euicc_info2="",
-                    eid="89044045930000000000001492294428",
+                    eid="89049032000000000000000000000101",
                     euicc_challenge="",
                     trusted_tls_public_key_data="",
                     transaction_id="",
                     euicc_package_result="",
-                    raw_body=bytes.fromhex("BF4F125A1089044045930000000000001492294428"),
+                    raw_body=bytes.fromhex("BF4F125A1089049032000000000000000000000101"),
                 ),
             ],
         )

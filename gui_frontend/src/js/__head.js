@@ -2,12 +2,11 @@
 // Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 /*
- * YggdraSIM Universal GUI — Phase A bootstrap.
+ * YggdraSIM Universal GUI bootstrap.
  *
- * Plain ES2020+ modules-free JS so the surface works byte-for-byte
- * across the pywebview backends (WebKitGTK on Linux, Edge on Windows,
- * WKWebView on macOS) without a build step. Phase B will swap this out
- * for a Vite + Vue / Svelte project; see V2_UNIVERSAL_GUI_PLAN.md §7.1.
+ * Plain ES2020+ script without modules or a bundler, so the surface works
+ * byte-for-byte across the pywebview backends (WebKitGTK on Linux, Edge
+ * WebView2 on Windows, WKWebView on macOS) with a concatenation-only build.
  */
 
 (function () {

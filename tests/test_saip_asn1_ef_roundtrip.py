@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Roundtrip tests for the 24 EF encoders that lacked coverage.
 
 Each test class covers one or more of: identity roundtrip
@@ -128,13 +127,22 @@ class AdEncoderTests(unittest.TestCase):
         self.assertEqual(encoded, raw)
 
     def test_mode_byte_rewrite(self) -> None:
-        # 0x00 = Normal; rewrite to Proprietary (0x80) leaving remaining bytes intact
+        # 0x00 = normal operation; rewrite to type approval (0x80) leaving
+        # the remaining bytes intact.
         raw = bytes([0x00, 0x00, 0x02, 0x00])
         decoded = dict(_decode_ad(raw.hex().upper()))
-        decoded["administrativeMode"] = "Proprietary"
+        decoded["administrativeMode"] = "Type approval operations"
         encoded = encode_ef_ad(decoded)
         self.assertEqual(encoded[0], 0x80)
         self.assertEqual(encoded[1:], raw[1:])
+
+    def test_mnc_length_rewrite_keeps_rfu_nibble(self) -> None:
+        raw = bytes([0x00, 0x00, 0x00, 0x02])
+        decoded = dict(_decode_ad(raw.hex().upper()))
+        decoded["mncLengthDigits"] = 3
+        self.assertEqual(encode_ef_ad(decoded), bytes([0x00, 0x00, 0x00, 0x03]))
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ef_ad({"raw": "00000002", "mncLengthDigits": 4})
 
     def test_error_on_unknown_mode(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
@@ -148,8 +156,15 @@ class HpplmnEncoderTests(unittest.TestCase):
         raw = bytes([0x1E])
         decoded = _decode_hpplmn_search_interval(raw.hex().upper())
         self.assertIsNotNone(decoded)
-        encoded = encode_ef_hpplmn_search_interval({"intervalMinutes": decoded["interval"]})
+        # TS 31.102 §4.2.6: n = 6 minutes, so '1E' = 30 * 6 = 180 minutes.
+        self.assertEqual(decoded["intervalMinutes"], 180)
+        encoded = encode_ef_hpplmn_search_interval(dict(decoded))
         self.assertEqual(encoded, raw)
+
+    def test_minutes_are_converted_to_units_of_six(self) -> None:
+        encoded = encode_ef_hpplmn_search_interval({"intervalMinutes": 180})
+        self.assertEqual(encoded, bytes([0x1E]))
+        self.assertEqual(encode_ef_hpplmn_search_interval({"intervalMinutes": 480}), bytes([0x50]))
 
     def test_zero_interval(self) -> None:
         encoded = encode_ef_hpplmn_search_interval({"intervalMinutes": 0})
@@ -157,7 +172,11 @@ class HpplmnEncoderTests(unittest.TestCase):
 
     def test_error_on_overflow(self) -> None:
         with self.assertRaises(RoundtripEncoderError):
-            encode_ef_hpplmn_search_interval({"intervalMinutes": 256})
+            encode_ef_hpplmn_search_interval({"interval": 256})
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ef_hpplmn_search_interval({"intervalMinutes": 486})
+        with self.assertRaises(RoundtripEncoderError):
+            encode_ef_hpplmn_search_interval({"intervalMinutes": 7})
 
 
 class AccEncoderTests(unittest.TestCase):
@@ -496,7 +515,7 @@ class PlmnListEncoderTests(unittest.TestCase):
 
 
 class LanguageRecordsEncoderTests(unittest.TestCase):
-    """EF.LP / EF.PL (3GPP TS 31.102 §4.2.83 — two-char language codes)."""
+    """EF.LP / EF.PL (3GPP TS 31.102 §4.2.83 -- two-char language codes)."""
 
     def test_encode_languages(self) -> None:
         payload = {"languages": ["en", "de", "fr"]}
@@ -518,7 +537,7 @@ class LanguageRecordsEncoderTests(unittest.TestCase):
 
 
 class UriTlvEncoderTests(unittest.TestCase):
-    """Generic 80-TLV URI encoder (EF.FDN_URI, EF.SDN_URI, ISIM EHURI, …)."""
+    """Generic 80-TLV URI encoder (EF.FDN_URI, EF.SDN_URI, ISIM EHURI, ...)."""
 
     def test_uri_field(self) -> None:
         uri = "sip:example@example.test"

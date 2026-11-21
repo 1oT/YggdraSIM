@@ -184,7 +184,7 @@ class UsimFileStructureConformance(unittest.TestCase):
                 self.assertIn(spec["structure"], allowed)
 
     def test_short_file_identifiers_stay_in_range(self) -> None:
-        """TS 102 221 clause 8.2.1.2 codes an SFI in five bits."""
+        """TS 102 221 v18.4 §11.1.1.4.8 codes a short file identifier in five bits."""
 
         for key, spec in _FILE_SPECS.items():
             sfi = spec.get("sfi")

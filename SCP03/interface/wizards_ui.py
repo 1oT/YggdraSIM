@@ -235,7 +235,7 @@ class InteractiveWizard:
 
             if step["warning"]:
                 print(
-                    f"{indent_str}{self.colors.WARNING}[!] "
+                    f"{indent_str}{self.colors.WARNING}[!] Warning: "
                     f"{step['warning']}{self.colors.ENDC}"
                 )
 

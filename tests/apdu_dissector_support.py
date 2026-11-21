@@ -36,7 +36,32 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DISSECTOR_PATH = REPO_ROOT / "Tools" / "ApduDissector" / "lua" / "yggdrasim_apdu.lua"
+def _dissector_path() -> Path:
+    """The Lua to hand tshark, mirrored out of $HOME where it must be.
+
+    Wireshark's AppArmor profile denies tshark every read under $HOME on
+    some distributions, so handing it the checkout path makes every
+    decode here skip with "the dissector loaded but produced no yapdu
+    fields" -- the same thing a genuinely broken dissector looks like.
+    The runtime mirrors the tree for exactly this reason; the suite uses
+    the same copy so it exercises what ships.
+    """
+    source = REPO_ROOT / "Tools" / "ApduDissector" / "lua" / "yggdrasim_apdu.lua"
+    try:
+        from Tools.ApduDissector.tshark_runner import (
+            DISSECTOR_FILENAME,
+            mirrored_lua_directory,
+        )
+
+        mirror = mirrored_lua_directory()
+    except Exception:
+        return source
+    if mirror is None:
+        return source
+    return mirror / DISSECTOR_FILENAME
+
+
+DISSECTOR_PATH = _dissector_path()
 
 REQUIRE_ENV = "YGGDRASIM_REQUIRE_TSHARK"
 UNPRIVILEGED_USER_ENV = "YGGDRASIM_TSHARK_USER"
@@ -391,8 +416,16 @@ def standard_corpus() -> list[Exchange]:
             bytes.fromhex("9000"),
             "update-binary",
         ),
-        # Case 1: no body either way.
+        # Case 1: no body either way. TS 102 221 v18.4 clause 11.1.9.1.2
+        # makes this the retry-counter query -- no PIN is presented, so
+        # '63CX' reports the counter rather than a refusal.
         Exchange(bytes.fromhex("00200001"), bytes.fromhex("63C2"), "verify-case-1"),
+        # And the same status word after a PIN really was presented.
+        Exchange(
+            bytes.fromhex("00200001" + "08") + bytes.fromhex("31323334FFFFFFFF"),
+            bytes.fromhex("63C2"),
+            "verify-wrong-pin",
+        ),
         # Case 3S: STORE DATA to the ISD-R carrying an ES10c request.
         Exchange(
             bytes.fromhex("80E291000A") + bytes.fromhex("BF2D07A0055A03010203"),

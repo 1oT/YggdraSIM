@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """GET IDENTITY (CLA=80 INS=78) handler -- USIM-side SUCI calculation.
 
 TS 31.102 §7.1.2.4 defines GET IDENTITY:

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Canonical Nord palette for YggdraSIM CLI / TUI / docs surfaces.
 
 Single source of truth for the muted Nord look-and-feel. Every CLI
@@ -147,11 +146,55 @@ class NordAnsi:
     GUIDE: str = "\033[38;2;76;86;106m"      # POLAR_NIGHT_3 #4C566A
 
 
-# Module-level singleton; importers can write either ``NordAnsi.RED``
-# (class attribute access) or use the instance for mypy-friendly
-# attribute resolution. Both are valid because dataclass defaults
-# expose the same names on the class object.
-NORD = NordAnsi()
+_STYLE_ROLES = frozenset(
+    {"RESET", "BOLD", "DIM", "ITALIC", "UNDERLINE"}
+)
+
+
+class _ActivePalette:
+    """Theme-aware view over the role escapes.
+
+    ``NORD`` was a :class:`NordAnsi` instance holding the Nord
+    sequences directly. Colour roles now resolve through
+    :mod:`yggdrasim_common.cli_theme` so that ``YGGDRASIM_CLI_THEME``
+    re-tints every call site without one of them changing, while the
+    default theme keeps the Nord values byte for byte. Style codes are
+    not colour and are answered from :class:`NordAnsi` unchanged.
+
+    The name is historical; the object is the active palette, not
+    necessarily the Nord one.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str) -> str:
+        # Deferred: cli_theme imports this module for NordHex, so a
+        # module-level import here would close the cycle.
+        from yggdrasim_common.cli_theme import (
+            COLOUR_ROLES,
+            ROLE_ALIASES,
+            role_ansi,
+            style_code,
+        )
+
+        if name in _STYLE_ROLES:
+            return style_code(name)
+        if name in COLOUR_ROLES or name in ROLE_ALIASES:
+            return role_ansi(name)
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no role {name!r}"
+        )
+
+    def __repr__(self) -> str:
+        from yggdrasim_common.cli_theme import active_theme
+
+        return f"<active palette: {active_theme()}>"
+
+
+# Module-level singleton. ``NordAnsi.RED`` (class attribute access)
+# still returns the frozen Nord sequence; ``NORD.RED`` follows the
+# active theme.
+NORD = _ActivePalette()
 
 
 __all__ = [

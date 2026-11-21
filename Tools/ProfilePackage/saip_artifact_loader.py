@@ -118,6 +118,37 @@ class SaipArtifactLoadResult:
         repr=False,
         compare=False,
     )
+    # Stored values for the inline variables, read from the tagged-JSON
+    # ``__ygg_inline_placeholders__`` block or the ``<stem>.variables.json``
+    # sidecar. Only values that encode against their occurrences are kept;
+    # the rest surface as ``inline_variable_warnings``.
+    inline_variable_values: dict[str, str] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
+    inline_variable_warnings: tuple[dict[str, Any], ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
+    # Test values per occurrence, keyed by the compact literal body
+    # (``iccidICCID10NibbleSwap``), read from the same two places.
+    inline_raw_values: dict[str, str] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
+    # The list file that answered each occurrence on this load, keyed like
+    # ``inline_raw_values``; a value read from the sidecar has no entry.
+    inline_raw_sources: dict[str, str] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
+    # Selector of the test-value list bound to the template (a library
+    # name or a path); empty means the universal list alone.
+    test_value_list: str = field(default="", repr=False, compare=False)
 
     @property
     def pe_count(self) -> int:
@@ -165,6 +196,13 @@ class SaipArtifactLoadResult:
             "strict_complete": self.strict_complete,
             "strict_failure": self.strict_failure,
             "raw_input_sha256": self.raw_input_sha256,
+            "inline_variable_values": dict(self.inline_variable_values),
+            "inline_raw_values": dict(self.inline_raw_values),
+            "inline_raw_sources": dict(self.inline_raw_sources),
+            "test_value_list": self.test_value_list,
+            "inline_variable_warnings": [
+                dict(warning) for warning in self.inline_variable_warnings
+            ],
         }
 
 
@@ -245,6 +283,24 @@ def load_saip_artifact(path: str | Path) -> SaipArtifactLoadResult:
         strict_complete=strict_complete,
         strict_failure=strict_failure,
         inline_placeholder_records=inline_records,
+        inline_variable_values={
+            str(name): str(value)
+            for name, value in dict(payload.get("inline_variable_values") or {}).items()
+        },
+        inline_variable_warnings=tuple(
+            dict(warning)
+            for warning in payload.get("inline_variable_warnings") or ()
+            if isinstance(warning, Mapping)
+        ),
+        inline_raw_values={
+            str(key): str(value)
+            for key, value in dict(payload.get("inline_raw_values") or {}).items()
+        },
+        inline_raw_sources={
+            str(key): str(value)
+            for key, value in dict(payload.get("inline_raw_sources") or {}).items()
+        },
+        test_value_list=str(payload.get("test_value_list") or ""),
     )
 
 

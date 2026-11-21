@@ -79,6 +79,42 @@ class RemoteLabDevice:
     capabilities: tuple[str, ...] = ()
     created_at: str = ""
     updated_at: str = ""
+    # How this operator reaches the host over SSH, for the setup and
+    # single-operator path. Deliberately local: an invite hands a
+    # colleague an agent and a token, never this operator's login or the
+    # path to their private key.
+    ssh_target: str = ""
+    ssh_identity_file: str = ""
+    remote_workdir: str = ""
+    remote_python: str = ""
+    hil_service_name: str = ""
+    # Where this host reads the operator's card from. "tunnel" opens an
+    # SSH reverse forward so the card stays on loopback; "direct" points
+    # the host at a card this machine publishes on a routable address.
+    card_reachability: str = "tunnel"
+    card_url: str = ""
+
+    @property
+    def has_agent(self) -> bool:
+        """True when this host can be reached by bearer token."""
+        return len(self.agent_host) > 0 and int(self.agent_control_port) > 0
+
+    @property
+    def has_ssh(self) -> bool:
+        """True when this host can be prepared and driven over SSH."""
+        return len(self.ssh_target) > 0
+
+    def access_dict(self) -> dict[str, Any]:
+        """The SSH half of a host card. Never part of an invite."""
+        return {
+            "ssh_target": self.ssh_target,
+            "identity_file": self.ssh_identity_file,
+            "remote_workdir": self.remote_workdir,
+            "remote_python": self.remote_python,
+            "hil_service_name": self.hil_service_name,
+            "card_reachability": self.card_reachability,
+            "card_url": self.card_url,
+        }
 
     def to_registry_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +138,7 @@ class RemoteLabDevice:
             "capabilities": list(self.capabilities),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "access": self.access_dict(),
         }
 
     def redacted_dict(self) -> dict[str, Any]:
@@ -173,6 +210,7 @@ def _device_from_registry(raw: dict[str, Any]) -> RemoteLabDevice:
     agent = raw.get("agent") if isinstance(raw.get("agent"), dict) else {}
     stream = raw.get("stream") if isinstance(raw.get("stream"), dict) else {}
     auth = raw.get("auth") if isinstance(raw.get("auth"), dict) else {}
+    access = raw.get("access") if isinstance(raw.get("access"), dict) else {}
     return RemoteLabDevice(
         id=str(raw.get("id") or "").strip(),
         name=str(raw.get("name") or raw.get("id") or "").strip(),
@@ -192,6 +230,14 @@ def _device_from_registry(raw: dict[str, Any]) -> RemoteLabDevice:
         ),
         created_at=str(raw.get("created_at") or "").strip(),
         updated_at=str(raw.get("updated_at") or "").strip(),
+        ssh_target=str(access.get("ssh_target") or "").strip(),
+        ssh_identity_file=str(access.get("identity_file") or "").strip(),
+        remote_workdir=str(access.get("remote_workdir") or "").strip(),
+        remote_python=str(access.get("remote_python") or "").strip(),
+        hil_service_name=str(access.get("hil_service_name") or "").strip(),
+        card_reachability=str(access.get("card_reachability") or "tunnel").strip()
+        or "tunnel",
+        card_url=str(access.get("card_url") or "").strip(),
     )
 
 
@@ -214,13 +260,40 @@ def _validate_device(device: RemoteLabDevice) -> None:
         raise ValueError("remote rig id contains control characters")
     if len(device.name) == 0:
         raise ValueError("device name is required")
-    _normalize_host(device.agent_host)
-    if device.agent_control_port <= 0 or device.agent_control_port > 65535:
-        raise ValueError("agent control_port must be between 1 and 65535")
-    if device.agent_scheme not in ("http", "https"):
-        raise ValueError("agent scheme must be http or https")
+    # A host needs at least one way in. An agent is how a rig is shared by
+    # token; SSH is how one operator prepares a rig that has no agent yet,
+    # which is every rig before somebody sets one up on it. Requiring the
+    # agent would mean standing up the thing you were about to install in
+    # order to record where to install it.
+    if device.has_agent is False and device.has_ssh is False:
+        raise ValueError(
+            "a device needs an agent (host and control_port) or an ssh_target"
+        )
+    if device.has_agent is True:
+        _normalize_host(device.agent_host)
+        if device.agent_control_port <= 0 or device.agent_control_port > 65535:
+            raise ValueError("agent control_port must be between 1 and 65535")
+        if device.agent_scheme not in ("http", "https"):
+            raise ValueError("agent scheme must be http or https")
+    elif device.agent_control_port != 0 or len(device.agent_host) > 0:
+        # Half an agent is worse than none: the control URL would be built
+        # from a host with no port or a port with no host.
+        raise ValueError(
+            "an agent needs both host and control_port, or neither"
+        )
     if device.stream_transport != "http-card-bridge":
-        raise ValueError("MVP supports stream transport 'http-card-bridge' only")
+        raise ValueError("stream transport must be 'http-card-bridge'")
+    if device.card_reachability not in ("tunnel", "direct"):
+        raise ValueError("card_reachability must be 'tunnel' or 'direct'")
+    if any(ord(character) < 32 for character in device.ssh_target):
+        raise ValueError("ssh_target contains control characters")
+    if len(device.ssh_target) > 256:
+        raise ValueError("ssh_target must be at most 256 characters")
+    if device.card_reachability == "direct" and len(device.card_url) == 0:
+        raise ValueError(
+            "card_reachability 'direct' needs card_url naming a Card Bridge "
+            "this host can route to"
+        )
 
 
 def _lock_registry_descriptor(descriptor: int) -> None:
@@ -389,6 +462,115 @@ def get_device(device_id: str) -> RemoteLabDevice:
     if device is None:
         raise KeyError(f"Remote Lab device not found: {device_id!r}")
     return device
+
+
+# Fields an operator may edit after import. ``id`` is the registry key and
+# ``token_file`` is credential plumbing, so neither is editable here. ``rig_id``
+# is deliberately excluded too: it is the id the agent matches, and it is baked
+# into the remote-reader binding, the session metadata ``reader_name`` and the
+# per-reader localStorage key, so changing it behind a live tab would strand
+# every one of them. Re-import the invite to change it.
+EDITABLE_DEVICE_FIELDS = (
+    "name",
+    "location",
+    "owner",
+    "notes",
+    "tags",
+    "capabilities",
+    "agent_scheme",
+    "agent_host",
+    "agent_control_port",
+    "ssh_target",
+    "ssh_identity_file",
+    "remote_workdir",
+    "remote_python",
+    "hil_service_name",
+    "card_reachability",
+    "card_url",
+)
+
+
+def update_device(device_id: str, changes: dict[str, Any]) -> RemoteLabDevice:
+    """Apply *changes* to one registered device and return the stored result.
+
+    Only keys in :data:`EDITABLE_DEVICE_FIELDS` are accepted; anything else
+    raises rather than being silently dropped. Values are normalised the same
+    way :func:`_build_imported_device` normalises an invite, so a host typed
+    with stray case or a trailing dot is stored in the one form every lookup
+    compares against.
+    """
+
+    requested = {str(key): value for key, value in dict(changes or {}).items()}
+    unknown = sorted(set(requested) - set(EDITABLE_DEVICE_FIELDS))
+    if unknown:
+        raise ValueError(
+            "not editable: " + ", ".join(unknown)
+            + " (editable: " + ", ".join(EDITABLE_DEVICE_FIELDS) + ")"
+        )
+
+    patch: dict[str, Any] = {}
+    if "name" in requested:
+        name = str(requested["name"] or "").strip()
+        if len(name) == 0:
+            raise ValueError("device name is required")
+        patch["name"] = name
+    for key in ("location", "owner", "notes"):
+        if key in requested:
+            patch[key] = str(requested[key] or "").strip()
+    for key in ("tags", "capabilities"):
+        if key in requested:
+            raw = requested[key]
+            if isinstance(raw, str):
+                raw = [part for part in raw.replace(",", " ").split()]
+            if not isinstance(raw, (list, tuple)):
+                raise ValueError(f"{key} must be a list of strings")
+            patch[key] = tuple(
+                str(item).strip() for item in raw if str(item).strip()
+            )
+    if "agent_scheme" in requested:
+        scheme = str(requested["agent_scheme"] or "").strip().lower() or "http"
+        if scheme not in ("http", "https"):
+            raise ValueError("agent scheme must be http or https")
+        patch["agent_scheme"] = scheme
+    if "agent_host" in requested:
+        # _validate_device only calls _normalize_host to raise; it discards the
+        # canonical form. Store the normalised value or every later exact-string
+        # comparison (reader-bar matching, remote-reader registry) can miss.
+        patch["agent_host"] = _normalize_host(requested["agent_host"])
+    if "agent_control_port" in requested:
+        try:
+            port = int(requested["agent_control_port"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("agent control_port must be an integer") from exc
+        patch["agent_control_port"] = port
+    # The SSH half of a host card. Plain text fields: the path values are
+    # left as typed so a leading ~ survives to whoever expands it.
+    for key in (
+        "ssh_target",
+        "ssh_identity_file",
+        "remote_workdir",
+        "remote_python",
+        "hil_service_name",
+        "card_url",
+    ):
+        if key in requested:
+            patch[key] = str(requested[key] or "").strip()
+    if "card_reachability" in requested:
+        patch["card_reachability"] = (
+            str(requested["card_reachability"] or "").strip().lower() or "tunnel"
+        )
+
+    with _locked_registry():
+        devices = _load_registry_unlocked(strict=False)
+        key = str(device_id or "").strip()
+        current = devices.get(key)
+        if current is None:
+            raise KeyError(f"Remote Lab device not found: {device_id!r}")
+        updated = dataclass_replace(current, updated_at=_utc_now_iso(), **patch)
+        _validate_device(updated)
+        devices[key] = updated
+        _save_registry_unlocked(devices)
+    return updated
 
 
 def remove_device(device_id: str, *, remove_token_file: bool = False) -> bool:
@@ -580,6 +762,66 @@ def import_invites(payload: Any, *, replace: bool = True) -> list[RemoteLabDevic
 
 def import_invite(invite: dict[str, Any], *, replace: bool = True) -> RemoteLabDevice:
     return import_invites(invite, replace=replace)[0]
+
+
+def create_ssh_host(
+    *,
+    device_id: str,
+    name: str = "",
+    ssh_target: str,
+    ssh_identity_file: str = "",
+    remote_workdir: str = "",
+    remote_python: str = "",
+    hil_service_name: str = "",
+    location: str = "",
+    owner: str = "",
+    notes: str = "",
+    tags: tuple[str, ...] = (),
+) -> RemoteLabDevice:
+    """Store a host reached over SSH that publishes no agent.
+
+    This is the bootstrap case and it has no invite, by definition: an
+    invite hands a colleague an agent and a token, and this host has
+    neither yet. It is what you record before setting one up, so it
+    carries only the SSH half and gains the agent half later, through the
+    ordinary invite import, without changing identity.
+    """
+    identifier = str(device_id or "").strip()
+    if len(identifier) == 0:
+        raise ValueError("device id is required")
+    target = str(ssh_target or "").strip()
+    if len(target) == 0:
+        raise ValueError("ssh_target is required for a host with no agent")
+
+    with _locked_registry():
+        devices = _load_registry_unlocked(strict=False)
+        existing = {key.casefold(): key for key in devices}
+        collision = existing.get(identifier.casefold())
+        if collision is not None:
+            raise ValueError(
+                f"device id collides with an existing device: {collision}"
+            )
+        now = _utc_now_iso()
+        device = RemoteLabDevice(
+            id=identifier,
+            name=str(name or identifier).strip(),
+            rig_id=identifier,
+            location=str(location or "").strip(),
+            tags=tuple(str(tag).strip() for tag in tags if str(tag).strip()),
+            owner=str(owner or "").strip(),
+            notes=str(notes or "").strip(),
+            created_at=now,
+            updated_at=now,
+            ssh_target=target,
+            ssh_identity_file=str(ssh_identity_file or "").strip(),
+            remote_workdir=str(remote_workdir or "").strip(),
+            remote_python=str(remote_python or "").strip(),
+            hil_service_name=str(hil_service_name or "").strip(),
+        )
+        _validate_device(device)
+        devices[identifier] = device
+        _save_registry_unlocked(devices)
+    return device
 
 
 def export_invite(device_id: str, *, include_token: bool = True) -> dict[str, Any]:

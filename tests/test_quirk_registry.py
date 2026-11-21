@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SIMCARD/quirks.py QuirkRegistry public methods."""
 
 from __future__ import annotations
@@ -20,14 +19,20 @@ class AddBeforeApduTests(unittest.TestCase):
 
     def test_hook_appended(self) -> None:
         registry = QuirkRegistry()
-        hook = lambda apdu, state: None
+        def hook(apdu, state):
+            return None
+
         registry.add_before_apdu(hook)
         self.assertIn(hook, registry.before_apdu_hooks)
 
     def test_multiple_hooks_ordered(self) -> None:
         registry = QuirkRegistry()
-        h1 = lambda apdu, state: None
-        h2 = lambda apdu, state: None
+        def h1(apdu, state):
+            return None
+
+        def h2(apdu, state):
+            return None
+
         registry.add_before_apdu(h1)
         registry.add_before_apdu(h2)
         self.assertEqual(registry.before_apdu_hooks, [h1, h2])
@@ -37,7 +42,9 @@ class AddAfterApduTests(unittest.TestCase):
 
     def test_hook_appended(self) -> None:
         registry = QuirkRegistry()
-        hook = lambda apdu, result, state: None
+        def hook(apdu, result, state):
+            return None
+
         registry.add_after_apdu(hook)
         self.assertIn(hook, registry.after_apdu_hooks)
 
@@ -46,7 +53,9 @@ class AddOnResetTests(unittest.TestCase):
 
     def test_hook_appended(self) -> None:
         registry = QuirkRegistry()
-        hook = lambda state: None
+        def hook(state):
+            return None
+
         registry.add_on_reset(hook)
         self.assertIn(hook, registry.on_reset_hooks)
 
@@ -55,7 +64,9 @@ class AddStateHookTests(unittest.TestCase):
 
     def test_hook_appended(self) -> None:
         registry = QuirkRegistry()
-        hook = lambda state: None
+        def hook(state):
+            return None
+
         registry.add_state_hook(hook)
         self.assertIn(hook, registry.state_hooks)
 

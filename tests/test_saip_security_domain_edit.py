@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Unit tests for ``saip_security_domain_edit``.
 
 The helpers operate on a decoded ``PE-SecurityDomain`` dict, so each
@@ -78,6 +77,22 @@ class KeyListAddTests(unittest.TestCase):
         self.assertEqual(len(entry["keyComponents"]), 1)
         self.assertEqual(entry["keyComponents"][0]["keyType"], bytes([0x88]))
         self.assertEqual(entry["keyComponents"][0]["macLength"], 8)
+
+    def test_summary_names_the_protocol_of_each_key_version(self) -> None:
+        sd = _empty_sd()
+        for kvn in (0x01, 0x30, 0x40, 0x70):
+            sd_edit.add_key(
+                sd,
+                key_version=kvn,
+                key_identifier=1,
+                usage_qualifier_hex="C0",
+                key_components=[_sample_component()],
+            )
+        keys = sd_edit.security_domain_summary(sd)["keys"]
+        self.assertEqual(
+            [(key["key_version"], key["key_version_protocol"]) for key in keys],
+            [(0x01, "SCP80"), (0x30, "SCP03"), (0x40, "SCP81"), (0x70, "")],
+        )
 
     def test_add_three_keys_round_trip(self) -> None:
         sd = _empty_sd()

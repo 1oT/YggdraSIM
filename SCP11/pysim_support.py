@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 pySim support: thin wrappers over pySim SAIP codec and OTA keyset for profile decoding and BPP signing."""
 import os
 from typing import Any, List, Optional
 
 from cryptography import x509 as crypto_x509
+
+from yggdrasim_common.process_debug import suppress_noisy_crypto_warnings
 
 try:
     from .pysim_path import ensure_repo_pysim_on_path
@@ -27,6 +28,10 @@ except Exception:
 
 _PY_SIM_RSP_ASN1 = None
 if compile_asn1_subdir is not None:
+    # The pinned pySim declares the SGP.22 v3.1 StoreMetadataRequest members
+    # (upstream_patches/osmocom-pysim-rsp-v3-metadata/); against one that does
+    # not, ``rsp_type_members`` lets the encoders refuse those fields instead
+    # of dropping them.
     try:
         _PY_SIM_RSP_ASN1 = compile_asn1_subdir("rsp")
     except Exception:
@@ -50,18 +55,72 @@ def pysim_rsp_asn1() -> Optional[Any]:
     return _PY_SIM_RSP_ASN1
 
 
-def encode_rsp_type(type_name: str, payload: Any) -> bytes:
-    asn1 = pysim_rsp_asn1()
+def pysim_rsp_v3_asn1() -> Optional[Any]:
+    """pySim's SGP.22 v3.1 module (``rsp.asn1_v3``), None for a pySim without one.
+
+    osmocom keeps ``asn1/rsp/rsp.asn`` at SGP.22 v2; the v3.1 module sits next
+    to it (``upstream_patches/osmocom-pysim-rsp-v3-module/``) and pySim compiles
+    it on first use: on a call of the function ``rsp.asn1_v3()`` (the pinned
+    fork) or on the first access of the module attribute ``rsp.asn1_v3`` (the
+    version under review upstream). Both forms are read here.
+    """
+    if pysim_available() is False:
+        return None
+    accessor = getattr(pysim_rsp, "asn1_v3", None)
+    if accessor is None:
+        return None
+    return accessor() if callable(accessor) else accessor
+
+
+def _rsp_spec(v3: bool) -> Optional[Any]:
+    return pysim_rsp_v3_asn1() if v3 else pysim_rsp_asn1()
+
+
+def rsp_type_members(type_name: str, *, v3: bool = False) -> frozenset:
+    """Return the member names the compiled schema defines for a SEQUENCE type.
+
+    Empty when the codec is unavailable or the type is not a SEQUENCE, so a
+    caller cannot tell those apart from a type with no members and must treat
+    an empty result as "unknown" rather than "none defined". ``v3`` reads the
+    SGP.22 v3.1 module instead of the v2 one.
+    """
+    asn1 = _rsp_spec(v3)
+    if asn1 is None:
+        return frozenset()
+    try:
+        members = asn1.types[str(type_name)].type.root_members
+    except (AttributeError, KeyError, TypeError):
+        return frozenset()
+    return frozenset(
+        name
+        for name in (getattr(member, "name", None) for member in members)
+        if name is not None
+    )
+
+
+def encode_rsp_type(type_name: str, payload: Any, *, v3: bool = False) -> bytes:
+    asn1 = _rsp_spec(v3)
     if asn1 is None:
         return b""
     return asn1.encode(str(type_name), payload)
 
 
-def decode_rsp_type(type_name: str, payload: bytes) -> Any:
-    asn1 = pysim_rsp_asn1()
+def decode_rsp_type(type_name: str, payload: bytes, *, v3: bool = False) -> Any:
+    asn1 = _rsp_spec(v3)
     if asn1 is None:
         return None
-    return asn1.decode(str(type_name), bytes(payload))
+    # The codec is an asn1tools compiler object, so the package imports
+    # whenever pySim resolved one.
+    import asn1tools
+
+    try:
+        return asn1.decode(str(type_name), bytes(payload))
+    except asn1tools.DecodeError as exc:
+        # These payloads come off a card or an SM-DP+, so one that does
+        # not decode is an expected condition rather than a codec fault.
+        # Rejecting with ValueError keeps asn1tools out of the except
+        # clause of every caller.
+        raise ValueError(f"Malformed {type_name}: {exc}") from exc
 
 
 def unwrap_tlv_octet_string(value: bytes, tag_bytes: bytes) -> bytes:
@@ -144,7 +203,8 @@ def encode_smdp_signed2(
 
 
 def encode_ctx_params1(ctx_params: dict) -> bytes:
-    return encode_rsp_type("CtxParams1", ("ctxParamsForCommonAuthentication", ctx_params))
+    """CtxParams1 { ctxParamsForCommonAuthentication } through the SGP.22 v3.1 module (DeviceInfo as v3.1 defines it)."""
+    return encode_rsp_type("CtxParams1", ("ctxParamsForCommonAuthentication", ctx_params), v3=True)
 
 
 def encode_authenticate_server_request(
@@ -154,8 +214,13 @@ def encode_authenticate_server_request(
     server_certificate_der: bytes,
     ctx_params: dict,
 ) -> bytes:
-    """Encode a complete ES9+.AuthenticateClient request payload."""
-    decoded_server_signed1 = decode_rsp_type("ServerSigned1", server_signed1_der)
+    """Encode a complete ES10b.AuthenticateServer request payload with the SGP.22 v3.1 module.
+
+    ServerSigned1 is decoded and encoded again, so the module has to define every member an SM-DP+
+    signs: v3.1 carries the v3 sessionContext and serverRspCapability the v2 module would drop, and
+    gives the v2 members the same bytes.
+    """
+    decoded_server_signed1 = decode_rsp_type("ServerSigned1", server_signed1_der, v3=True)
     decoded_server_certificate = decode_certificate(server_certificate_der)
     if decoded_server_signed1 is None:
         return b""
@@ -170,7 +235,7 @@ def encode_authenticate_server_request(
     }
     if len(euicc_ci_pk_id_to_be_used) > 0:
         payload["euiccCiPKIdToBeUsed"] = bytes(euicc_ci_pk_id_to_be_used)
-    return encode_rsp_type("AuthenticateServerRequest", payload)
+    return encode_rsp_type("AuthenticateServerRequest", payload, v3=True)
 
 
 def encode_prepare_download_request(
@@ -285,10 +350,11 @@ def _load_pem_certificates(bundle_path: str) -> List[crypto_x509.Certificate]:
     certificates = []
     marker = b"-----END CERTIFICATE-----"
     segments = bundle_data.split(marker)
-    for segment in segments:
-        cleaned = segment.strip()
-        if len(cleaned) == 0:
-            continue
-        pem_bytes = cleaned + b"\n" + marker + b"\n"
-        certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
+    with suppress_noisy_crypto_warnings():
+        for segment in segments:
+            cleaned = segment.strip()
+            if len(cleaned) == 0:
+                continue
+            pem_bytes = cleaned + b"\n" + marker + b"\n"
+            certificates.append(crypto_x509.load_pem_x509_certificate(pem_bytes))
     return certificates

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Unit coverage for the four PE consumers added on the SAIP loader side
 to close the inbound-BPP gap for cdmaParameter / application /
 nonStandard / ssimEaptls. Each test feeds the consumer a hand-built
@@ -233,7 +232,7 @@ class SsimEaptlsConsumerTests(unittest.TestCase):
 
 class ProfileHeaderConsumerTests(unittest.TestCase):
     """Full-coverage tests for ``_consume_profile_header``. Every
-    documented SAIP §A.2 ProfileHeader field must be reflected on the
+    documented SAIP v3.4.1 §8.2.1 ProfileHeader field must be reflected on the
     ``SimProfileImage`` so a downstream consumer can read it without
     re-walking the BPP.
     """
@@ -280,7 +279,7 @@ class ProfileHeaderConsumerTests(unittest.TestCase):
         self.assertEqual(img.header_mandatory_aids, ())
 
     def test_iccid_trailing_f_nibbles_stripped(self):
-        # 19-digit ICCID — encoder pads with 0xF in the low nibble of byte 9.
+        # 19-digit ICCID -- encoder pads with 0xF in the low nibble of byte 9.
         img = SimProfileImage()
         _consume_profile_element(
             img,
@@ -365,6 +364,73 @@ class DispatchTableCoverageTests(unittest.TestCase):
         _consume_profile_element(img, "end", {"end-header": {}})
         self.assertEqual(img.nodes, [])
         self.assertIsNone(img.auth_config)
+
+
+class IotConsumerTests(unittest.TestCase):
+    """PE-IoT / PE-OPT-IoT split into the MF, USIM, DF.5GS and DF.SAIP consumers."""
+
+    def _paths(self, img: SimProfileImage) -> dict[tuple[str, ...], object]:
+        return {node.path: node for node in img.nodes}
+
+    def test_iot_creates_mf_files_and_the_usim_adf(self):
+        img = SimProfileImage()
+        _consume_profile_element(
+            img,
+            "iot",
+            {
+                "iot-header": {"mandated": None, "identification": 2},
+                "templateID": "2.23.143.1.2.17",
+                "mf": [],
+                "ef-iccid": [("fillFileContent", bytes.fromhex("98882010325476981032"))],
+                "ef-dir": [],
+                "adf-usim": [],
+                "ef-imsi": [("fillFileContent", bytes.fromhex("080910100000000010"))],
+                "ef-arr-usim": [("fillFileContent", bytes.fromhex("800101A406830101950108"))],
+                "ef-acc": [("fillFileContent", bytes.fromhex("0001"))],
+            },
+        )
+        paths = self._paths(img)
+        self.assertIn(("MF", "EF.ICCID"), paths)
+        self.assertEqual(paths[("MF", "EF.ICCID")].data, bytes.fromhex("98882010325476981032"))
+        adf = paths[("MF", "ADF.USIM")]
+        self.assertEqual(adf.kind, "adf")
+        self.assertEqual(adf.fid, "7FF1")
+        self.assertEqual(paths[("MF", "ADF.USIM", "EF.IMSI")].data, bytes.fromhex("080910100000000010"))
+        # ef-arr-usim is the ADF's own EF.ARR, not the MF-level one.
+        self.assertIn(("MF", "ADF.USIM", "EF.ARR"), paths)
+        self.assertNotIn(("MF", "EF.ARR"), paths)
+        self.assertEqual(paths[("MF", "ADF.USIM", "EF.ACC")].data, bytes.fromhex("0001"))
+
+    def test_opt_iot_splits_at_the_df_descriptors(self):
+        img = SimProfileImage()
+        _consume_profile_element(
+            img,
+            "opt-iot",
+            {
+                "optiot-header": {"mandated": None, "identification": 3},
+                "templateID": "2.23.143.1.2.18",
+                "ef-fdn": [("fillFileContent", b"\xff" * 26)],
+                "df-df-5gs": [],
+                "ef-5gs3gpploci": [("fillFileContent", b"\xff" * 20)],
+                "df-df-saip": [],
+                "ef-suci-calc-info-usim": [("fillFileContent", bytes.fromhex("A000"))],
+            },
+        )
+        paths = self._paths(img)
+        self.assertIn(("MF", "ADF.USIM", "EF.FDN"), paths)
+        self.assertNotIn(("MF", "ADF.USIM"), paths, msg="opt-iot never emits a fresh ADF root")
+        self.assertEqual(paths[("MF", "ADF.USIM", "DF.5GS")].fid, "5FC0")
+        self.assertEqual(paths[("MF", "ADF.USIM", "DF.5GS", "EF.5GS3GPPLOCI")].data, b"\xff" * 20)
+        self.assertEqual(paths[("MF", "ADF.USIM", "DF.SAIP")].fid, "5FD0")
+        self.assertEqual(
+            paths[("MF", "ADF.USIM", "DF.SAIP", "EF.SUCI_CALC_INFO")].data,
+            bytes.fromhex("A000"),
+        )
+
+    def test_iot_types_are_known_to_the_dispatch_table(self):
+        known = known_profile_element_types()
+        self.assertIn("iot", known)
+        self.assertIn("opt-iot", known)
 
 
 if __name__ == "__main__":

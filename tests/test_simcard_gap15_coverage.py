@@ -174,7 +174,7 @@ class SetUpCallTrLatchTests(_ToolkitHarness):
 
     def test_set_up_call_success_records_address(self) -> None:
         result = self.toolkit.queue_setup_call(
-            "+15551234567",
+            "+15550100123",
             alpha_identifier="Call",
         )
         cmd = int(result["commandNumber"])
@@ -187,11 +187,11 @@ class SetUpCallTrLatchTests(_ToolkitHarness):
         self.toolkit.handle_terminal_response(tr)
         toolkit = self.state.toolkit
         self.assertEqual(toolkit.last_set_up_call_result, 0x00)
-        self.assertIn("15551234567", toolkit.last_set_up_call_address)
+        self.assertIn("15550100123", toolkit.last_set_up_call_address)
         self.assertEqual(toolkit.last_set_up_call_additional, b"")
 
     def test_set_up_call_failure_records_additional_info(self) -> None:
-        result = self.toolkit.queue_setup_call("+15551234567")
+        result = self.toolkit.queue_setup_call("+15550100123")
         cmd = int(result["commandNumber"])
         self.toolkit.handle_fetch()
         # Result 0x21 = "Network currently unable to process command";

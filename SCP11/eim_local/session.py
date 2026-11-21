@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local session: drives local package exchange through ES8+ delivery."""
 import json
 import os
@@ -29,7 +28,10 @@ from .config import EimLocalConfig
 from .eim_cert_store import EimCertificateRecord, EimCertificateStore
 from .eim_package_codec import (
     encode_additional_tlvs,
+    encode_notification_event_bits,
     encode_optional_tlvs,
+    ipa_euicc_data_request_opaque_body,
+    ipa_euicc_data_request_tag_list,
     lint_eim_package_document,
     load_eim_package_document,
     resolve_package_runtime_hints,
@@ -38,6 +40,8 @@ from .identity import load_eim_identity
 from .models import EimLocalState, EimHandoverContext
 from .response_logger import EimResponseLogger
 from .runtime_state import EimRuntimeStateStore
+from SCP11.shared.ber_tlv import retag_sequence
+from SCP11.shared.eim_configuration_data import encode_der_integer, encode_named_bit_string
 from SCP11.shared.gsma_error_codes import (
     describe_sgp22_profile_state_result,
     describe_sgp32_eim_package_result_error,
@@ -45,6 +49,16 @@ from SCP11.shared.gsma_error_codes import (
     resolve_sgp22_profile_state_result_code,
     resolve_sgp32_eim_package_result_error_code,
     resolve_sgp32_profile_download_error_reason_code,
+)
+
+
+_ADD_EIM_RETIRED = (
+    "addEim is an eCO inside a signed eUICC Package (SGP.32 v1.3 §2.11.1.1.2); the 'BF58' STORE DATA "
+    "an add_eim package sent is ProfileRollback (§5.9.16). Queue it: QUEUE ADD-EIM <eimId> key=value ..."
+)
+_RESULT_PREVIEW_RETIRED = (
+    "{package_type} documents only previewed a result; results now come from the card through the operation "
+    "queue (OP <id>). EIM-PACKAGE-EXPLAIN still shows the encoding."
 )
 
 
@@ -346,30 +360,6 @@ class EimLocalSession(LocalIsdrSession):
         )
         return response
 
-    def delete_eim(self, eim_id: str) -> bytes:
-        """Send ES2+.DeleteEIM to remove the eIM from the eUICC registry (SGP.32 §5.5.7)."""
-        target = str(eim_id).strip()
-        if len(target) == 0:
-            raise ValueError("DeleteEim requires eim_id.")
-        payload = self._wrap_tlv(b"\x80", target.encode("utf-8"))
-        command_payload = self._wrap_tlv(bytes.fromhex("BF59"), payload)
-        self.reset_state()
-        self.select_isdr()
-        response = self._send_retrieve_store_data(command_payload, "EIM-LOCAL: DeleteEim")
-        self._sync_pending_notifications(response)
-        self._append_response_log_event(
-            action="delete_eim",
-            package_path="",
-            package_type="bf59",
-            transaction_id_hex="",
-            matching_id=target,
-            success=True,
-            result_len=len(response),
-            response_preview_hex=self._response_preview_hex(response),
-            details={"eim_id": target},
-        )
-        return response
-
     def euicc_memory_reset(
         self,
         package_path: str = "",
@@ -436,6 +426,39 @@ class EimLocalSession(LocalIsdrSession):
         package_path = self.resolve_eim_package_path(override_path=override_path)
         return load_eim_package_document(package_path)
 
+    def explain_eim_package(self, package_path: str = "", *, strict_executable: bool = False) -> dict[str, Any]:
+        """Describe an eIM package file: type, runtime hints, signing certificate, identity defaults, lint.
+
+        Reads files only. The shell's EIM-PACKAGE-EXPLAIN and the Command
+        Center action both print this payload.
+        """
+        resolved_path = self.resolve_eim_package_path(override_path=package_path)
+        document = self.load_eim_package_document(package_path)
+        lint_report = self.lint_eim_package(
+            package_path=package_path,
+            strict_executable=strict_executable,
+        )
+        identity = self.identity_summary()
+        return {
+            "package": {
+                "path": resolved_path,
+                "type": str(lint_report.get("package_type", "")).strip(),
+                "version": str(lint_report.get("package_version", "")).strip(),
+                "strict_executable": bool(strict_executable),
+                "command_tag_hex": str(document.get("command_tag_hex", "")).strip().upper(),
+            },
+            "runtime_hints": resolve_package_runtime_hints(document),
+            "signing_certificate": self.preview_eim_signing_certificate(package_path=resolved_path),
+            "identity_defaults": {
+                "eim_id": identity.get("eim_id", ""),
+                "eim_fqdn": identity.get("eim_fqdn", ""),
+                "default_matching_id": identity.get("default_matching_id", ""),
+                "eim_endpoint": identity.get("eim_endpoint", ""),
+                "smdp_address": identity.get("smdp_address", ""),
+            },
+            "lint": lint_report,
+        }
+
     def lint_eim_package(self, package_path: str = "", strict_executable: bool = False) -> dict[str, Any]:
         """Run static lint checks on an eIM package and return a list of finding strings."""
         resolved_path = self.resolve_eim_package_path(override_path=package_path)
@@ -445,13 +468,15 @@ class EimLocalSession(LocalIsdrSession):
             package_type = str(document.get("package_type", "")).strip().lower()
             coverage = self.execution_coverage_matrix().get(package_type, {})
             mode = str(coverage.get("mode", "")).strip().lower()
-            if mode == "model_only" and self._is_model_only_allowed(document) is False:
+            if mode in ("queue", "retired"):
                 errors = report.get("errors", [])
                 if isinstance(errors, list) is False:
                     errors = []
                 errors.append(
-                    "strict_executable mode: package_type is model_only and "
-                    "runtime.allow_model_only/runtime.mock_mode is not enabled."
+                    f"strict_executable mode: {package_type} is queued with PACKAGE-IMPORT and served by the "
+                    "operation queue, not issued."
+                    if mode == "queue"
+                    else f"strict_executable mode: {package_type} is retired from issuing."
                 )
                 report["errors"] = errors
                 report["ok"] = False
@@ -764,14 +789,22 @@ class EimLocalSession(LocalIsdrSession):
         self,
         eid: str = "",
         error_code: int = 127,
+        eim_transaction_id: bytes = b"",
     ) -> bytes:
+        # SGP.32 v1.3 EimPackageResult: eimPackageResultResponseError [0] is an
+        # implicitly tagged SEQUENCE whose INTEGER keeps its universal tag,
+        # because eimTransactionId [0] carries an explicit tag of its own.
         if error_code < 0 or error_code > 127:
             error_code = 127
         body = b""
         eid_bytes = self._eid_bcd_string_to_bytes(eid)
         if len(eid_bytes) == 16:
             body += self._wrap_tlv(b"\x5A", eid_bytes)
-        body += bytes.fromhex(f"800530030201{error_code:02X}")
+        error_body = b""
+        if len(eim_transaction_id) > 0:
+            error_body += self._wrap_tlv(b"\x80", bytes(eim_transaction_id))
+        error_body += bytes([0x02, 0x01, error_code & 0xFF])
+        body += self._wrap_tlv(b"\xA0", error_body)
         return self._wrap_tlv(bytes.fromhex("BF50"), body)
 
     def _build_provide_eim_package_result_tlv(self, card_response: bytes, eid: str = "") -> bytes:
@@ -967,21 +1000,6 @@ class EimLocalSession(LocalIsdrSession):
             source_mode=source_mode,
         )
 
-    def add_eim(
-        self,
-        cert_path: str = "",
-        package_path: str = "",
-        source_mode: str = "package",
-    ) -> bytes:
-        """Register a new eIM entry in the local store and persist it."""
-        return self._run_add_eim_command(
-            tag_hex=self.cfg.EIM_ADD_TAG_HEX,
-            action_label="AddEim",
-            cert_path=cert_path,
-            package_path=package_path,
-            source_mode=source_mode,
-        )
-
     def _run_add_eim_command(
         self,
         tag_hex: str,
@@ -994,10 +1012,9 @@ class EimLocalSession(LocalIsdrSession):
         normalized_source = source_mode.strip().lower()
         try:
             if normalized_source in ("isdr", "handshake"):
-                return self._run_add_eim_from_isdr_handshake(
-                    tag_hex=tag_hex,
-                    action_label=action_label,
-                    cert_path=cert_path,
+                raise ValueError(
+                    "The ISD-R handshake form ({80 certificate, 81 endpoint, 82 matchingId}) is not an "
+                    "SGP.32 structure; give an AddInitialEim package, or use ASSOCIATE."
                 )
             if normalized_source in (
                 "local",
@@ -1142,72 +1159,6 @@ class EimLocalSession(LocalIsdrSession):
                     "cert_root_ci_pkids": list(self.eim_state.selected_eim_certificate_ci_pkids),
                     "wire_payload_len": len(command_payload),
                     "wire_payload_preview_hex": self._response_preview_hex(command_payload),
-                },
-            )
-        finally:
-            if self.state.session_open:
-                self.close_session()
-        return response
-
-    def _run_add_eim_from_isdr_handshake(
-        self,
-        tag_hex: str,
-        action_label: str,
-        cert_path: str = "",
-    ) -> bytes:
-        cert_file = cert_path.strip()
-        resolved_cert, _, _, _ = self._resolve_signing_certificate_candidate(
-            requested_path=cert_file,
-            preferred_ci_pkids=[self._effective_euicc_ci_pk_id()],
-            allow_auto_select=self._is_auto_selectable_signing_cert_path(cert_file),
-        )
-        cert_bytes, resolved_cert = self._load_certificate_bytes(resolved_cert)
-        if len(cert_bytes) == 0:
-            raise RuntimeError(f"{action_label} certificate file is empty: {resolved_cert}")
-
-        matching_id = self.eim_state.handover.matching_id.strip()
-        if len(matching_id) == 0:
-            matching_id = self._default_matching_id()
-        endpoint = self.cfg.EIM_BIP_ENDPOINT
-
-        payload = b""
-        payload += self._wrap_tlv(b"\x80", cert_bytes)
-        payload += self._wrap_tlv(b"\x81", endpoint.encode("utf-8"))
-        if len(matching_id) > 0:
-            payload += self._wrap_tlv(b"\x82", matching_id.encode("utf-8"))
-        command_tag = bytes.fromhex(tag_hex)
-        command_payload = self._wrap_tlv(command_tag, payload)
-
-        self.reset_state()
-        self.select_isdr()
-        self.open_session()
-        response = b""
-        try:
-            response = self._send_retrieve_store_data(
-                command_payload,
-                f"EIM-LOCAL: {action_label} [ISDR-HANDSHAKE]",
-            )
-            self._sync_pending_notifications(response)
-            self.enforce_notification_hygiene()
-            self.runtime_state.record_operation(
-                f"{action_label}_isdr",
-                transaction_id_hex="",
-                matching_id=matching_id,
-            )
-            self._append_response_log_event(
-                action=action_label,
-                package_path="",
-                package_type=f"{action_label.lower()}_isdr",
-                transaction_id_hex="",
-                matching_id=matching_id,
-                success=True,
-                result_len=len(response),
-                response_preview_hex=self._response_preview_hex(response),
-                details={
-                    "mode": "isdr",
-                    "cert_path": resolved_cert,
-                    "cert_reason": self.eim_state.selected_eim_certificate_reason.strip(),
-                    "cert_root_ci_pkids": list(self.eim_state.selected_eim_certificate_ci_pkids),
                 },
             )
         finally:
@@ -1368,12 +1319,10 @@ class EimLocalSession(LocalIsdrSession):
             )
         counter_value = self._field_mapping(row.get("counter_value"))
         if bool(counter_value.get("include", True)):
-            payload += self._wrap_tlv(
-                b"\x83",
-                self._encode_minimal_unsigned_integer(
-                    self._coerce_integer(counter_value.get("value"), "counter_value.value")
-                ),
-            )
+            counter = self._coerce_integer(counter_value.get("value"), "counter_value.value")
+            if counter < 0:
+                raise ValueError("counter_value.value must be zero or positive.")
+            payload += self._wrap_tlv(b"\x83", encode_der_integer(counter))
         association_token = self._field_mapping(row.get("association_token"))
         if bool(association_token.get("include", False)):
             payload += self._wrap_tlv(
@@ -1465,13 +1414,13 @@ class EimLocalSession(LocalIsdrSession):
             "trusted_eim_pk_tls",
             "trusted_public_key_tls",
         ):
-            return self._wrap_tlv(
-                b"\xA0",
-                self._decode_hex_field(
-                    field.get(public_key_hex_key),
-                    public_key_hex_key,
-                ),
-            )
+            # SGP.32 v1.3 EimConfigurationData: the SubjectPublicKeyInfo alternative
+            # takes automatic tag [0], which replaces the SEQUENCE tag of the DER.
+            spki_der = self._decode_hex_field(field.get(public_key_hex_key), public_key_hex_key)
+            try:
+                return retag_sequence(b"\xA0", spki_der)
+            except ValueError as error:
+                raise ValueError(f"{public_key_hex_key} must hold one DER SubjectPublicKeyInfo: {error}") from error
         if choice in (
             "eim_certificate",
             "certificate",
@@ -1487,7 +1436,10 @@ class EimLocalSession(LocalIsdrSession):
                 preferred_ci_pkids=preferred_ci_pkids or [],
                 allow_auto_select=allow_auto_select,
             )
-            return self._wrap_tlv(b"\xA1", cert_bytes)
+            try:
+                return retag_sequence(b"\xA1", cert_bytes)
+            except ValueError as error:
+                raise ValueError(f"{certificate_path_key} must hold one DER Certificate: {error}") from error
         raise ValueError(
             "Unsupported subject public key choice: "
             f"{choice or '(empty)'}"
@@ -1799,10 +1751,9 @@ class EimLocalSession(LocalIsdrSession):
         return int(value).to_bytes(length, "big")
 
     def _encode_association_token(self, value: Any) -> bytes:
+        # Any negative value asks the eUICC for a token: -1 (SGP.32 v1.3 §5.9.4).
         token_value = self._coerce_integer(value, "association_token.value")
-        if token_value < 0:
-            return b"\xFF"
-        return self._encode_minimal_unsigned_integer(token_value)
+        return encode_der_integer(-1 if token_value < 0 else token_value)
 
     @staticmethod
     def _decode_hex_field(value: Any, field_name: str) -> bytes:
@@ -1816,17 +1767,8 @@ class EimLocalSession(LocalIsdrSession):
 
     @classmethod
     def _encode_eim_supported_protocol_value(cls, field: dict[str, Any]) -> bytes:
-        highest_set_bit = -1
-        payload = bytearray(1)
-        for bit_index, flag_name in enumerate(cls.EIM_SUPPORTED_PROTOCOL_FLAGS):
-            if bool(field.get(flag_name, False)) is False:
-                continue
-            highest_set_bit = bit_index
-            payload[0] |= 1 << (7 - bit_index)
-        if highest_set_bit < 0:
-            return bytes.fromhex("0800")
-        unused_bits = 7 - highest_set_bit
-        return bytes([unused_bits & 0xFF]) + bytes(payload)
+        names = [name for name in cls.EIM_SUPPORTED_PROTOCOL_FLAGS if bool(field.get(name, False))]
+        return encode_named_bit_string(names, cls.EIM_SUPPORTED_PROTOCOL_FLAGS)
 
     def set_handover_transaction(self, transaction_id_hex: str, matching_id: str = "") -> EimHandoverContext:
         """Record a handover transaction reference against the current session state."""
@@ -2367,23 +2309,24 @@ class EimLocalSession(LocalIsdrSession):
         return {
             "add_initial_eim": {"mode": "executable", "execution_path": "add_initial_eim"},
             "addinitialeim": {"mode": "executable", "execution_path": "add_initial_eim"},
-            "add_eim": {"mode": "executable", "execution_path": "add_eim"},
-            "addeim": {"mode": "executable", "execution_path": "add_eim"},
+            "add_eim": {"mode": "retired", "execution_path": "queue ADD-EIM"},
+            "addeim": {"mode": "retired", "execution_path": "queue ADD-EIM"},
             "euicc_memory_reset": {"mode": "executable", "execution_path": "euicc_memory_reset"},
             "ipad_discover": {"mode": "executable", "execution_path": "ipad_discover"},
             "ipad": {"mode": "executable", "execution_path": "ipad_discover"},
             "get_eim_package": {"mode": "executable", "execution_path": "get_eim_package_discover"},
-            "provide_eim_package_result": {"mode": "executable", "execution_path": "provide_eim_package_result_preview"},
+            "provide_eim_package_result": {"mode": "retired", "execution_path": "result_from_card"},
             "bound_profile_package": {"mode": "executable", "execution_path": "direct_profile_download"},
             "direct_profile_download": {"mode": "executable", "execution_path": "direct_profile_download"},
             "eim_acknowledgements": {"mode": "executable", "execution_path": "acknowledge_pending"},
-            "eim_package_result": {"mode": "executable", "execution_path": "result_acknowledge"},
-            "euicc_package_result": {"mode": "executable", "execution_path": "result_acknowledge"},
-            "profile_download_trigger_result": {"mode": "executable", "execution_path": "result_acknowledge"},
-            "eim_package_request": {"mode": "model_only", "execution_path": "pending_operation_register"},
-            "euicc_package_request_eim_configuration_data": {"mode": "model_only", "execution_path": "pending_operation_register"},
-            "euicc_package_request_ecos": {"mode": "model_only", "execution_path": "pending_operation_register"},
-            "euicc_package_request_psmos": {"mode": "model_only", "execution_path": "pending_operation_register"},
+            "eim_package_result": {"mode": "retired", "execution_path": "result_from_card"},
+            "euicc_package_result": {"mode": "retired", "execution_path": "result_from_card"},
+            "profile_download_trigger_result": {"mode": "retired", "execution_path": "result_from_card"},
+            "eim_package_request": {"mode": "queue", "execution_path": "package_import"},
+            "ipa_euicc_data_request": {"mode": "queue", "execution_path": "package_import"},
+            "euicc_package_request_eim_configuration_data": {"mode": "retired", "execution_path": "queue ADD-EIM"},
+            "euicc_package_request_ecos": {"mode": "queue", "execution_path": "package_import"},
+            "euicc_package_request_psmos": {"mode": "queue", "execution_path": "package_import"},
             "profile_download_trigger_request": {"mode": "executable", "execution_path": "indirect_profile_download"},
         }
 
@@ -2397,12 +2340,6 @@ class EimLocalSession(LocalIsdrSession):
         mode = str(coverage.get("mode", "unsupported")).strip().lower()
         if mode == "unsupported":
             raise ValueError(f"Unsupported package_type in {resolved_path}: {package_type or '(missing)'}")
-        if mode == "model_only" and self._is_model_only_allowed(package_document) is False:
-            raise ValueError(
-                "Unsupported executable branch for package_type "
-                f"'{package_type}'. This type is model_only. "
-                "Set runtime.allow_model_only=true in package JSON to run mock registration mode."
-            )
         return {
             "package_path": resolved_path,
             "package_type": package_type,
@@ -2472,6 +2409,110 @@ class EimLocalSession(LocalIsdrSession):
         inner += self._wrap_tlv(b"\x80", activation_code.encode("utf-8"))
         return self._wrap_tlv(bytes.fromhex("BF54"), inner)
 
+    def _build_ipa_euicc_data_request_preview(
+        self,
+        package_document: dict[str, Any],
+        txid: bytes,
+    ) -> bytes:
+        """Encode SGP.32 §2.11.1.2 IpaEuiccDataRequest (BF52) from a package document.
+
+        The body is reachable either as the standalone ``ipa_euicc_data_request``
+        package type or as the matching alternative of the eIM Package Request
+        CHOICE, so both spellings resolve to the same section.
+        """
+        sgp32 = package_document.get("sgp32", {})
+        request: dict[str, Any] = {}
+        if isinstance(sgp32, dict):
+            direct = sgp32.get("ipa_euicc_data_request", {})
+            if isinstance(direct, dict):
+                request = direct
+            wrapper = sgp32.get("eim_package_request", {})
+            if isinstance(wrapper, dict):
+                choice = str(wrapper.get("choice", "")).strip().lower()
+                if choice == "ipa_euicc_data_request":
+                    nested = wrapper.get("ipa_euicc_data_request", {})
+                    if isinstance(nested, dict):
+                        request = nested
+        if len(request) == 0:
+            return b""
+
+        tag_list = ipa_euicc_data_request_tag_list(request)
+        if len(tag_list) == 0:
+            # A body captured off the wire is replayed verbatim, with or
+            # without its outer BF52 tag.
+            opaque_body = ipa_euicc_data_request_opaque_body(request)
+            if len(opaque_body) == 0:
+                return b""
+            if opaque_body.startswith(bytes.fromhex("BF52")):
+                return opaque_body
+            return self._wrap_tlv(bytes.fromhex("BF52"), opaque_body)
+
+        body = self._wrap_tlv(b"\x5C", tag_list)
+
+        ci_pk = request.get("euicc_ci_pk_identifier_to_be_used", {})
+        if isinstance(ci_pk, dict) and bool(ci_pk.get("include", False)):
+            # euiccCiPKIdentifierToBeUsed is an untagged OCTET STRING: the
+            # SEQUENCE already carries tagged members, so automatic tagging
+            # does not apply and the universal '04' tag stays on the wire.
+            body += self._wrap_tlv(b"\x04", self._package_field_bytes(ci_pk))
+
+        notification = request.get("search_criteria_notification", {})
+        if isinstance(notification, dict) and bool(notification.get("include", False)):
+            criteria = self._build_search_criteria_notification(notification)
+            if len(criteria) > 0:
+                body += self._wrap_tlv(b"\xA1", criteria)
+
+        package_result = request.get("search_criteria_euicc_package_result", {})
+        if isinstance(package_result, dict) and bool(package_result.get("include", False)):
+            criteria = self._build_search_criteria_seq_number(package_result)
+            if len(criteria) > 0:
+                body += self._wrap_tlv(b"\xA2", criteria)
+
+        eim_transaction_id = bytes(txid)
+        transaction_field = request.get("eim_transaction_id", {})
+        if isinstance(transaction_field, dict) and bool(transaction_field.get("include", False)):
+            candidate = self._package_field_bytes(transaction_field)
+            if len(candidate) > 0:
+                eim_transaction_id = candidate
+        if len(eim_transaction_id) > 0:
+            body += self._wrap_tlv(b"\x83", eim_transaction_id)
+        return self._wrap_tlv(bytes.fromhex("BF52"), body)
+
+    @staticmethod
+    def _package_field_bytes(field: dict[str, Any]) -> bytes:
+        value_hex = str(field.get("value_hex", "")).strip().replace(" ", "")
+        if len(value_hex) == 0 or len(value_hex) % 2 != 0:
+            return b""
+        try:
+            return bytes.fromhex(value_hex)
+        except ValueError:
+            return b""
+
+    def _build_search_criteria_seq_number(self, section: dict[str, Any]) -> bytes:
+        seq_number = section.get("seq_number", {})
+        if isinstance(seq_number, dict) is False:
+            return b""
+        if bool(seq_number.get("include", True)) is False:
+            return b""
+        value = seq_number.get("value")
+        if isinstance(value, bool) or isinstance(value, int) is False or value < 0:
+            return b""
+        return self._wrap_tlv(b"\x80", self._encode_notification_sequence(value))
+
+    def _build_search_criteria_notification(self, section: dict[str, Any]) -> bytes:
+        choice = str(section.get("choice", "")).strip().lower()
+        if choice == "seq_number":
+            return self._build_search_criteria_seq_number(section)
+        if choice != "profile_management_operation":
+            return b""
+        operation = section.get("profile_management_operation", {})
+        if isinstance(operation, dict) is False:
+            return b""
+        events = operation.get("events", {})
+        if isinstance(events, dict) is False:
+            return b""
+        return self._wrap_tlv(b"\x81", encode_notification_event_bits(events))
+
     def build_wire_payload_preview(self, package_document: dict[str, Any]) -> bytes:
         """Build a structured preview of the wire payload that would be sent for this package."""
         package_type = str(package_document.get("package_type", "")).strip().lower()
@@ -2508,6 +2549,8 @@ class EimLocalSession(LocalIsdrSession):
             if source_bytes.startswith(bytes.fromhex("BF36")):
                 return bytes(source_bytes)
             return b""
+        if package_type in ("ipa_euicc_data_request",):
+            return self._build_ipa_euicc_data_request_preview(package_document, txid)
         if package_type in ("eim_package_request",):
             sgp32 = package_document.get("sgp32", {})
             if isinstance(sgp32, dict):
@@ -2520,6 +2563,8 @@ class EimLocalSession(LocalIsdrSession):
                             runtime_hints,
                             txid,
                         )
+                    if choice == "ipa_euicc_data_request":
+                        return self._build_ipa_euicc_data_request_preview(package_document, txid)
         if package_type in ("euicc_package_result",):
             payload = b""
             sgp32 = package_document.get("sgp32", {})
@@ -2667,14 +2712,7 @@ class EimLocalSession(LocalIsdrSession):
             execution_path = "add_initial_eim_package_isdr"
             transport = "local_auth"
         elif package_type in ("add_eim", "addeim"):
-            response = self.add_eim(
-                cert_path=cert_path,
-                package_path=resolved_path,
-                source_mode="package_isdr",
-            )
-            result_len = len(response)
-            execution_path = "add_eim_package_isdr"
-            transport = "local_auth"
+            raise ValueError(_ADD_EIM_RETIRED)
         elif package_type == "euicc_memory_reset":
             response = self.euicc_memory_reset(package_path=resolved_path)
             result_len = len(response)
@@ -2711,12 +2749,19 @@ class EimLocalSession(LocalIsdrSession):
         package_type = str(package_document.get("package_type", "")).strip().lower()
         coverage = self.execution_coverage_matrix().get(package_type, {})
         mode = str(coverage.get("mode", "")).strip().lower()
-        if mode == "model_only" and self._is_model_only_allowed(package_document) is False:
+        if mode == "queue":
             raise ValueError(
-                "Unsupported executable branch for package_type "
-                f"'{package_type}'. This type is model_only. "
-                "Set runtime.allow_model_only=true in package JSON to run mock registration mode."
+                f"{package_type} packages are signed and served from the operation queue: "
+                f"PACKAGE-IMPORT {resolved_path} [eid], then SERVE or DELIVER."
             )
+        if mode == "retired":
+            if package_type in ("add_eim", "addeim"):
+                raise ValueError(_ADD_EIM_RETIRED)
+            if package_type == "euicc_package_request_eim_configuration_data":
+                from SCP11.eim_local.engine.package_import import NOT_A_PACKAGE
+
+                raise ValueError(NOT_A_PACKAGE)
+            raise ValueError(_RESULT_PREVIEW_RETIRED.format(package_type=package_type))
         txid = str(runtime_hints.get("transaction_id_hex", "")).strip().upper()
         matching_id = str(runtime_hints.get("matching_id", "")).strip()
         response_preview = ""
@@ -2728,23 +2773,6 @@ class EimLocalSession(LocalIsdrSession):
                 result_len = len(response)
                 response_preview = self._response_preview_hex(response)
                 details["execution_path"] = "add_initial_eim"
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=result_len,
-                    response_preview_hex=response_preview,
-                    details=details,
-                )
-                return resolved_path, package_type, result_len
-            if package_type in ("add_eim", "addeim"):
-                response = self.add_eim(package_path=resolved_path)
-                result_len = len(response)
-                response_preview = self._response_preview_hex(response)
-                details["execution_path"] = "add_eim"
                 self._append_response_log_event(
                     action="issue_package",
                     package_path=resolved_path,
@@ -2869,35 +2897,6 @@ class EimLocalSession(LocalIsdrSession):
                     details=details,
                 )
                 return resolved_path, package_type, result_len
-            if package_type in (
-                "eim_package_request",
-                "euicc_package_request_eim_configuration_data",
-                "euicc_package_request_ecos",
-                "euicc_package_request_psmos",
-            ):
-                counter_assignments = self._apply_runtime_counters(package_document)
-                self._register_pending_operation(package_type, runtime_hints)
-                self._commit_counter_assignments(counter_assignments)
-                self.runtime_state.record_operation(
-                    package_type,
-                    transaction_id_hex=str(runtime_hints.get("transaction_id_hex", "")),
-                    matching_id=str(runtime_hints.get("matching_id", "")),
-                )
-                details["execution_path"] = "pending_operation_register"
-                details["execution_mode"] = "model_only"
-                details["pending_operations"] = len(self.eim_state.pending_operations)
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=0,
-                    response_preview_hex="",
-                    details=details,
-                )
-                return resolved_path, package_type, 0
             if package_type in ("eim_acknowledgements",):
                 closed = self._close_pending_from_hints(runtime_hints)
                 self.acknowledge_eim_operations(
@@ -2954,65 +2953,6 @@ class EimLocalSession(LocalIsdrSession):
                     details=details,
                 )
                 return resolved_path, package_type, 0
-            if package_type in ("provide_eim_package_result",):
-                wire_payload = self.build_wire_payload_preview(package_document)
-                closed = self._close_pending_from_hints(runtime_hints)
-                self.runtime_state.record_operation(
-                    package_type,
-                    transaction_id_hex=str(runtime_hints.get("transaction_id_hex", "")),
-                    matching_id=str(runtime_hints.get("matching_id", "")),
-                )
-                self.state.eim_package_response = wire_payload
-                result_len = len(wire_payload)
-                response_preview = self._response_preview_hex(wire_payload)
-                details["execution_path"] = "provide_eim_package_result_preview"
-                details["wire_payload_len"] = len(wire_payload)
-                details["wire_payload_preview_hex"] = self._response_preview_hex(wire_payload)
-                details["closed_operations"] = int(closed)
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=result_len,
-                    response_preview_hex=response_preview,
-                    details=details,
-                )
-                return resolved_path, package_type, result_len
-            if package_type in (
-                "eim_package_result",
-                "euicc_package_result",
-                "profile_download_trigger_result",
-            ):
-                wire_payload = self.build_wire_payload_preview(package_document)
-                closed = self._close_pending_from_hints(runtime_hints)
-                self.acknowledge_eim_operations(
-                    transaction_id_hex=str(runtime_hints.get("transaction_id_hex", "")),
-                    matching_id=str(runtime_hints.get("matching_id", "")),
-                    strict_io=False,
-                )
-                self.runtime_state.record_operation(
-                    package_type,
-                    transaction_id_hex=str(runtime_hints.get("transaction_id_hex", "")),
-                    matching_id=str(runtime_hints.get("matching_id", "")),
-                )
-                details["execution_path"] = "result_acknowledge_wire_preview"
-                details["wire_payload_len"] = len(wire_payload)
-                details["closed_operations"] = int(closed)
-                self._append_response_log_event(
-                    action="issue_package",
-                    package_path=resolved_path,
-                    package_type=package_type,
-                    transaction_id_hex=txid,
-                    matching_id=matching_id,
-                    success=True,
-                    result_len=len(wire_payload),
-                    response_preview_hex=self._response_preview_hex(wire_payload),
-                    details=details,
-                )
-                return resolved_path, package_type, len(wire_payload)
             raise ValueError(
                 f"Unsupported package_type in {resolved_path}: {package_type or '(missing)'}"
             )
@@ -3167,7 +3107,7 @@ class EimLocalSession(LocalIsdrSession):
         rows: list[dict[str, Any]] = []
         resolved_dir = self.reset_hotfolder_metadata_session(hotfolder_dir=hotfolder_dir)
         stop_reason = "cycles_completed"
-        # Determinate bar — we know the cycle budget up front. When
+        # Determinate bar -- we know the cycle budget up front. When
         # ``until_empty`` is set the bar may finish early (early break
         # below); the sticky footer just shows the real completion
         # state whenever the caller exits the ``with`` block.

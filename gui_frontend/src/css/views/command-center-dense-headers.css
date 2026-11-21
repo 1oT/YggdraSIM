@@ -15,7 +15,7 @@
 }
 
 .cc-action-card.card:hover:not(.is-busy) {
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   border-color: var(--border);
 }
 
@@ -23,14 +23,14 @@
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent-soft),
-    0 0 18px -4px var(--accent-glow);
+    0 0 18px -4px var(--glow);
 }
 
 .cc-action-card.is-busy {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent-soft),
-    0 0 18px -4px var(--accent-glow);
+    0 0 18px -4px var(--glow);
 }
 
 .cc-action-card.is-busy::before {
@@ -40,12 +40,7 @@
   height: 2px;
   border-top-left-radius: var(--radius-md);
   border-top-right-radius: var(--radius-md);
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--accent) 40%,
-    var(--accent-strong) 60%,
-    transparent 100%);
+  background: var(--card-stripe);
   background-size: 200% 100%;
   animation: ygg-busy-sweep 1.4s linear infinite;
   pointer-events: none;

@@ -1,0 +1,180 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* -- Skin: Bench (default) -------------------------------------------------
+ *
+ * A skin is the non-colour half of the design: typefaces, type scale,
+ * shape, separation and the chrome treatment. Colour stays with the theme
+ * (`data-theme`), so every skin renders in every palette. A skin file
+ * declares custom properties only; the layout, component and view rules
+ * read them, and `theme-init.js` sets `data-skin` before first paint.
+ *
+ * Bench is the lab-instrument skin: a condensed sans for the interface and
+ * monospace for data, square keys, flat panels separated by rules, chrome
+ * on the code surface, the current selection lit like a pressed key, and
+ * capitals for UI legends only -- names (eSIM, eUICC, LPA-d, ASN.1 types)
+ * keep their case. Status lamps are square. */
+:root,
+html[data-skin="bench"] {
+  /* Type */
+  --font-sans: "IBM Plex Sans Condensed", "Roboto Condensed", "Arial Narrow",
+    "Liberation Sans Narrow", "DejaVu Sans Condensed", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-head: var(--font-sans);
+  --font-size-base: 13px;
+  --line-height-base: 1.45;
+  --heading-weight: 600;
+  --heading-track: 0.01em;
+  --legend-size: 10.5px;
+  --legend-weight: 600;
+  --legend-track: 0.08em;
+  --group-case: none;
+  --group-size: 11.5px;
+  --group-track: 0.01em;
+
+  /* Shape */
+  --radius-xs: 1px;
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-pill: 2px;
+  --radius-dot: 1px;
+
+  /* Motion: short and linear, no overshoot. */
+  --transition-fast: 90ms linear;
+  --transition-mid: 140ms linear;
+  --transition-slow: 200ms linear;
+  --ease-out-bounce: cubic-bezier(0.25, 0.8, 0.4, 1);
+  --hover-shift: 0;
+
+  /* Separation: rules instead of shadows, no glow, no page tint. */
+  --page-tint: none;
+  --surface-shadow: none;
+  --surface-shadow-hover: none;
+  --overlay-shadow: 0 0 0 1px var(--border-strong);
+  --glow: transparent;
+  --accent-fill: var(--accent);
+  --brand-fill: linear-gradient(var(--fg), var(--fg));
+
+  /* Chrome: top bar, sidebar, event log and status line. */
+  --bar-h: 46px;
+  --bar-bg: var(--code-bg);
+  --bar-blur: none;
+  --bar-rule: var(--border-strong);
+  --bar-underline: transparent;
+  --bar-gap: 12px;
+  --bar-pad: 0 10px;
+  --chrome-pill-bg: transparent;
+  --chrome-pill-border: var(--border-strong);
+  --chrome-pill-h: 28px;
+  --nav-bg: var(--bg);
+  --nav-rule: var(--border-strong);
+  --nav-item-h: 30px;
+  --nav-item-size: 13px;
+  --dock-bg: var(--code-bg);
+  --dock-tabs-bg: var(--code-bg);
+  --dock-rule: var(--border-strong);
+  --status-h: 26px;
+  --status-bg: var(--code-bg);
+  --status-font: var(--font-mono);
+  --main-pad: 16px 18px 28px;
+
+  /* Extra chrome tokens */
+  --glow-size: 0px;
+  --brand-hover-transform: none;
+  --nav-item-pad: 5px 10px 5px 14px;
+  --title-rule: var(--border);
+  --nav-count-bg: transparent;
+  --nav-count-fg: var(--fg-dim);
+  --nav-count-font: var(--font-mono);
+  --nav-count-on-bg: transparent;
+  --nav-count-on-fg: var(--accent-fg);
+
+  --dock-tab-on-bg: transparent;
+
+  /* Components */
+  --radius-ms: 2px;
+  --surface-glow: none;
+  --hover-lift: 0;
+  --btn-h: 28px;
+  --btn-pad: 4px 12px;
+  --title-size: 22px;
+  --title-weight: 600;
+  --title-track: 0.01em;
+
+  --rail-w: 62px;
+
+  --card-stripe: transparent;
+
+  --spot-tint: 0%;
+
+  /* Module workbench: action list | output | inspector. */
+  --module-areas: "actions main side";
+  --module-areas-mid: "actions main" "side main";
+  --module-col-actions: minmax(200px, 236px);
+  --module-col-main: minmax(0, 1fr);
+  --module-col-side: minmax(250px, 320px);
+  --module-rows-mid: minmax(0, 1.25fr) minmax(0, 1fr);
+  --module-col-actions-strip: 34px;
+  --module-col-side-strip: 34px;
+  --module-pane-display: contents;
+  --module-inspector-display: flex;
+  --module-pane-head-display: flex;
+  --module-legacy-label-display: none;
+  --module-side-pad: 8px 8px 10px;
+  --module-side-rule: var(--border);
+  --module-side-bg: var(--bg);
+  --strip-writing: vertical-rl;
+  --actlist-flow: column nowrap;
+  --actlist-gap: 1px;
+  --actlist-tabs-direction: column;
+  --actlist-tab-justify: space-between;
+  --actlist-item-justify: flex-start;
+  --actlist-item-width: 100%;
+  --actlist-item-min-w: 0;
+  --actlist-item-pad: 4px 8px;
+  --actlist-item-h: 26px;
+  --actlist-item-bg: transparent;
+  --actlist-item-border: transparent;
+  --actlist-label-size: 12.5px;
+  --actlist-label-max: none;
+  --actlist-label-wrap: normal;
+  --actlist-on-bg: var(--accent);
+  --actlist-on-fg: var(--accent-fg);
+  --actlist-on-border: var(--accent);
+
+  --module-col-actions-none: 0px;
+
+  --module-col-side-wide: minmax(420px, 0.85fr);
+
+  --chip-case: none;
+
+  /* Selection: the current entry is a lit key. */
+  --nav-current-bg: var(--accent);
+  --nav-current-fg: var(--accent-fg);
+  --nav-current-mark: 0;
+  --seg-on-bg: var(--accent);
+  --seg-on-fg: var(--accent-fg);
+  --seg-on-border: var(--accent);
+
+  /* Keys: the module ribbons are rows of legended keys. */
+  --key-direction: row;
+  --key-gap: 6px;
+  --key-pad: 0 10px;
+  --key-h: 28px;
+  --key-bg: var(--bg-elev-2);
+  --key-border: var(--border-strong);
+  --key-label-size: 12px;
+  --key-label-weight: 500;
+  --key-label-max: none;
+  --key-tile-h: 28px;
+  --key-justify: center;
+  --key-danger-fg: var(--fail);
+  --key-danger-bg: var(--bg-elev);
+  --key-icon-display: none;
+}

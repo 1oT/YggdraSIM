@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -70,6 +71,73 @@ def dissector_is_available(module_dir: Path | None = None) -> bool:
         return False
 
 
+# Wireshark on some distributions ships an AppArmor profile that denies
+# tshark every read under $HOME. The plugin lives in the checkout, so
+# tshark cannot load it and decodes without it -- silently, because a
+# refused -X is a warning on stderr and not an error. /tmp is the one
+# place both sides can reach (the profile allows it, and the user-owned
+# runtime dir is denied like $HOME), so the Lua is mirrored there.
+def _lua_tree_signature(source: Path) -> str:
+    """Identify a Lua tree by its files, so a stale copy is detectable."""
+    parts: list[str] = []
+    for path in sorted(source.rglob("*.lua")):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        parts.append(f"{path.relative_to(source)}:{stat.st_size}:{int(stat.st_mtime)}")
+    return "\n".join(parts)
+
+
+def mirrored_lua_directory(module_dir: Path | None = None) -> Path | None:
+    """A copy of the Lua tree in a directory tshark is allowed to read.
+
+    Returns None when the mirror cannot be made safely, in which case the
+    caller uses the original path and tshark decides. The directory is
+    owned by this user and is not group- or world-writable, because
+    tshark executes whatever Lua it finds there.
+    """
+    try:
+        source = lua_directory(module_dir)
+        if source.is_dir() is False:
+            return None
+        root = Path(tempfile.gettempdir()) / f"yggdrasim-apdu-dissector-{os.getuid()}"
+        if root.is_symlink():
+            return None
+        if root.exists():
+            stat = root.stat()
+            if stat.st_uid != os.getuid() or root.is_dir() is False:
+                return None
+            if stat.st_mode & 0o022:
+                root.chmod(0o755)
+        else:
+            root.mkdir(mode=0o755, parents=True, exist_ok=True)
+
+        # Compare the mirror against the source rather than a marker the
+        # mirror carries: a marker only records what was copied, so a
+        # mirror edited underneath us would keep claiming to be current
+        # and tshark would decode with whatever is actually there.
+        # copytree preserves mtimes, so the two signatures match exactly
+        # while the copy is faithful.
+        if _lua_tree_signature(root) != _lua_tree_signature(source):
+            for existing in root.iterdir():
+                if existing.is_dir() and existing.is_symlink() is False:
+                    shutil.rmtree(existing, ignore_errors=True)
+                else:
+                    existing.unlink(missing_ok=True)
+            shutil.copytree(source, root, dirs_exist_ok=True)
+            # copytree carries the source directory's mode across, and a
+            # checkout is often group-writable. Tighten afterwards, not
+            # before: tshark executes this Lua.
+            for path in [root, *root.rglob("*")]:
+                path.chmod(0o755 if path.is_dir() else 0o644)
+        if (root / DISSECTOR_FILENAME).is_file() is False:
+            return None
+        return root
+    except OSError:
+        return None
+
+
 def dissector_enabled(environ: Mapping[str, str] | None = None) -> bool:
     """False when the operator has switched the dissector off."""
     source = environ if environ is not None else os.environ
@@ -90,6 +158,9 @@ def dissector_arguments(
         return []
     if not dissector_is_available(module_dir):
         return []
+    mirror = mirrored_lua_directory(module_dir)
+    if mirror is not None:
+        return ["-X", f"lua_script:{mirror / DISSECTOR_FILENAME}"]
     return ["-X", f"lua_script:{locate_dissector(module_dir)}"]
 
 

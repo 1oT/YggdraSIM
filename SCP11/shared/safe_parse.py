@@ -77,7 +77,7 @@ def _format_preview(buffer: bytes | bytearray | memoryview | None, preview_bytes
     head = raw[:preview_bytes]
     tail_note = ""
     if len(raw) > preview_bytes:
-        tail_note = f"… (+{len(raw) - preview_bytes} more)"
+        tail_note = f"... (+{len(raw) - preview_bytes} more)"
     return f"{head.hex().upper()}{tail_note} (len={len(raw)})"
 
 
@@ -104,7 +104,7 @@ def safe_parse(
     normalized_buffer = b"" if buffer is None else bytes(buffer)
     try:
         return parser(normalized_buffer)
-    except Exception as exc:  # noqa: BLE001 — documented fallback site
+    except Exception as exc:  # noqa: BLE001 -- documented fallback site
         preview = _format_preview(normalized_buffer, preview_bytes)
         active_logger.debug(
             "safe_parse(%s) suppressed %s: %s [buffer=%s]",

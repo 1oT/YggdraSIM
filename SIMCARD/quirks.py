@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Simulated card quirk flags: opt-out knobs for spec-compliant but interoperability-breaking behaviours."""
 from __future__ import annotations
 
@@ -125,6 +124,29 @@ def _path_is_disabled_sentinel(path: str) -> bool:
     return text in _QUIRKS_PATH_DISABLED_ALIASES
 
 
+# The template the runtime root's Workspace/SIMCARD/sim_quirks.py is seeded
+# from. It installs no hooks and overrides nothing.
+_SHIPPED_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sim_quirks_template.py")
+
+
+def _is_unedited_shipped_template(path: str) -> bool:
+    """True when ``path`` holds the shipped quirks template byte for byte.
+
+    Such a file defines nothing, so the loader skips it without running
+    it and without the YGGDRASIM_ALLOW_QUIRKS gate; a file that differs
+    in one byte is an operator's quirks file and goes through the gate.
+    """
+    try:
+        with open(_SHIPPED_TEMPLATE_PATH, "rb") as handle:
+            template = handle.read()
+        if os.path.getsize(path) != len(template):
+            return False
+        with open(path, "rb") as handle:
+            return handle.read() == template
+    except OSError:
+        return False
+
+
 def load_quirk_registry(path: str) -> QuirkRegistry:
     """Load the per-card quirk overrides from the quirks YAML file into the engine registry."""
     registry = QuirkRegistry()
@@ -137,6 +159,8 @@ def load_quirk_registry(path: str) -> QuirkRegistry:
         return registry
     absolute_path = os.path.abspath(os.path.expanduser(normalized))
     if os.path.isfile(absolute_path) is False:
+        return registry
+    if _is_unedited_shipped_template(absolute_path):
         return registry
     if _quirks_loading_enabled() is False:
         raise PermissionError(

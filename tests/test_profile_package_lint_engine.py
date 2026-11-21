@@ -246,7 +246,7 @@ class SaipProfileLinterTests(unittest.TestCase):
 
     # ------------------------------------------------------------------
     # ICCID cross-PE consistency (header.iccid vs MF/EF.ICCID
-    # fillFileContent) — TS 102 221 §13.2.
+    # fillFileContent) -- TS 102 221 §13.2.
     # ------------------------------------------------------------------
 
     def _profile_with_iccid_fields(
@@ -277,7 +277,7 @@ class SaipProfileLinterTests(unittest.TestCase):
 
     def test_iccid_consistency_fail_on_mismatch(self) -> None:
         # Header is printable-order BCD. EF.ICCID is nibble-swapped BCD
-        # but pointing at a *different* digit string — same length,
+        # but pointing at a *different* digit string -- same length,
         # different identity.
         doc = self._profile_with_iccid_fields(
             header_iccid=bytes.fromhex("8988081111111111112F"),
@@ -300,7 +300,7 @@ class SaipProfileLinterTests(unittest.TestCase):
     def test_iccid_consistency_pass_on_match(self) -> None:
         # Header bytes 89880811...11 (printable BCD) and EF bytes
         # 98888011...11 (nibble-swapped BCD) decode to the same
-        # printable digit string — this is the canonical SAIP
+        # printable digit string -- this is the canonical SAIP
         # arrangement.
         doc = self._profile_with_iccid_fields(
             header_iccid=bytes.fromhex("89880811111111111111"),
@@ -363,9 +363,10 @@ class SaipProfileLinterTests(unittest.TestCase):
         }
 
     def test_imsi_well_formed_15_digit_passes(self) -> None:
-        # 15-digit IMSI "001010000000001": parity=1, first digit=0.
-        # Body: 08 01 10 10 00 00 00 00 10
-        doc = self._profile_with_ef_imsi(bytes.fromhex("080110100000000010"))
+        # 15-digit IMSI "001010000000001": parity=9 (odd digit count,
+        # TS 24.008 §10.5.1.4), first digit=0.
+        # Body: 08 09 10 10 00 00 00 00 10
+        doc = self._profile_with_ef_imsi(bytes.fromhex("080910100000000010"))
         report = SaipProfileLinter(strict=False).lint_decoded_document(
             decoded_document=doc, profile_label="t",
         )
@@ -416,8 +417,9 @@ class SaipProfileLinterTests(unittest.TestCase):
         self.assertEqual(hits[0].severity, "FAIL")
 
     def test_imsi_parity_mismatch_fails(self) -> None:
-        # 15 actual digits but parity=9 (which would mean even count).
-        doc = self._profile_with_ef_imsi(bytes.fromhex("080910101010101010"))
+        # 15 actual digits but parity=1 (which means an even count,
+        # TS 24.008 §10.5.1.4).
+        doc = self._profile_with_ef_imsi(bytes.fromhex("080110101010101010"))
         report = SaipProfileLinter(strict=False).lint_decoded_document(
             decoded_document=doc, profile_label="t",
         )
@@ -425,20 +427,20 @@ class SaipProfileLinterTests(unittest.TestCase):
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0].severity, "FAIL")
         self.assertEqual(hits[0].evidence["digit_count"], 15)
-        self.assertEqual(hits[0].evidence["expected_parity"], "0x1")
+        self.assertEqual(hits[0].evidence["expected_parity"], "0x9")
 
     def test_imsi_short_imsi_emits_info(self) -> None:
         # 8-digit IMSI: digit_count=8 (even), parity=9.
-        # Body: 08 91 10 10 10 FF FF FF FF — wait, lots of filler.
+        # Body: 08 91 10 10 10 FF FF FF FF -- wait, lots of filler.
         # Easier: 7 digits "0123456" → first_digit=0, then 6 digits "123456".
-        # 8 digits: "01234567" → parity=9 (even).
-        # first_digit=0, parity=9 → parity_byte=0x09.
+        # 8 digits: "01234567" → parity=1 (even, TS 24.008 §10.5.1.4).
+        # first_digit=0, parity=1 → parity_byte=0x01.
         # rest 7 digits "1234567" → pad to "1234567F" (8 nibbles, 4 bytes).
         # swap pairs: "21436587", then the "F7" filler nibble pair.
         # Pairs of "1234567F": (1,2)→"21", (3,4)→"43", (5,6)→"65", (7,F)→"F7"
-        # So body = 08 09 21 43 65 F7 + 3 bytes filler FF FF FF
-        # = 0809214365F7FFFFFF
-        doc = self._profile_with_ef_imsi(bytes.fromhex("0809214365F7FFFFFF"))
+        # Five significant bytes, so the length byte is 05:
+        # body = 05 01 21 43 65 F7 + 3 bytes filler FF FF FF
+        doc = self._profile_with_ef_imsi(bytes.fromhex("0501214365F7FFFFFF"))
         report = SaipProfileLinter(strict=False).lint_decoded_document(
             decoded_document=doc, profile_label="t",
         )

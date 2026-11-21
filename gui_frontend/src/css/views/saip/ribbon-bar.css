@@ -13,11 +13,12 @@
  */
 .saip-ribbon {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 10px;
   padding: 8px 10px 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   align-items: stretch;
   min-height: 0;
@@ -38,7 +39,7 @@
 }
 
 .saip-ribbon::-webkit-scrollbar-thumb {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong);
 }
 
@@ -77,16 +78,16 @@
 
 .saip-ribbon-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: var(--key-direction);
   align-items: center;
-  justify-content: flex-start;
-  gap: 2px;
+  justify-content: var(--key-justify);
+  gap: var(--key-gap);
   min-width: 54px;
-  min-height: 52px;
-  padding: 5px 7px 4px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  min-height: var(--key-tile-h);
+  padding: var(--key-pad);
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
   transition:
@@ -115,6 +116,12 @@
   border-color: var(--accent);
 }
 
+/* A toggle button (the Token editor dock) shows its open state. */
+.saip-ribbon-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
 .saip-ribbon-btn.is-disabled,
 .saip-ribbon-btn[disabled] {
   opacity: 0.52;
@@ -130,7 +137,7 @@
 }
 
 .saip-ribbon-btn-icon {
-  display: inline-flex;
+  display: var(--key-icon-display);
   align-items: center;
   justify-content: center;
   width: 25px;
@@ -152,7 +159,60 @@
 }
 
 .saip-ribbon-btn-label {
-  font-size: 11px;
+  font-size: var(--key-label-size);
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+/* Tabbed ribbon: one command group at a time behind a tab per group
+   (saipRibbonApplyTabs), so every key keeps its full legend in one row. */
+.saip-ribbon--tabbed {
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.saip-ribbon-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-ribbon-tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--legend-size);
+  font-weight: var(--legend-weight);
+  letter-spacing: var(--legend-track);
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.saip-ribbon-tab:hover {
+  color: var(--fg);
+}
+
+.saip-ribbon-tab.is-active {
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.saip-ribbon-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.saip-ribbon--tabbed > .saip-ribbon-group {
+  padding: 8px 10px;
+  border-right: none;
+}
+
+.saip-ribbon--tabbed .saip-ribbon-group-label {
+  display: none;
 }

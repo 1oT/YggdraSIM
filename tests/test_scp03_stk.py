@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from SCP03.interface.stk_shell import StkShell
 from SCP03.logic.stk import StkController
+from yggdrasim_common.stk_terminal import terminal_profile_apdu
 
 
 class FakeConnection:
@@ -62,7 +63,7 @@ class StkControllerTests(unittest.TestCase):
         self.assertEqual(
             transport.connection.calls,
             [
-                "8010000015FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00",
+                terminal_profile_apdu().hex().upper(),
                 "801200000F",
                 "801400000C810301050002028281030100",
             ],

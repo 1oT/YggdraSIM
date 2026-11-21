@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Session-key bundle contract for the EUM diagnostics dissector.
 
@@ -9,11 +8,11 @@ An EUM / SM-DP+ operator investigating a failed download typically has
 access to the session keys that the server database associates with
 the failing ICCID:
 
-* ``ShS-ENC`` — the AES-128 shared secret used to encrypt the Bound
+* ``ShS-ENC`` -- the AES-128 shared secret used to encrypt the Bound
   Profile Package (SGP.22 §2.5.6).
-* ``ShS-MAC`` — the AES-128 shared secret used for the S-ENC/MAC
+* ``ShS-MAC`` -- the AES-128 shared secret used for the S-ENC/MAC
   integrity layer over the BPP segments.
-* ``DEK``      — the optional Data Encryption Key that protects PPR
+* ``DEK``      -- the optional Data Encryption Key that protects PPR
   elements inside the BPP (present for some profile types).
 
 This module defines a strongly-typed container, validates the inputs
@@ -21,7 +20,7 @@ This module defines a strongly-typed container, validates the inputs
 the bundle to a side-car JSON file that the Lua dissector reads via
 the ``YGGDRASIM_EUM_SESSION_KEYS`` environment variable.
 
-The container deliberately does NOT perform any decryption — that is
+The container deliberately does NOT perform any decryption -- that is
 the Lua dissector's job (or pySim, for the offline decode CLI). We
 keep the Python side pure so it is safe to import on hosts that lack
 tshark / libgcrypt / libnettle.
@@ -158,7 +157,7 @@ class SessionKeyRepository:
 
     The Lua dissector performs a per-BPP ICCID lookup to select the
     right keys. Serialising the repository is therefore an
-    ICCID-indexed JSON object rather than a bare list — constant-time
+    ICCID-indexed JSON object rather than a bare list -- constant-time
     lookup at dissection time matters on large PCAPs.
     """
 

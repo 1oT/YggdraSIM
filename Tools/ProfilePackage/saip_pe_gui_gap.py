@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile-element coverage vs Command Center GUI dispatch.
 
 The browser workbench classifies each PE in
@@ -45,6 +44,7 @@ _FILE_TEMPLATE_PE: frozenset[str] = frozenset(
         "df-snpn",
         "df-5gprose",
         "df-eap",
+        "eap",
         "df-tetra",
         "df-wlan",
         "gsm-access",
@@ -76,16 +76,14 @@ _TYPED_CARD_PE: frozenset[str] = frozenset(
         "gfm",
         "rfm",
         "application",
+        "cdmaparameter",
+        "nonstandard",
         "end",
     },
 )
 
-_NONSTANDARD_SPARSE_PE: frozenset[str] = frozenset({"nonstandard"})
-
 _SPARSE_CARD_PE: frozenset[str] = frozenset(
     {
-        "cdmaparameter",
-        "eap",
         "ssimeaptlsparameters",
     },
 )
@@ -93,8 +91,8 @@ _SPARSE_CARD_PE: frozenset[str] = frozenset(
 _GAP_NOTES: dict[str, str] = {
     "securitydomain_ssd": "GUI normalises this quick-add key to the ``ssd`` dispatch branch.",
     "profileheader": "GUI normalises legacy ``profileHeader`` to ``header`` before dispatch.",
-    "isdr": "Role variant of ``securityDomain`` — root security domain, not a separate PE type.",
-    "isdp": "Role variant of ``securityDomain`` — MNO-SD, not a separate PE type.",
+    "isdr": "Role variant of ``securityDomain`` -- root security domain, not a separate PE type.",
+    "isdp": "Role variant of ``securityDomain`` -- MNO-SD, not a separate PE type.",
     "optusim": "Alias normalised to ``opt-usim``.",
     "optisim": "Alias normalised to ``opt-isim``.",
     "optcsim": "Alias normalised to ``opt-csim``.",
@@ -124,8 +122,6 @@ def classify_pe_gui_tier(pe_type: str) -> str:
         return "filesystem_template_catalog_no_pe_decoded_panel"
     if t in _SECURITY_DOMAIN_PE:
         return "security_domain_cards_wizard"
-    if t in _NONSTANDARD_SPARSE_PE:
-        return "nonstandard_sparse_card_untyped_section_wizard"
     if t in _TYPED_CARD_PE:
         return "typed_summary_cards_wizard"
     if t in _SPARSE_CARD_PE:
@@ -175,7 +171,7 @@ _QUICK_ADD_MENU_KEYS: frozenset[str] = frozenset(
         "cdmaParameter",
         "rfm",
         "genericFileManagement",
-        # ssim / ssimEaptls deferred — pySim schema v3.4+
+        # ssim / ssimEaptls deferred -- pySim schema v3.4+
     },
 )
 

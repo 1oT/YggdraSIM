@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Run SaipProfileLinter against TRANSCODE-TUI JSON buffer (lazy import of linter only from TUI).
 """
@@ -59,7 +58,7 @@ def lint_profile_json_buffer(
     # Pre-substitute inline typed placeholders (``{name:TYPE:length[:mod]}``)
     # so dejsonify sees valid hex. The paths of rewritten hex leaves are
     # fed into the linter as ``placeholder_paths`` to downgrade FAIL/WARN
-    # findings rooted beneath them — a placeholder-bearing leaf is
+    # findings rooted beneath them -- a placeholder-bearing leaf is
     # authoring scaffolding, not a broken profile, and should read as
     # INFO rather than red.
     inline_paths: frozenset[str] = frozenset()

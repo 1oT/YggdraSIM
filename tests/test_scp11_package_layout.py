@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 import subprocess
 import sys
@@ -40,15 +39,39 @@ class Scp11PackageLayoutTests(unittest.TestCase):
 
     def test_compatibility_exports_preserve_symbol_identity(self):
         from SCP11.crypto_engine import CryptoEngine as RootCryptoEngine
-        from SCP11.models import EimPollRequest as RootPollRequest
+        from SCP11.live.crypto_engine import CryptoEngine as LiveCryptoEngine
+        from SCP11.live.models import EimPollRequest as LivePollRequest
         from SCP11.relay.models import EimPollRequest as RelayPollRequest
         from SCP11.shared.crypto_engine import CryptoEngine as SharedCryptoEngine
         from SCP11.test.models import EimPollRequest as TestPollRequest
-        from SCP11.live.models import EimPollRequest as LivePollRequest
 
         self.assertIs(SharedCryptoEngine, RootCryptoEngine)
-        self.assertIs(RelayPollRequest, RootPollRequest)
+        self.assertIs(LiveCryptoEngine, RootCryptoEngine)
+        self.assertIs(RelayPollRequest, LivePollRequest)
         self.assertIs(TestPollRequest, LivePollRequest)
+
+    def test_shared_transport_has_one_implementation(self):
+        import SCP11.live.transport as live_transport
+        import SCP11.shared.transport as shared_transport
+        import SCP11.transport as root_transport
+
+        self.assertIs(live_transport, root_transport)
+        self.assertIs(shared_transport.PcscApduChannel, root_transport.PcscApduChannel)
+
+    def test_old_relay_copies_are_gone(self):
+        import importlib.util
+
+        for name in (
+            "SCP11.orchestrator",
+            "SCP11.console",
+            "SCP11.es9_client",
+            "SCP11.models",
+            "SCP11.config",
+            "SCP11.factory",
+            "SCP11.providers",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(importlib.util.find_spec(name))
 
     def test_live_console_imports_when_hil_runtime_is_omitted(self):
         repo_root = Path(__file__).resolve().parent.parent
@@ -94,7 +117,7 @@ class Scp11PackageLayoutTests(unittest.TestCase):
                 package = ""
                 if isinstance(globals, dict):
                     package = str(globals.get("__package__", "") or "")
-                if level == 1 and name == "transport" and package == "SCP11":
+                if level == 1 and name == "transport" and package == "SCP11.live":
                     raise ModuleNotFoundError(
                         "No module named 'missing_transport_dependency'",
                         name="missing_transport_dependency",
@@ -103,7 +126,7 @@ class Scp11PackageLayoutTests(unittest.TestCase):
 
             builtins.__import__ = fake_import
             try:
-                import SCP11.factory
+                import SCP11.live.factory
             except ModuleNotFoundError as error:
                 raise SystemExit(0 if error.name == "missing_transport_dependency" else 2)
             raise SystemExit(1)

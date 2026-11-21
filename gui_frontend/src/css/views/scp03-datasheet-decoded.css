@@ -60,10 +60,7 @@
   margin: 0;
   border: 0;
   border-radius: 0;
-  background: linear-gradient(
-    165deg,
-    color-mix(in oklab, var(--bg-deep), transparent 8%) 0%,
-    var(--code-bg) 100%);
+  background: var(--code-bg);
   padding: 12px 14px;
   font-size: 11.5px;
   line-height: 1.5;

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SIMCARD/scp03.py Scp03CardLogic public methods.
 
 Exercises is_wrapped_command, key_template, handle_initialize_update
@@ -126,7 +125,7 @@ class HandleInitializeUpdateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# handle_external_authenticate — no active session guard
+# handle_external_authenticate -- no active session guard
 # ---------------------------------------------------------------------------
 
 class HandleExternalAuthenticateTests(unittest.TestCase):
@@ -146,7 +145,7 @@ class HandleExternalAuthenticateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# unwrap_command — unauthenticated pass-through
+# unwrap_command -- unauthenticated pass-through
 # ---------------------------------------------------------------------------
 
 class UnwrapCommandTests(unittest.TestCase):
@@ -162,7 +161,7 @@ class UnwrapCommandTests(unittest.TestCase):
         logic = Scp03CardLogic(_make_state())
         logic.state.scp03_session.authenticated = True
         logic._session_keys = {"s_mac": bytes(16), "s_enc": bytes(16), "s_rmac": bytes(16)}
-        # 4-byte header + 3-byte data — too short for C-MAC (needs >= 8 bytes of data)
+        # 4-byte header + 3-byte data -- too short for C-MAC (needs >= 8 bytes of data)
         apdu = bytes([0x84, 0xE2, 0x00, 0x00, 0x03, 0xAA, 0xBB, 0xCC])
         plain, error = logic.unwrap_command(apdu)
         self.assertIsNone(plain)

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
+import importlib.util
 import io
 import sys
 import types
@@ -10,6 +11,11 @@ from contextlib import redirect_stdout
 
 def _install_smartcard_stubs() -> None:
     if "smartcard" in sys.modules:
+        return
+    if importlib.util.find_spec("smartcard") is not None:
+        # pyscard is installed. The stub carries only the submodules this
+        # file needs, so leaving it in sys.modules would break every later
+        # test in the session that reaches smartcard.util.
         return
 
     smartcard_module = types.ModuleType("smartcard")
@@ -29,8 +35,10 @@ def _install_smartcard_stubs() -> None:
 
 _install_smartcard_stubs()
 
-from SCP03.interface.commands import CommandRegistry
-from SCP03.interface.shell import ShellDispatcher
+# The stubs installed above must be in sys.modules before the modules
+# under test import their smart-card dependencies.
+from SCP03.interface.commands import CommandRegistry  # noqa: E402
+from SCP03.interface.shell import ShellDispatcher  # noqa: E402
 
 
 class _CallableProxy:
@@ -110,6 +118,10 @@ class ShellDispatcherCommandRegistryTests(unittest.TestCase):
 class ShellDispatcherExecLineTests(unittest.TestCase):
     def _make_shell(self) -> ShellDispatcher:
         shell = ShellDispatcher.__new__(ShellDispatcher)
+        # __init__ derives ``commands`` from the registry's ``command_map``;
+        # _exec_line calls a verb listed there bare and hands any other verb
+        # (one a plugin added later) its whole argument line.
+        shell.command_map = {}
         shell.commands = {}
         shell.transport = None
         shell.prompt_updates = 0
@@ -162,7 +174,12 @@ class ShellDispatcherExecLineTests(unittest.TestCase):
     def test_zero_arg_command_calls_handler(self) -> None:
         shell = self._make_shell()
         calls: list[str] = []
-        shell.commands = {"HELP": lambda: calls.append("help")}
+
+        def handler() -> None:
+            calls.append("help")
+
+        shell.command_map = {"HELP": (handler, "")}
+        shell.commands = {"HELP": handler}
 
         shell._exec_line("HELP")
 

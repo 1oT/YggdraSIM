@@ -10,8 +10,8 @@ from pathlib import Path
 from unittest import mock
 
 import yggdrasim_common.runtime_paths as runtime_paths
-from SCP11.config import SGPConfig as RelayConfig
-from SCP11.es9_client import Es9LikeClient
+from SCP11.relay.config import SGPConfig as RelayConfig
+from SCP11.live.es9_client import Es9LikeClient
 from SCP11.eim_local.config import EimLocalConfig
 from SCP11.live.config import SGPConfig as LiveRelayConfig
 from SCP11.local_access.config import LocalAccessConfig
@@ -120,8 +120,8 @@ class FrozenRuntimePathTests(unittest.TestCase):
                 relay_cfg = RelayConfig()
                 live_cfg = LiveRelayConfig()
                 test_cfg = CompatibilityRelayConfig()
-            self.assertEqual(relay_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "CERT.DPauth.ECDSA.der"))
             self.assertEqual(live_cfg.CERT_PATH_AUTH, str(runtime_root / "Workspace" / "SCP11" / "live" / "CERT.DPauth.ECDSA.der"))
+            self.assertEqual(relay_cfg.CERT_PATH_AUTH, live_cfg.CERT_PATH_AUTH)
             self.assertEqual(test_cfg.CERT_PATH_AUTH, live_cfg.CERT_PATH_AUTH)
             self.assertEqual(relay_cfg.ES9_CA_BUNDLE_PATH, "")
             self.assertEqual(live_cfg.ES9_CA_BUNDLE_PATH, "")
@@ -234,11 +234,11 @@ class FrozenRuntimePathTests(unittest.TestCase):
             patch_frozen, patch_executable, patch_env = self._frozen_patches(runtime_root)
             with patch_frozen, patch_executable, patch_env:
                 client = Es9LikeClient(base_url="https://rsp.example.com")
-            self.assertEqual(client._module_dir, str(runtime_root / "SCP11"))
+            self.assertEqual(client._module_dir, str(runtime_root / "SCP11" / "live"))
             self.assertEqual(client._workspace_root, str(runtime_root))
             self.assertEqual(
                 client._es9_ca_lookup_path,
-                str(runtime_root / "SCP11" / "es9_ca_lookup.json"),
+                str(runtime_root / "SCP11" / "live" / "es9_ca_lookup.json"),
             )
 
     def test_device_inventory_defaults_follow_runtime_root_when_frozen(self) -> None:

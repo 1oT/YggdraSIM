@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+
+# Line endings are a property of the repository, not of a clone.
+# ``core.autocrlf`` is per-developer and was unset here, so whatever bytes
+# a contributor wrote were stored verbatim; thirty tracked files ended up
+# carrying CRLF and six were mixed within a single file. A text-mode
+# read/write round-trip over one of those rewrites every line, which
+# turns a one-line edit into a whole-file diff.
+* text=auto
+
+# The only tracked files that are not text.
+*.png binary
+
+# Shell scripts must reach the interpreter with LF whatever the host
+# checked them out as: a CRLF shebang fails as "bad interpreter".
+*.sh text eol=lf

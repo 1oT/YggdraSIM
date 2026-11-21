@@ -4,7 +4,7 @@
  */
 
 
-/* Ribbon (G-2) — grouped icon toolbar inside workbench tabs ------------- */
+/* Ribbon (G-2) -- grouped icon toolbar inside workbench tabs ------------- */
 
 .ribbon {
   display: flex;
@@ -13,12 +13,10 @@
   gap: 6px;
   padding: 8px 6px;
   margin: 8px 0 12px;
-  background: linear-gradient(180deg,
-    color-mix(in oklab, var(--bg-elev), transparent 8%) 0%,
-    var(--bg-elev) 100%);
+  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 14px -10px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--surface-shadow);
 }
 
 .ribbon-group {
@@ -52,15 +50,16 @@
 
 .ribbon-btn {
   display: inline-flex;
-  flex-direction: column;
+  flex-direction: var(--key-direction);
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: var(--key-gap);
   min-width: 60px;
-  padding: 6px 10px 4px;
+  min-height: var(--key-h);
+  padding: var(--key-pad);
   border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--key-border);
+  background: var(--key-bg);
   color: var(--fg);
   font-family: inherit;
   font-size: 11px;
@@ -86,6 +85,7 @@
 }
 
 .ribbon-btn-icon {
+  display: var(--key-icon-display);
   font-size: 18px;
   line-height: 1;
   color: var(--accent);
@@ -97,9 +97,15 @@
 }
 
 .ribbon-btn-label {
-  font-weight: 600;
+  font-size: var(--key-label-size);
+  font-weight: var(--key-label-weight);
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+.ribbon-btn--danger {
+  color: var(--key-danger-fg);
+  background: var(--key-danger-bg);
 }
 
 .ribbon-btn--danger .ribbon-btn-icon {

@@ -42,7 +42,7 @@
   color: var(--fg-muted);
   background: var(--surface-alt);
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
 

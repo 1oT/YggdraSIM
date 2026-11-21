@@ -46,7 +46,7 @@ non-trivial, the row links to the page that explains it in full.
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `/ping` works but `/apdu` returns `401` | bearer token missing on the consumer side | copy the token file with mode `0600` and pass `--remote-card-token-file`; see [Remote APDU Streaming](../how-to/remote-apdu-streaming.md) |
+| `/ping` works but `/apdu` returns `401` | bearer token missing on the consumer side | copy the token file with mode `0600` and pass `--remote-card-token-file`; see [Card Bridge over SSH](../how-to/remote-apdu-streaming.md) |
 | `429 Too many authentication failures` | repeated bad tokens from the same peer | wait for the lockout window, then retry with the correct token |
 | `Connection refused` from the HIL rig | SSH forward is missing or bound on the wrong host | confirm `ssh -L` or `ssh -R` is still running and that the rig can reach `http://127.0.0.1:8642/ping` |
 | APDUs hang during long eUICC work | tunnel latency or timeout too low | raise `--apdu-timeout-ms` on the HIL bridge or supervisor |
@@ -114,7 +114,7 @@ On first successful load the manager prints a one-line stderr banner naming each
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| `ADD-INITIAL-EIM` rejected | BF55 row already populated or overwrite not allowed | check `Workspace/SIMCARD/isdr_config.json` simulator-side, or use `ADD-EIM` |
+| `ADD-INITIAL-EIM` rejected | BF55 row already populated or overwrite not allowed | check `Workspace/SIMCARD/isdr_config.json` simulator-side, or reset the eIM configuration first (`ASSOCIATE` in the Local eIM resets it and stores the Local eIM) |
 | optional relay verbs absent from SCP11 shells | local command extension not loaded | same opt-in and hard-lock checks as above. |
 | Hotfolder empty after drop | wrong directory | confirm the runtime root `SCP11/eim_local/eim_packages/hotfolder/` |
 
@@ -126,6 +126,8 @@ On first successful load the manager prints a one-line stderr banner naming each
 | relay never reports `status: ok` | `osmo-remsim-client-st2` failing | check its stderr, verify firmware |
 | missing `atr` in relay state | card not powered or inserted | reseat card |
 | `reader busy` in a YggdraSIM shell | direct PC/SC handle used while bridge owns the reader | route through the relay |
+| `reader busy: <what runs> (pid <n>) has held '<reader>' since <time>` | another YggdraSIM process holds the local reader (a console command in a terminal, the HIL bridge, the GUI, an MCP card session) | let it finish or stop it; the pid is in the message |
+| supervisor status `reader-busy` | another YggdraSIM process holds the bridge's reader; no session is started (no SIMtrace2 reset, no modem reset) until it is free | stop that process; the state's reason names it |
 | `Card source: remote` never appears | bridge is still using local PC/SC mode | pass `--remote-card-url` and `--remote-card-token-file` to the bridge or supervisor |
 
 ## Profile package
@@ -150,5 +152,5 @@ On first successful load the manager prints a one-line stderr banner naming each
 - [Glossary](glossary.md)
 - [Runtime Root](runtime-root.md)
 - [State Schema](state-schema.md)
-- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md)
+- [Card Bridge over SSH](../how-to/remote-apdu-streaming.md)
 - [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)

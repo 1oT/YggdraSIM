@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge wire protocol: framing, message types, and (de)serialisation for the HIL-Bridge IPC channel."""
 from __future__ import annotations
 
@@ -32,6 +31,11 @@ GSMTAP_HDR_LEN_WORDS = 4
 GSMTAP_TYPE_SIM = 0x04
 GSMTAP_SIM_APDU = 0x00
 GSMTAP_SIM_ATR = 0x01
+# libosmocore include/osmocom/core/gsmtap.h (GSMTAP_TYPE_OSMOCORE_LOG) and
+# include/osmocom/core/logging.h (LOGL_NOTICE, LOGL_ERROR).
+GSMTAP_TYPE_OSMOCORE_LOG = 0x10
+GSMTAP_LOG_LEVEL_NOTICE = 5
+GSMTAP_LOG_LEVEL_ERROR = 7
 GSMTAP_UDP_PORT = 4729
 GSMTAP_ARFCN_F_UPLINK = 0x4000
 GSMTAP_COMPAT_NATIVE = "native"
@@ -311,6 +315,126 @@ def build_proactive_refresh_command(*, command_number: int, qualifier: int | str
     return build_simple_tlv(PROACTIVE_COMMAND_TAG, proactive_body)
 
 
+@dataclass(frozen=True, slots=True)
+class ProactiveCommandDetails:
+    """Command details of a proactive command (ETSI TS 102 223 V18.3.0 clause 8.6)."""
+
+    command_number: int
+    command_type: int
+    qualifier: int
+
+
+def _read_proactive_length(payload: bytes, offset: int) -> tuple[int, int] | None:
+    """Return ``(length, next_offset)`` for the BER length at *offset*, or ``None``.
+
+    A proactive command travels in one FETCH response, so its length and
+    the lengths of its objects use the one-byte form or ``81 xx`` (ETSI
+    TS 102 223 V18.3.0 clause 6.6 gives "1 or 2" for every command). Any
+    other first byte, and a header that runs past the payload, reads as
+    malformed.
+    """
+    if offset >= len(payload):
+        return None
+    first = payload[offset]
+    if first < 0x80:
+        return first, offset + 1
+    if first == 0x81 and offset + 1 < len(payload):
+        return payload[offset + 1], offset + 2
+    return None
+
+
+def parse_proactive_command_details(
+    payload: bytes | bytearray | list[int] | tuple[int, ...],
+) -> ProactiveCommandDetails | None:
+    """Read the Command details object out of a FETCH response body.
+
+    *payload* is the R-APDU as the modem receives it, with or without the
+    trailing status word. Anything that is not a complete proactive command
+    carrying a three-byte Command details object reads as ``None``: no
+    bytes, a bare tag, a truncated length, a length that claims more than
+    the payload holds. Wire data never raises here.
+    """
+    data = ensure_bytes(payload)
+    if len(data) < 2 or data[0] != PROACTIVE_COMMAND_TAG:
+        return None
+    header = _read_proactive_length(data, 1)
+    if header is None:
+        return None
+    body_length, offset = header
+    end = offset + body_length
+    if body_length == 0 or end > len(data):
+        return None
+    while offset < end:
+        tag = data[offset]
+        element = _read_proactive_length(data, offset + 1)
+        if element is None:
+            return None
+        value_length, value_offset = element
+        value_end = value_offset + value_length
+        if value_end > end:
+            return None
+        # b8 of a COMPREHENSION-TLV tag is the comprehension-required
+        # flag, not part of the tag number.
+        if (tag & 0x7F) == (PROACTIVE_TLV_COMMAND_DETAILS & 0x7F):
+            if value_length != 3:
+                return None
+            return ProactiveCommandDetails(
+                command_number=data[value_offset],
+                command_type=data[value_offset + 1],
+                qualifier=data[value_offset + 2],
+            )
+        offset = value_end
+    return None
+
+
+def refresh_mode_from_fetch_response(
+    payload: bytes | bytearray | list[int] | tuple[int, ...],
+) -> tuple[str, int] | None:
+    """Return ``(mode name, qualifier)`` when *payload* is a REFRESH proactive command."""
+    details = parse_proactive_command_details(payload)
+    if details is None or details.command_type != PROACTIVE_REFRESH_COMMAND_TYPE:
+        return None
+    return describe_refresh_mode(details.qualifier), details.qualifier
+
+
+@dataclass(frozen=True, slots=True)
+class SlotPhysStatus:
+    """Modem-side slot state as ``clientSlotStatusInd`` reports it (RSPRO ``SlotPhysStatus``).
+
+    ``reset_active`` is mandatory in the schema; the other three are
+    optional and read ``None`` when the client did not report them.
+    """
+
+    reset_active: bool = False
+    vcc_present: bool | None = None
+    clk_active: bool | None = None
+    card_present: bool | None = None
+
+
+def _optional_flag(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def decode_slot_phys_status(body: Any) -> SlotPhysStatus:
+    """Read the ``slotPhysStatus`` member of a decoded ``clientSlotStatusInd`` body.
+
+    A missing or malformed member reads as "RST inactive, the rest
+    unknown", so the caller's edge detection sees no edge rather than an
+    invented one.
+    """
+    status = body.get("slotPhysStatus") if isinstance(body, dict) else None
+    if isinstance(status, dict) is False:
+        return SlotPhysStatus()
+    return SlotPhysStatus(
+        reset_active=bool(status.get("resetActive", False)),
+        vcc_present=_optional_flag(status.get("vccPresent")),
+        clk_active=_optional_flag(status.get("clkActive")),
+        card_present=_optional_flag(status.get("cardPresent")),
+    )
+
+
 @lru_cache(maxsize=1)
 def load_rspro_codec() -> Any:
     """Load and return the RSPRO ASN.1 codec module, or raise ImportError if unavailable."""
@@ -329,7 +453,18 @@ def load_rspro_codec() -> Any:
 
 def decode_rspro_pdu(payload: bytes) -> dict[str, Any]:
     codec = load_rspro_codec()
-    decoded = codec.decode("RsproPDU", payload)
+    # ``load_rspro_codec`` owns the "asn1tools is missing" case, so the
+    # import cannot fail once it has returned.
+    import asn1tools
+
+    try:
+        decoded = codec.decode("RsproPDU", payload)
+    except asn1tools.DecodeError as exc:
+        # Frames arrive from the network, so a payload that does not
+        # decode is an expected condition rather than a codec fault.
+        # Rejecting with ValueError keeps asn1tools out of the caller's
+        # except clause.
+        raise ValueError(f"Malformed RSPRO PDU: {exc}") from exc
     if isinstance(decoded, dict) is False:
         raise ValueError("Decoded RSPRO payload is not a mapping.")
     return decoded
@@ -521,25 +656,79 @@ def build_reset_state_res(*, tag: int, result: str = RESULT_OK) -> dict[str, Any
     )
 
 
-def build_gsmtap_packet(payload: bytes, *, subtype: int, uplink: bool = False) -> bytes:
-    """Wrap *payload* in a GSMTAP v2 header of the given *subtype* (GSMTAP §3.1)."""
+def _gsmtap_header(*, gsmtap_type: int, subtype: int, uplink: bool, antenna: int) -> bytes:
     arfcn = GSMTAP_ARFCN_F_UPLINK if uplink else 0
-    header = struct.pack(
+    return struct.pack(
         "!BBBBHbbIBBBB",
         GSMTAP_VERSION,
         GSMTAP_HDR_LEN_WORDS,
-        GSMTAP_TYPE_SIM,
+        gsmtap_type,
         0,
         arfcn,
         0,
         0,
         0,
         subtype,
-        0,
+        int(antenna) & 0xFF,
         0,
         0,
     )
+
+
+def build_gsmtap_packet(
+    payload: bytes, *, subtype: int, uplink: bool = False, antenna: int = 0
+) -> bytes:
+    """Wrap *payload* in a GSMTAP v2 header of the given *subtype* (GSMTAP §3.1).
+
+    ``antenna`` fills ``antenna_nr``. The bridge leaves it 0; the modem-side
+    DIAG mirror (``modem_diag``) sends 1, so one capture holds both views of
+    the same exchanges. Wireshark 4.4 hands SIM and log frames to their
+    sub-dissector before it decodes the GSMTAP header, so ``gsmtap.antenna``
+    stays empty for them; filter on the raw byte, ``udp.payload[13:1] == 01``.
+    """
+    header = _gsmtap_header(
+        gsmtap_type=GSMTAP_TYPE_SIM, subtype=subtype, uplink=uplink, antenna=antenna
+    )
     return header + ensure_bytes(payload)
+
+
+def _fixed_ascii(text: str, size: int) -> bytes:
+    return str(text).encode("ascii", "replace")[: size - 1].ljust(size, b"\x00")
+
+
+def build_gsmtap_log_packet(
+    text: str,
+    *,
+    process: str,
+    subsystem: str,
+    level: int = GSMTAP_LOG_LEVEL_NOTICE,
+    timestamp: float | None = None,
+    antenna: int = 0,
+) -> bytes:
+    """Wrap *text* as a libosmocore log record (GSMTAP type 0x10).
+
+    The record follows ``struct gsmtap_osmocore_log_hdr`` in libosmocore
+    ``include/osmocom/core/gsmtap.h``: seconds and microseconds, a 16-byte
+    process name, the pid, the level, three pad bytes, a 16-byte subsystem
+    and a 32-byte source file name with a line number, then the text.
+    Integers go in network byte order, which is how Wireshark's
+    ``gsmtap_log`` dissector reads them.
+    """
+    stamp = time.time() if timestamp is None else float(timestamp)
+    seconds = int(stamp)
+    microseconds = int(round((stamp - seconds) * 1_000_000)) % 1_000_000
+    log_header = (
+        struct.pack("!II", seconds & 0xFFFFFFFF, microseconds)
+        + _fixed_ascii(process, 16)
+        + struct.pack("!IB3x", os.getpid() & 0xFFFFFFFF, int(level) & 0xFF)
+        + _fixed_ascii(subsystem, 16)
+        + _fixed_ascii("", 32)
+        + struct.pack("!I", 0)
+    )
+    header = _gsmtap_header(
+        gsmtap_type=GSMTAP_TYPE_OSMOCORE_LOG, subtype=0, uplink=False, antenna=antenna
+    )
+    return header + log_header + str(text).encode("utf-8", "replace") + b"\x00"
 
 
 def build_simtrace_apdu_payload(
@@ -768,6 +957,10 @@ class GsmtapTap:
     _socket: socket.socket | None = field(default=None, init=False, repr=False)
     capture_path: str = ""
     capture_mirror_fifo_path: str = ""
+    antenna: int = 0
+    # Optional local address for the UDP socket; the modem-side mirror sends
+    # from 127.0.0.2 so its frames stand apart in Wireshark's Source column.
+    source_host: str = ""
     _capture_writer: GsmtapPcapWriter | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -787,6 +980,14 @@ class GsmtapTap:
             )
         if self.enabled:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            source_host = str(self.source_host or "").strip()
+            if len(source_host) > 0:
+                try:
+                    self._socket.bind((source_host, 0))
+                except OSError:
+                    self._socket.close()
+                    self._socket = None
+                    raise
 
     def close(self) -> None:
         """Flush pending writes, close the capture writer, and tear down the IPA socket."""
@@ -807,7 +1008,9 @@ class GsmtapTap:
             capture_writer.write_gsmtap_packet(packet)
 
     def send_apdu(self, payload: bytes, *, uplink: bool) -> None:
-        packet = build_gsmtap_packet(payload, subtype=GSMTAP_SIM_APDU, uplink=uplink)
+        packet = build_gsmtap_packet(
+            payload, subtype=GSMTAP_SIM_APDU, uplink=uplink, antenna=self.antenna
+        )
         self._send_packet(packet)
 
     def mirror_exchange(self, command: bytes, response: bytes) -> None:
@@ -816,11 +1019,32 @@ class GsmtapTap:
             build_simtrace_apdu_payload(command, response),
             subtype=GSMTAP_SIM_APDU,
             uplink=True,
+            antenna=self.antenna,
         )
         self._send_packet(packet)
 
     def send_atr(self, payload: bytes) -> None:
         if self.compat_mode == GSMTAP_COMPAT_WIRESHARK44:
             return
-        packet = build_gsmtap_packet(payload, subtype=GSMTAP_SIM_ATR, uplink=False)
+        packet = build_gsmtap_packet(
+            payload, subtype=GSMTAP_SIM_ATR, uplink=False, antenna=self.antenna
+        )
+        self._send_packet(packet)
+
+    def send_log(
+        self,
+        text: str,
+        *,
+        process: str,
+        subsystem: str,
+        level: int = GSMTAP_LOG_LEVEL_NOTICE,
+    ) -> None:
+        """Send *text* as a libosmocore log record on this tap's antenna."""
+        packet = build_gsmtap_log_packet(
+            text,
+            process=process,
+            subsystem=subsystem,
+            level=level,
+            antenna=self.antenna,
+        )
         self._send_packet(packet)

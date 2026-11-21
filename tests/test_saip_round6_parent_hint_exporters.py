@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Round-6 Sweeps 2 & 3 — parent_hint threading through the offline JSON
+Round-6 Sweeps 2 & 3 -- parent_hint threading through the offline JSON
 inspectors and the decoded-editor audit.
 
 The TRANSCODE inspector (``saip_transcode_inspect.build_transcode_inspector_text``)

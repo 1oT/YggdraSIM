@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave C Pass D — semantic decoder coverage for ADF.CSIM / OPT-CSIM core
+Wave C Pass D -- semantic decoder coverage for ADF.CSIM / OPT-CSIM core
 EFs (3GPP2 C.S0023 / C.S0065).
 
 For every EF promoted from the generic opaque pass-through catalog we

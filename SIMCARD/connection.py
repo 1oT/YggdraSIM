@@ -33,6 +33,10 @@ _SHARED_ENGINE_BEHAVIOUR_PROFILE_PATH = ""
 # serialization boundary.
 _SHARED_ENGINE_LOCK = threading.RLock()
 _VALIDATION_LEASE_OWNER: weakref.ReferenceType[Any] | None = None
+# Bumped whenever the singleton is replaced. Connection facades cache the
+# engine they were handed, so they compare generations to notice a rebuild
+# instead of going on mutating the abandoned instance.
+_SHARED_ENGINE_GENERATION = 0
 
 
 def _validation_lease_owner_locked() -> Any | None:
@@ -57,7 +61,7 @@ def _assert_validation_access_locked(connection: Any) -> None:
 
 def get_shared_engine() -> SimulatedSimCardEngine:
     """Return the process-wide singleton ``SimEngine`` instance, constructing it on first call."""
-    global _SHARED_ENGINE, _SHARED_ENGINE_QUIRKS_PATH, _SHARED_ENGINE_ISDR_CONFIG_PATH, _SHARED_ENGINE_EIM_IDENTITY_PATH, _SHARED_ENGINE_EUICC_STORE_ROOT, _SHARED_ENGINE_PROFILE_STORE_PATH, _SHARED_ENGINE_BEHAVIOUR_PROFILE_PATH
+    global _SHARED_ENGINE, _SHARED_ENGINE_QUIRKS_PATH, _SHARED_ENGINE_ISDR_CONFIG_PATH, _SHARED_ENGINE_EIM_IDENTITY_PATH, _SHARED_ENGINE_EUICC_STORE_ROOT, _SHARED_ENGINE_PROFILE_STORE_PATH, _SHARED_ENGINE_BEHAVIOUR_PROFILE_PATH, _SHARED_ENGINE_GENERATION
     quirks_path = get_sim_quirks_path()
     isdr_config_path = get_sim_isdr_config_path()
     eim_identity_path = get_sim_eim_identity_path()
@@ -93,6 +97,7 @@ def get_shared_engine() -> SimulatedSimCardEngine:
             _SHARED_ENGINE_EUICC_STORE_ROOT = euicc_store_root
             _SHARED_ENGINE_PROFILE_STORE_PATH = profile_store_path
             _SHARED_ENGINE_BEHAVIOUR_PROFILE_PATH = behaviour_profile_path
+            _SHARED_ENGINE_GENERATION += 1
         engine = _SHARED_ENGINE
     return engine
 
@@ -100,13 +105,34 @@ def get_shared_engine() -> SimulatedSimCardEngine:
 class SimulatedCardConnection:
     def __init__(self) -> None:
         self._engine = get_shared_engine()
+        self._engine_generation = _SHARED_ENGINE_GENERATION
         self._connected = False
         self._protocol = None
         self._owns_validation_lease = False
 
+    def _resolve_engine_locked(self):
+        """Re-bind to the shared engine when a configuration change rebuilt it.
+
+        A quirks / iSD-R / eUICC-store path change replaces the singleton. A
+        facade still holding the previous instance would keep mutating an
+        engine nothing else reads, so the binding is rechecked at every entry
+        point and the session is marked disconnected to force a clean reset.
+
+        A facade built without ``__init__`` carries no generation because its
+        engine was supplied directly; that caller owns the binding and the
+        singleton must not be substituted for it.
+        """
+        generation = getattr(self, "_engine_generation", None)
+        if generation is not None and generation != _SHARED_ENGINE_GENERATION:
+            self._engine = get_shared_engine()
+            self._engine_generation = _SHARED_ENGINE_GENERATION
+            self._connected = False
+        return self._engine
+
     def connect(self, protocol=None) -> None:
         with _SHARED_ENGINE_LOCK:
             _assert_validation_access_locked(self)
+            self._resolve_engine_locked()
             self._connect_locked(protocol)
 
     def _connect_locked(self, protocol=None) -> None:
@@ -124,14 +150,15 @@ class SimulatedCardConnection:
         payload = bytes(int(part) & 0xFF for part in apdu)
         with _SHARED_ENGINE_LOCK:
             _assert_validation_access_locked(self)
+            engine = self._resolve_engine_locked()
             if self._connected is False:
                 self._connect_locked(self._protocol)
-            data, sw1, sw2 = self._engine.transmit(payload)
+            data, sw1, sw2 = engine.transmit(payload)
         return list(data), sw1, sw2
 
     def getATR(self):
         with _SHARED_ENGINE_LOCK:
-            return list(self._engine.get_atr())
+            return list(self._resolve_engine_locked().get_atr())
 
     def getProtocol(self):
         return self._protocol
@@ -139,14 +166,15 @@ class SimulatedCardConnection:
     def getValidationCardIdentity(self) -> str:
         """Return the stable simulator identity for validation continuity checks."""
         with _SHARED_ENGINE_LOCK:
+            engine = self._resolve_engine_locked()
             return str(
-                self._engine.state.eid or self._engine.state.iccid or ""
+                engine.state.eid or engine.state.iccid or ""
             ).strip()
 
     def getResetCounter(self) -> int:
         """Return the monotonic simulator reset generation."""
         with _SHARED_ENGINE_LOCK:
-            return int(self._engine.state.reset_counter)
+            return int(self._resolve_engine_locked().state.reset_counter)
 
     def acquireValidationLease(self) -> None:
         """Reserve the shared simulator engine for this connection.

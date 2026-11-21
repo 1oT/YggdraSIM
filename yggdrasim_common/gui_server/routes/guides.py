@@ -16,10 +16,10 @@
 # Copyright (c) 2026 1oT OU. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""``/api/guides`` — markdown guide listing + read-only content endpoint.
+"""``/api/guides`` -- markdown guide listing + read-only content endpoint.
 
 Lists every ``*.md`` file shipped under the workspace ``guides/``
-directory (and a small allow-list of repository-root entries — README,
+directory (and a small allow-list of repository-root entries -- README,
 LICENSE, NOTICE, AUTHORS) so the GUI's About panel can deep-link to
 operator documentation without forcing the user to leave the desktop
 shell.
@@ -82,7 +82,28 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "README",
         "README.md",
         "Overview",
-        "Repository entry point — what YggdraSIM is and how to start.",
+        "Repository entry point -- what YggdraSIM is and how to start.",
+    ),
+    (
+        "user-manual",
+        "User Manual",
+        "guides/USER_MANUAL.md",
+        "Overview",
+        "Start here: the modules, installing and starting, shared concepts, real-card work.",
+    ),
+    (
+        "user-manual-gui",
+        "User Manual · GUI",
+        "guides/USER_MANUAL_GUI.md",
+        "Overview",
+        "The Command Center: the window, running an action, every module in sidebar order.",
+    ),
+    (
+        "user-manual-cli",
+        "User Manual · CLI",
+        "guides/USER_MANUAL_CLI.md",
+        "Overview",
+        "The launcher and the shells: how every shell works, every module in turn.",
     ),
     (
         "guides-index",
@@ -142,6 +163,13 @@ _CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
         "Docker, PyInstaller, .deb, and packaging guidance.",
     ),
     # -- operator guides --
+    (
+        "runbook",
+        "Runbook",
+        "guides/RUNBOOK.md",
+        "Operator Guides",
+        "Each task on the CLI and in the GUI, repository upkeep, card and simulator runs.",
+    ),
     (
         "cli-and-piping",
         "CLI & Piping",
@@ -238,7 +266,7 @@ def _resolve_catalog_path(rel_path: str) -> Path | None:
     works in both source-checkout mode and PyInstaller-frozen mode
     (where guides are bundled into ``_MEIPASS``). The resolved path
     is rejected if it escapes the bundle root after symlink resolution
-    — defence-in-depth against ``..`` smuggling even though the id
+    -- defence-in-depth against ``..`` smuggling even though the id
     space is closed by the catalog.
     """
     if not rel_path:

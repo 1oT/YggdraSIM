@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """ASN.1/TLV decoder tests."""
 from __future__ import annotations
 
@@ -37,6 +36,37 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         self.assertEqual(root["items"][1]["decoded"]["hex"], "41")
         self.assertIn("ASN1_SEQUENCE [30]", decoded["asn1Notation"])
 
+    def test_encapsulated_der_renders_as_nested_notation(self) -> None:
+        # An X.509 extension: extnValue is an OCTET STRING holding the DER of the value.
+        extension = _tlv("30", _tlv("06", bytes.fromhex("551D0E")) + _tlv("04", _tlv("04", bytes.fromhex("8D475EBA"))))
+
+        notation = decode_bytes(extension)["asn1Notation"]
+
+        # The gitignored tag index names a universal tag ASN1_OCTET_STRING and the
+        # built-in table OCTET STRING, so the label is matched without the prefix.
+        self.assertIn("OCTET_STRING [04] encapsulates {", notation)
+        self.assertIn("OCTET_STRING [04] = '8D475EBA'H", notation)
+        self.assertNotIn("embeddedAsn1", notation)
+        self.assertNotIn("headerLength", notation)
+
+    def test_bit_string_is_encapsulating_only_with_a_constructed_first_element(self) -> None:
+        ec_point = decode_bytes(_tlv("03", b"\x00\x04\x3F" + b"\xAA" * 63))["asn1Notation"]
+        signature = decode_bytes(_tlv("03", b"\x00" + _tlv("30", _tlv("02", b"\x01") + _tlv("02", b"\x02"))))["asn1Notation"]
+
+        self.assertIn('payloadHex "043FAA', ec_point)
+        self.assertNotIn("encapsulates", ec_point)
+        self.assertNotIn("embeddedAsn1", ec_point)
+        self.assertIn("BIT_STRING [03] ::= encapsulates {", signature)
+        self.assertIn("[02] = 2", signature)
+
+    def test_undecoded_printable_primitive_shows_its_text(self) -> None:
+        uri = b"http://crl.example.test/ci.crl"
+
+        notation = decode_bytes(_tlv("30", _tlv("86", uri) + _tlv("88", bytes.fromhex("2B0601040183BB14"))))["asn1Notation"]
+
+        self.assertIn(f"'{uri.hex().upper()}'H (\"{uri.decode()}\")", notation)
+        self.assertIn("= '2B0601040183BB14'H\n", notation)
+
     def test_gsma_tag_names_load_from_registry(self) -> None:
         decoded = decode_bytes(bytes.fromhex("BF2203810102"))
 
@@ -70,6 +100,34 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         tags = decoded["items"][0]["decoded"]["tags"]
         self.assertEqual(tags[0]["tag"], "BF51")
         self.assertEqual(tags[0]["name"], "EUICC_PACKAGE")
+
+    def test_tag_list_notation_lists_the_tags_without_their_aliases(self) -> None:
+        notation = decode_bytes(bytes.fromhex("5C064F5A90A0BF20"))["asn1Notation"]
+
+        # A one-byte context tag ('A0') is named by the request the list belongs to,
+        # which the generic reading does not know; BER class names are left out.
+        self.assertEqual(
+            notation,
+            "TAG_LIST [5C] ::= { 4F AID, 5A EID_OR_ICCID, 90 PROFILE_NICKNAME, A0, BF20 EUICC_INFO_1 }",
+        )
+
+    def test_one_byte_context_tags_take_no_name_from_spec_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            index = Path(tmp) / "_indexes" / "gsma-asn1-tags.md"
+            index.parent.mkdir()
+            index.write_text(
+                "| `A0` | `ASN1_A0` | `ASN1_CHOICE_OPTION_1` |\n"
+                "| `90` | `NOT_THE_NICKNAME` |\n"
+                "| `9F7D` | `TABLE_NAME` |\n",
+                encoding="utf-8",
+            )
+            registry = TagRegistry.load(root=Path(tmp))
+
+        self.assertEqual(registry.lookup("A0", "context", 0).name, "CONTEXT_0")
+        nickname = registry.lookup("90", "context", 16)
+        self.assertEqual(nickname.name, "PROFILE_NICKNAME")
+        self.assertNotIn("NOT_THE_NICKNAME", nickname.aliases)
+        self.assertEqual(registry.lookup("9F7D", "context", 125).name, "TABLE_NAME")
 
     def test_builtin_registry_covers_sgp22_sgp32_allocated_tags_without_converted_docs(self) -> None:
         registry = TagRegistry.load(root=Path("/tmp/yggdrasim-no-such-spec-root"))
@@ -124,7 +182,7 @@ class Asn1TlvDecodeTests(unittest.TestCase):
             "BF4F": "GET_EIM_PACKAGE",
             "BF50": "PROVIDE_EIM_PACKAGE_RESULT",
             "BF51": "EUICC_PACKAGE",
-            "BF52": "PACKAGE_DATA",
+            "BF52": "IPA_EUICC_DATA",
             "BF53": "EIM_ACKNOWLEDGEMENTS",
             "BF54": "PROFILE_DOWNLOAD_TRIGGER",
             "BF55": "GET_EIM_CONFIGURATION_DATA",
@@ -257,7 +315,9 @@ class Asn1TlvDecodeTests(unittest.TestCase):
         ))
         decoded = decode_bytes(_tlv("BF51", signed + _tlv("5F37", b"\xAA" * 64)))
 
-        notation = decoded["asn1Notation"]
+        # With the RSP schema compiled the notation is the schema reading and this
+        # renderer's lines move to berNotation; without it they are the notation.
+        notation = decoded.get("berNotation", decoded["asn1Notation"])
         self.assertIn("euiccPackageSigned [30]", notation)
         self.assertIn("eimId [80] = \"1.3.6.1.4.1.99999.0.5\"", notation)
         self.assertIn("eidValue [5A] = '89049032000000000000000000000001'H", notation)
@@ -300,7 +360,8 @@ class Asn1TlvDecodeTests(unittest.TestCase):
 
         stdout = TtyStdout()
 
-        code = run_cli(["3006020105040141"], stdout=stdout, stderr=StringIO())
+        # The layout under a terminal; --color never keeps escape codes out of the comparison.
+        code = run_cli(["--color", "never", "3006020105040141"], stdout=stdout, stderr=StringIO())
 
         self.assertEqual(code, 0)
         self.assertTrue(stdout.getvalue().startswith("\nASN1_SEQUENCE [30] ::="))

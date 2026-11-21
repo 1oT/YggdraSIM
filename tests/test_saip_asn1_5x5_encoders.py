@@ -49,7 +49,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# Pass A — call and phonebook records.
+# Pass A -- call and phonebook records.
 
 
 class LndRecordEncoderTests(unittest.TestCase):
@@ -154,7 +154,7 @@ class CcpRecordEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass A — key material.
+# Pass A -- key material.
 
 
 class UsimKeysRecordEncoderTests(unittest.TestCase):
@@ -217,7 +217,7 @@ class HiddenKeyEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass A — network config.
+# Pass A -- network config.
 
 
 class OpaqueEncoderTests(unittest.TestCase):
@@ -283,15 +283,46 @@ class NasConfigEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Pass A — 5G.
+# Pass A -- 5G.
 
 
 class SuciCalcInfoEncoderTests(unittest.TestCase):
+    # TS 31.102 §4.4.11.8: 'A0' lists (scheme id, key index) pairs in
+    # priority order; 'A1' pairs a key identifier ('80') with its key ('81').
+    _RAW = bytes.fromhex(
+        "A006" + "0101" + "0202" + "0000"
+        + "A125" + "800101" + "8120" + "11" * 32
+    )
+
+    def test_decode_scheme_pairs_and_key_list(self) -> None:
+        decoded = _decode_suci_calc_info(self._RAW.hex())
+        assert decoded is not None
+        self.assertEqual(decoded["reference"], "TS 31.102 §4.4.11.8")
+        items = decoded["items"]
+        entries = items[0]["decoded"]["entries"]
+        self.assertEqual(
+            [(e["protectionSchemeId"], e["keyIndex"]) for e in entries],
+            [(1, 1), (2, 2), (0, 0)],
+        )
+        self.assertIn("Profile A", entries[0]["protectionScheme"])
+        self.assertIn("Profile B", entries[1]["protectionScheme"])
+        self.assertEqual(entries[2]["protectionScheme"], "null-scheme")
+        key_items = items[1]["items"]
+        self.assertEqual(key_items[0]["tag"], "80")
+        self.assertEqual(key_items[0]["decoded"]["decimal"], 1)
+        self.assertEqual(key_items[1]["tag"], "81")
+        self.assertEqual(key_items[1]["raw"], "11" * 32)
+
     def test_hex_roundtrip(self) -> None:
-        raw = bytes.fromhex("A00A" + "8001" + "02" + "8105" + "0102030405")
-        decoded = _decode_suci_calc_info(raw.hex())
-        encoded = encode_ef_suci_calc_info(dict(decoded), target_length=len(raw))
-        self.assertEqual(encoded, raw)
+        decoded = _decode_suci_calc_info(self._RAW.hex())
+        encoded = encode_ef_suci_calc_info(dict(decoded), target_length=len(self._RAW))
+        self.assertEqual(encoded, self._RAW)
+
+    def test_items_rebuild_roundtrip(self) -> None:
+        decoded = dict(_decode_suci_calc_info(self._RAW.hex()))
+        decoded.pop("hex")
+        encoded = encode_ef_suci_calc_info(decoded, target_length=len(self._RAW))
+        self.assertEqual(encoded, self._RAW)
 
 
 class SupinaiEncoderTests(unittest.TestCase):

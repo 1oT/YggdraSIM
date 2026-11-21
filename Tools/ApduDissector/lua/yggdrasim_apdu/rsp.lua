@@ -46,39 +46,12 @@ function M.isdr_aid()
     return ""
 end
 
---- GSMA SGP.22 clause 2.5.2, the BoundProfilePackage.
---
--- Five members, not four. The first is 'BF23'
--- initialiseSecureChannelRequest -- a tagged type, not one of the
--- implicit context tags -- and the sequences that follow are 'A0'
--- firstSequenceOf87, 'A1' sequenceOf88, 'A2' sequenceOf86 and 'A3'
--- secondSequenceOf87. Numbering them from 'A0' as the request shifts
--- every name by one and loses the fifth entirely, so a profile whose
--- installation fails in the second sequence of '87' segments is reported
--- as failing in the first.
-local BPP_SECTIONS = {
-    [0xBF23] = "initialiseSecureChannelRequest",
-    [0xA0] = "firstSequenceOf87",
-    [0xA1] = "sequenceOf88",
-    [0xA2] = "sequenceOf86",
-    [0xA3] = "secondSequenceOf87",
-}
-
---- Name a BoundProfilePackage member.
---
--- *parent* gates the implicit context tags: 'A0' to 'A3' are ordinary
--- constructed context tags that appear all over the SGP.22 surface, and
--- they only carry these names directly inside a 'BF36'. Naming them
--- unconditionally labelled the 'A0' of an unrelated structure
--- "firstSequenceOf87".
-function M.bpp_section_name(tag, parent)
-    if tag == 0xBF23 then
-        return BPP_SECTIONS[tag]
+--- The hex key the generated tables use for a tag.
+local function tag_key(tag)
+    if tag > 0xFF then
+        return string.format("%04X", tag)
     end
-    if parent ~= M.TAG_BOUND_PROFILE_PACKAGE then
-        return ""
-    end
-    return BPP_SECTIONS[tag] or ""
+    return string.format("%02X", tag)
 end
 
 --- Name an ES10 function from its context tag.
@@ -96,36 +69,51 @@ function M.is_rsp_function(tag)
     return M.function_name(tag) ~= ""
 end
 
---- SGP.22 EUICCInfo1/EUICCInfo2 carry the euiccCiPKId lists at 'A9'/'AA'.
--- Those are ordinary constructed context tags elsewhere -- the Type-2/3
--- file tags of an EF.PBR record are 'A9'/'AA' too -- so they are named only
--- when nested directly in a 'BF20'/'BF22'.
-local EUICC_INFO_TAGS = {
-    [0xA9] = "euiccCiPKIdListForVerification (SGP.22 EUICCInfo1 / EUICCInfo2)",
-    [0xAA] = "euiccCiPKIdListForSigning (SGP.22 EUICCInfo1 / EUICCInfo2)",
-}
-
---- Name an EUICCInfo1/2 sub-tag, gated on its parent being 'BF20'/'BF22'.
-function M.euicc_info_tag_name(tag, parent)
-    if parent ~= 0xBF20 and parent ~= 0xBF22 then
-        return ""
+--- Name a member of an RSP structure, and say what it opens.
+--
+-- Returns the ASN.1 field name and the type its children belong to, both
+-- empty when *structure* does not declare *tag*. The structure is what
+-- makes a name safe to give: 'A0' is firstSequenceOf87 in a
+-- BoundProfilePackage, profileInfoListOk in a ProfileInfoListResponse
+-- and an ordinary constructed context tag in the Type-2 file list of an
+-- EF.PBR record, and only the enclosing type tells them apart.
+function M.member(structure, tag)
+    if structure == nil or structure == "" then
+        return "", nil
     end
-    return EUICC_INFO_TAGS[tag] or ""
+    local key = tag_key(tag)
+    local names = tables.RSP_MEMBERS[structure]
+    if names == nil then
+        return "", nil
+    end
+    local opens = tables.RSP_MEMBER_TYPES[structure]
+    return names[key] or "", opens ~= nil and opens[key] or nil
+end
+
+--- The RSP structure an ES10 function tag opens, or nil.
+function M.structure_of(tag)
+    if not M.is_rsp_function(tag) then
+        return nil
+    end
+    return tables.RSP_ROOTS[tag_key(tag)]
 end
 
 --- TLV walker options that name RSP structures.
+--
+-- At the top of the payload the function tag names itself and opens its
+-- own type; below that every name comes from the enclosing type, so a
+-- tag is never named on its own account.
 function M.tlv_options()
     return {
-        resolver = function(tag, _raw, _level, parent)
-            local section = M.bpp_section_name(tag, parent)
-            if section ~= "" then
-                return section
+        resolver = function(tag, _raw, _level, _parent, structure)
+            if structure == nil or structure == "" then
+                return M.function_name(tag), M.structure_of(tag)
             end
-            local euicc = M.euicc_info_tag_name(tag, parent)
-            if euicc ~= "" then
-                return euicc
+            local name, opened = M.member(structure, tag)
+            if name ~= "" then
+                return name, opened
             end
-            return M.function_name(tag)
+            return M.function_name(tag), M.structure_of(tag)
         end,
     }
 end

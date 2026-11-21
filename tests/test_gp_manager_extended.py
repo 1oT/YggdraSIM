@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``SCP03.logic.gp.GlobalPlatformManager`` methods not covered
 by test_gp_manager_utils.py.
 
@@ -72,7 +71,7 @@ class VerifyAdmTests(unittest.TestCase):
 class GetKeysInfoDataTests(unittest.TestCase):
 
     def _make_with_key_response(self) -> GlobalPlatformManager:
-        # C0 08 88 01 88 02 81 88 18 01 — two AES key entries
+        # C0 08 88 01 88 02 81 88 18 01 -- two AES key entries
         payload = bytes.fromhex("C00888018802818818018801880281881801")
         mgr = _make_manager(transmit_return=(payload, 0x90, 0x00))
         return mgr
@@ -153,7 +152,7 @@ class GetRegistryDataTests(unittest.TestCase):
 
         apdu = mgr.tp.transmit.call_args.args[0].upper()
 
-        self.assertEqual(apdu, "80F24000024F0000")
+        self.assertEqual(apdu, "80F24002024F0000")
 
     def test_list_registry_shortcut_includes_case4_le(self) -> None:
         mgr = _make_manager(transmit_return=(b"", 0x90, 0x00))
@@ -161,13 +160,17 @@ class GetRegistryDataTests(unittest.TestCase):
         mgr.list_registry("PACKAGES")
 
         apdu = mgr.tp.transmit.call_args.args[0].upper()
-        self.assertEqual(apdu, "80F22000024F0000")
+        self.assertEqual(apdu, "80F22002024F0000")
 
     def test_pagination_increments_pages(self) -> None:
         mgr = _make_manager()
         responses = iter([
             (b"\xE3\x02\x84\x01", 0x63, 0x10),
             (b"\xE3\x02\x84\x02", 0x90, 0x00),
+            # The SD view reads the '40' subset as well (GPC v2.3.1
+            # §11.4.2.1: '80' reports the Issuer Security Domain only), so a
+            # third response is consumed there.
+            (b"", 0x90, 0x00),
         ])
         mgr.tp.transmit.side_effect = lambda *a, **kw: next(responses)
         result = mgr.get_registry_data("SD")
@@ -191,7 +194,8 @@ class GetRegistryDataTests(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["entries"][0]["aid"], "F000000001")
-        self.assertEqual(result["entries"][0]["state"], "OP_READY")
+        # GPC v2.3.1 Table 11-3: '01' is LOADED for an Executable Load File.
+        self.assertEqual(result["entries"][0]["state"], "LOADED")
 
     def test_fcp_template_is_not_parsed_as_compact_registry(self) -> None:
         raw = bytes.fromhex(
@@ -236,6 +240,11 @@ class InstallCommandEncodingTests(unittest.TestCase):
 def _component(tag: int, payload: bytes) -> bytes:
     return bytes([tag]) + len(payload).to_bytes(2, "big") + payload
 
+# JCVM 3.1 §6.4 header_component_compact, everything ahead of AID_length:
+# magic 'DECAFFED', CAP format minor then major ('02' '02'), flags, and the
+# package_info minor and major version.
+HEADER_PREFIX = bytes.fromhex("DECAFFED") + b"\x02\x02\x00\x00\x01"
+
 
 class InstallCapWithSuppliedApduTests(unittest.TestCase):
     PACKAGE_AID = bytes.fromhex("A000000151")
@@ -243,7 +252,7 @@ class InstallCapWithSuppliedApduTests(unittest.TestCase):
 
     @staticmethod
     def _write_ijc(directory: Path, package_aid: bytes, applet_aid: bytes) -> Path:
-        header_payload = (b"\x00" * 9) + bytes([len(package_aid)]) + package_aid
+        header_payload = HEADER_PREFIX + bytes([len(package_aid)]) + package_aid
         applet_payload = bytes([1, len(applet_aid)]) + applet_aid + b"\x00\x00"
         component_blob = _component(0x01, header_payload) + _component(0x03, applet_payload)
         load_block = CapFileParser._wrap_load_file_block(component_blob)
@@ -324,7 +333,7 @@ class InstallCapWithSuppliedApduTests(unittest.TestCase):
         call_args = mgr.tp.transmit.call_args
         self.assertEqual(
             call_args.args[0].upper(),
-            "80E602001805F00000000108A00000015100000002AABB02C900021122",
+            "80E602001805F00000000108A00000015100000002AABB02C90002112200",
         )
         self.assertEqual(call_args.kwargs, {"silent": True})
 

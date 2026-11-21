@@ -109,12 +109,12 @@ class MsinBcdTests(unittest.TestCase):
 
 class SplitImsiTests(unittest.TestCase):
     def test_two_digit_mnc(self) -> None:
-        # 3GPP TS 23.003 §2.2 test PLMN (MCC=001 / MNC=01).
+        # Test PLMN MCC=001 / MNC=01 (3GPP TS 31.124 v18.7 §27.22.2A).
         mcc, mnc, msin = split_imsi("001017830012345", 2)
         self.assertEqual((mcc, mnc, msin), ("001", "01", "7830012345"))
 
     def test_three_digit_mnc(self) -> None:
-        # 3GPP TS 23.003 §2.2 alternate test PLMN (MCC=999 / MNC=999).
+        # MCC=999 / MNC=999: the MCC shared for use inside private networks (ITU-T E.212 (06/2024) Appendix III).
         mcc, mnc, msin = split_imsi("999999123456789", 3)
         self.assertEqual((mcc, mnc, msin), ("999", "999", "123456789"))
 
@@ -141,7 +141,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
         self.assertEqual(len(identity), 13)
         # Octet 1: SUPI format=0 (IMSI, upper nibble), type-of-identity=001 (SUCI)
         self.assertEqual(identity[0], 0x01)
-        # MCC+MNC for 001/01 (3GPP TS 23.003 §2.2 test PLMN):
+        # MCC+MNC for 001/01 (test PLMN, 3GPP TS 31.124 v18.7 §27.22.2A):
         #   o2 = (m[1]<<4)|m[0] = 0x00
         #   o3 = (mnc[2]<<4)|m[2] = 0xF1
         #   o4 = (mnc[1]<<4)|mnc[0] = 0x10
@@ -160,7 +160,7 @@ class SuciMobileIdentityNullSchemeTests(unittest.TestCase):
             routing_indicator="0",
             protection_scheme=ProtectionScheme.NULL,
         )
-        # MCC=999, MNC=999 (3GPP TS 23.003 §2.2 alternate test PLMN):
+        # MCC=999, MNC=999 (shared private-network MCC, ITU-T E.212 (06/2024) Appendix III):
         #   o2 = (m[1]<<4)|m[0] = 0x99
         #   o3 = (mnc[2]<<4)|m[2] = 0x99
         #   o4 = (mnc[1]<<4)|mnc[0] = 0x99
@@ -210,7 +210,7 @@ class ProfileARoundTripTests(unittest.TestCase):
         self.hn_private = x25519.X25519PrivateKey.from_private_bytes(b"\x42" * 32)
         self.hn_pub = self.hn_private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
         self.hn_priv_bytes = self.hn_private.private_bytes_raw()
-        # 3GPP TS 23.003 §2.2 test PLMN (MCC=001 / MNC=01) — never allocated.
+        # Test PLMN MCC=001 / MNC=01 (3GPP TS 31.124 v18.7 §27.22.2A) -- never allocated.
         self.imsi = "001017830012345"
         self.mnc_length = 2
         self.expected_msin_bcd = encode_msin_bcd("7830012345")

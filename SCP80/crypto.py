@@ -19,100 +19,120 @@
 
 # TS 102 225 §5.1 / §5.2 cipher and CC primitives are routed through
 # pySim.ota so the spec citations (DES/3DES2/3DES3/AES algorithms,
-# CMAC truncation rules) live in one upstream place. The §5.1 envelope
-# layout in this module — leading CHI=00 byte, 1-octet CPL — is
-# YggdraSIM-specific and intentionally diverges from pySim's
-# ``OtaDialectSms.encode_cmd`` (2-octet CPL, no CHI). See
-# tests/test_scp80_pysim_parity.py for the pinned divergence.
-from pySim .ota import (
-    OtaAlgoAuthAES as _PysimAuthAES ,
-    OtaAlgoAuthDES3 as _PysimAuthDES3 ,
-    OtaAlgoCryptAES as _PysimCryptAES ,
-    OtaAlgoCryptDES3 as _PysimCryptDES3 ,
-    OtaKeyset as _PysimOtaKeyset ,
+# CMAC truncation rules) live in one upstream place. The SMS-PP command
+# packet ``OtaPacketBuilder`` emits (TS 31.115 §4.2 table 1: 2-octet
+# CPL, null CHI, 1-octet CHL) is byte-identical to pySim's
+# ``OtaDialectSms.encode_cmd`` for a cryptographic-checksum SPI. The one
+# divergence is that the builder always emits an 8-octet CC where pySim
+# honours an SPI asking for a redundancy check; see
+# tests/test_scp80_pysim_parity.py.
+from pySim.ota import (
+    OtaAlgoAuthAES as _PysimAuthAES,
+    OtaAlgoAuthDES3 as _PysimAuthDES3,
+    OtaAlgoCryptAES as _PysimCryptAES,
+    OtaAlgoCryptDES3 as _PysimCryptDES3,
+    OtaKeyset as _PysimOtaKeyset,
 )
-if __package__ :
-    from .utils import Utils 
-else :
-    from utils import Utils 
+
+if __package__:
+    from .utils import Utils
+else:
+    from utils import Utils
 
 
-def _build_pysim_otak (algo_crypt :str ,algo_auth :str ,key :bytes )->"_PysimOtaKeyset":
+def _build_pysim_otak(algo_crypt: str, algo_auth: str, key: bytes) -> "_PysimOtaKeyset":
     # pySim's OtaAlgo* classes resolve their ``enum_name`` against the
     # paired ``OtaKeyset``. We construct one keyset per call: the cost
     # is a couple of attribute writes, well below CMAC.new() / AES.new().
-    return _PysimOtaKeyset (
-        algo_crypt =algo_crypt ,kic_idx =1 ,kic =key ,
-        algo_auth =algo_auth ,kid_idx =1 ,kid =key ,
+    return _PysimOtaKeyset(
+        algo_crypt=algo_crypt,
+        kic_idx=1,
+        kic=key,
+        algo_auth=algo_auth,
+        kid_idx=1,
+        kid=key,
     )
 
 
-class CryptoEngine :
-    @staticmethod 
-    def get_algo_type (byte_hex :str )->str :
+class CryptoEngine:
+    @staticmethod
+    def get_algo_type(byte_hex: str) -> str:
         """Map a keyset algo nibble to a cipher name string (TS 102 225 §5.2)."""
-        try :
-            val =int (byte_hex ,16 )&0x0F 
-            if val ==0x02 :return "AES"
-            if val ==0x05 :return "3DES2"
-            if val ==0x09 :return "3DES3"
+        try:
+            val = int(byte_hex, 16) & 0x0F
+            if val == 0x02:
+                return "AES"
+            if val == 0x05:
+                return "3DES2"
+            if val == 0x09:
+                return "3DES3"
             return "3DES2"
-        except Exception :return "3DES2"
+        except Exception:
+            return "3DES2"
 
-    @staticmethod 
-    def describe_keyset (byte_hex :str )->str :
+    @staticmethod
+    def describe_keyset(byte_hex: str) -> str:
         """Return a human-readable keyset description for a single algo byte (TS 102 225 §5.2)."""
-        try :
-            val =int (byte_hex ,16 )
-            algo =val &0x0F 
-            keyset =(val >>4 )&0x0F 
+        try:
+            val = int(byte_hex, 16)
+            algo = val & 0x0F
+            keyset = (val >> 4) & 0x0F
 
-            algo_name ="Unknown"
-            if algo ==0x00 :algo_name ="Implicit"
-            elif algo ==0x01 :algo_name ="DES"
-            elif algo ==0x02 :algo_name ="AES"
-            elif algo ==0x05 :algo_name ="3DES (2-key)"
-            elif algo ==0x09 :algo_name ="3DES (3-key)"
+            algo_name = "Unknown"
+            if algo == 0x00:
+                algo_name = "Implicit"
+            elif algo == 0x01:
+                algo_name = "DES"
+            elif algo == 0x02:
+                algo_name = "AES"
+            elif algo == 0x05:
+                algo_name = "3DES (2-key)"
+            elif algo == 0x09:
+                algo_name = "3DES (3-key)"
 
             return f"{byte_hex} ({algo_name}, Keyset {keyset})"
-        except Exception :
-            return byte_hex 
+        except Exception:
+            return byte_hex
 
-    @staticmethod 
-    def compute_pcntr (payload_len :int ,block_size :int ,cc_len :int =8 )->int :
-        base_len =5 +1 +cc_len +payload_len 
-        limit =16 if block_size ==16 else 8 
-        for p in range (limit ):
-            if (base_len +p )%block_size ==0 :return p 
-        raise ValueError ("PCNTR alignment failed")
+    @staticmethod
+    def compute_pcntr(payload_len: int, block_size: int, cc_len: int = 8) -> int:
+        base_len = 5 + 1 + cc_len + payload_len
+        limit = 16 if block_size == 16 else 8
+        for p in range(limit):
+            if (base_len + p) % block_size == 0:
+                return p
+        raise ValueError("PCNTR alignment failed")
 
-    @staticmethod 
-    def compute_cc (algo :str ,key :bytes ,data :bytes )->bytes :
+    @staticmethod
+    def compute_cc(algo: str, key: bytes, data: bytes) -> bytes:
         """Compute a Cryptographic Checksum over *data* using *algo* and *key* (TS 102 225 §5.1.1)."""
-        # TS 102 225 §5.1.1 — CC truncation to 8 octets is enforced by
+        # TS 102 225 §5.1.1 -- CC truncation to 8 octets is enforced by
         # pySim's ``OtaAlgoAuth*._sign``. We match the upstream rule.
-        if algo =="AES":
-            otak =_build_pysim_otak ("aes_cbc","aes_cmac",key )
-            return _PysimAuthAES (otak )._sign (data )
-        key_eff =Utils .pad_key_3des (key )
-        pad_len =(-len (data ))%8 
-        if pad_len :data +=b'\x00'*pad_len 
-        otak =_build_pysim_otak ("triple_des_cbc2","triple_des_cbc2",key_eff )
-        return _PysimAuthDES3 (otak )._sign (data )
+        if algo == "AES":
+            otak = _build_pysim_otak("aes_cbc", "aes_cmac", key)
+            return _PysimAuthAES(otak)._sign(data)
+        key_eff = Utils.pad_key_3des(key)
+        pad_len = (-len(data)) % 8
+        if pad_len:
+            data += b"\x00" * pad_len
+        otak = _build_pysim_otak("triple_des_cbc2", "triple_des_cbc2", key_eff)
+        return _PysimAuthDES3(otak)._sign(data)
 
-    @staticmethod 
-    def encrypt_ct (algo :str ,key :bytes ,data :bytes )->bytes :
+    @staticmethod
+    def encrypt_ct(algo: str, key: bytes, data: bytes) -> bytes:
         """Encrypt *data* with *algo* and *key* for the OTA Ciphered Text field (TS 102 225 §5.1.2)."""
-        if algo =="AES":
-            pad_len =(-len (data ))%16 
-            if pad_len :data +=b'\x00'*pad_len 
-            otak =_build_pysim_otak ("aes_cbc","aes_cmac",key )
-            return _PysimCryptAES (otak )._encrypt (data )
-        key_eff =Utils .pad_key_3des (key )
-        pad_len =(-len (data ))%8 
-        if pad_len :data +=b'\x00'*pad_len 
-        otak =_build_pysim_otak ("triple_des_cbc2","triple_des_cbc2",key_eff )
-        return _PysimCryptDES3 (otak )._encrypt (data )
+        if algo == "AES":
+            pad_len = (-len(data)) % 16
+            if pad_len:
+                data += b"\x00" * pad_len
+            otak = _build_pysim_otak("aes_cbc", "aes_cmac", key)
+            return _PysimCryptAES(otak)._encrypt(data)
+        key_eff = Utils.pad_key_3des(key)
+        pad_len = (-len(data)) % 8
+        if pad_len:
+            data += b"\x00" * pad_len
+        otak = _build_pysim_otak("triple_des_cbc2", "triple_des_cbc2", key_eff)
+        return _PysimCryptDES3(otak)._encrypt(data)
 
     @staticmethod
     def decrypt_ct(algo: str, key: bytes, data: bytes) -> bytes:
@@ -158,7 +178,9 @@ class CryptoEngine :
             raise ValueError("truncated secured application data")
         payload_padded = secured_tail
         inner = payload_padded[:-pcntr] if pcntr else payload_padded
-        mac_input = header_blob + param_data + cntr_bytes + bytes([pcntr]) + payload_padded
+        mac_input = (
+            header_blob + param_data + cntr_bytes + bytes([pcntr]) + payload_padded
+        )
         cc_calc = CryptoEngine.compute_cc(mac_mode, k_mac, mac_input)
         if cc_calc != cc_recv:
             raise ValueError("secured packet cryptographic checksum mismatch")

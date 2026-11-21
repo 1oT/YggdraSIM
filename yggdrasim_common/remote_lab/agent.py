@@ -28,11 +28,20 @@ from urllib.parse import unquote, urlparse, urlsplit, urlunparse
 
 from yggdrasim_common.__about__ import __version__
 from yggdrasim_common.card_backend import _request_card_relay_json
-from yggdrasim_common.card_bridge_auth import fingerprint, parse_bearer_header
+from yggdrasim_common.card_bridge_auth import (
+    CARD_LEASE_HEADER,
+    fingerprint,
+    parse_bearer_header,
+)
 from yggdrasim_common.remote_lab.config import (
     RemoteLabAgentConfig,
     RigConfig,
     load_config,
+)
+from yggdrasim_common.remote_lab.consumer import (
+    CardOffer,
+    CardOfferError,
+    ConsumerManager,
 )
 from yggdrasim_common.remote_lab.security import read_token_file, verify_token
 from yggdrasim_common.remote_lab.sessions import LabSession, LabSessionManager, RigBusyError
@@ -45,6 +54,13 @@ def _utc_iso(epoch: float) -> str:
     if not epoch:
         return ""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(float(epoch)))
+
+
+# How long the agent holds the upstream card lease before renewing it.
+# It must outlast the operator's heartbeat interval so a live session
+# never loses the card between renewals, and stay short enough that a
+# dead agent frees the card without anyone walking to the rig.
+CARD_LEASE_TTL_SECONDS = 180.0
 
 
 def _status_url_for_apdu(apdu_url: str) -> str:
@@ -65,6 +81,40 @@ def _reset_url_for_apdu(apdu_url: str) -> str:
     else:
         path = path + "/card/reset"
     return urlunparse((parsed.scheme, parsed.netloc, path or "/card/reset", "", "", ""))
+
+
+def _lease_url_for_apdu(apdu_url: str) -> str:
+    parsed = urlparse(apdu_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/apdu"):
+        path = path[: -len("/apdu")] + "/lease"
+    else:
+        path = path + "/lease"
+    return urlunparse((parsed.scheme, parsed.netloc, path or "/lease", "", "", ""))
+
+
+def _read_supervisor_state() -> dict[str, Any]:
+    """Read the HIL supervisor's state file, or ``{}`` when it has none.
+
+    One host runs one SIMtrace2, so one state file describes the single
+    modem rig on it. A host carrying several would need the path per rig.
+    """
+    try:
+        from yggdrasim_common.runtime_paths import runtime_path
+
+        path = runtime_path("state", "hil_bridge_supervisor.json")
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _lease_headers(session: LabSession) -> dict[str, str]:
+    """Headers that present this session's upstream card lease, if any."""
+    if len(session.card_lease_token) == 0:
+        return {}
+    return {CARD_LEASE_HEADER: session.card_lease_token}
 
 
 def _base_url_for_apdu(apdu_url: str) -> str:
@@ -165,6 +215,7 @@ class RemoteLabAgentService:
         self._cleanup_stop = threading.Event()
         self._cleanup_thread: threading.Thread | None = None
         self._control_serving = threading.Event()
+        self.consumers = ConsumerManager()
 
     def authorize(self, presented_token: str, *, role: str = "user") -> AuthorizedToken | None:
         required_admin = role == "admin"
@@ -190,7 +241,198 @@ class RemoteLabAgentService:
             auth_token=self.upstream_token(rig),
         )
 
+    def claim_card_lease(self, rig: RigConfig, session: LabSession) -> str:
+        """Take the upstream card lease for the life of this session.
+
+        Returns the lease token, or an empty string when the upstream
+        grants no lease. An upstream running without a bearer token
+        answers 403 and is treated as lease-less rather than as a
+        failure, so a rig that predates leases keeps working.
+
+        Raises ``RigBusyError`` when another consumer holds the card.
+        """
+        if rig.serves_card is False or len(rig.upstream.url) == 0:
+            return ""
+        try:
+            payload = _request_card_relay_json(
+                _lease_url_for_apdu(rig.upstream.url),
+                method="POST",
+                request_json={
+                    "holder": f"remote-lab:{session.id}",
+                    "ttlSeconds": CARD_LEASE_TTL_SECONDS,
+                },
+                timeout_seconds=5,
+                auth_token=self.upstream_token(rig),
+            )
+        except Exception as exc:  # noqa: BLE001
+            status = getattr(exc, "status", 0)
+            if int(status or 0) == 409:
+                raise RigBusyError(
+                    "card leased by another consumer",
+                    payload={
+                        "error": "card_leased",
+                        "rig_id": rig.id,
+                        "message": (
+                            "The card behind this rig is leased by another "
+                            "consumer."
+                        ),
+                    },
+                ) from exc
+            if int(status or 0) in (403, 404):
+                # No bearer token upstream, or a relay that predates
+                # leases. Both mean there is nothing to hold.
+                return ""
+            _LOGGER.warning(
+                "remote_lab card lease unavailable rig=%s error=%s",
+                rig.id,
+                f"{type(exc).__name__}: {exc}",
+            )
+            return ""
+        return str(payload.get("leaseToken") or "")
+
+    def renew_card_lease(self, rig: RigConfig, session: LabSession) -> None:
+        """Push the upstream lease out by another TTL. Best effort."""
+        if len(session.card_lease_token) == 0:
+            return
+        try:
+            _request_card_relay_json(
+                _lease_url_for_apdu(rig.upstream.url),
+                method="POST",
+                request_json={
+                    "leaseToken": session.card_lease_token,
+                    "holder": f"remote-lab:{session.id}",
+                    "ttlSeconds": CARD_LEASE_TTL_SECONDS,
+                },
+                timeout_seconds=5,
+                auth_token=self.upstream_token(rig),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "remote_lab card lease renewal failed rig=%s error=%s",
+                rig.id,
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    def release_session_resources(self, session: LabSession) -> None:
+        """Undo everything a reservation took: the card, then the consumer."""
+        # Session-scoped: safe whoever holds the rig now.
+        self.release_card_lease(session)
+        # Rig-scoped, and this runs a tick after the session was reaped.
+        # Another operator may hold the rig by now and be running their
+        # own consumer on it; stopping it would end their session.
+        holder = self.sessions.active_session_for_rig(session.rig_id)
+        if holder is not None and holder.id != session.id:
+            _LOGGER.info(
+                "remote_lab consumer stop skipped rig=%s reaped=%s held_by=%s",
+                session.rig_id,
+                session.id,
+                holder.id,
+            )
+            return
+        self.consumers.stop(session.rig_id)
+
+    def release_card_lease(self, session: LabSession) -> None:
+        """Drop the upstream lease. Best effort: the TTL is the backstop."""
+        if len(session.card_lease_token) == 0:
+            return
+        rig = self.rigs.get(session.rig_id)
+        if rig is None or len(rig.upstream.url) == 0:
+            return
+        try:
+            _request_card_relay_json(
+                _lease_url_for_apdu(rig.upstream.url),
+                method="DELETE",
+                request_json={"leaseToken": session.card_lease_token},
+                timeout_seconds=5,
+                auth_token=self.upstream_token(rig),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "remote_lab card lease release failed rig=%s error=%s",
+                session.rig_id,
+                f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            session.card_lease_token = ""
+
+    def validate_card_offer(self, rig: RigConfig, offer: CardOffer) -> None:
+        """Check the rig can actually use the card the operator offered.
+
+        Two failures look identical to an operator once a session is
+        running and neither is visible in a log they can see, so both are
+        turned into a refusal at reservation time.
+        """
+        try:
+            _request_card_relay_json(
+                _status_url_for_apdu(offer.url),
+                method="GET",
+                timeout_seconds=5,
+                auth_token=offer.token,
+            )
+        except Exception as reach_error:  # noqa: BLE001
+            status = int(getattr(reach_error, "status", 0) or 0)
+            if status in (401, 403):
+                raise CardOfferError(
+                    "The rig reached your card bridge but the token was "
+                    "rejected. Check card_offer.token."
+                ) from reach_error
+            raise CardOfferError(
+                f"Rig {rig.id} cannot reach the offered card at "
+                f"{offer.url}. Open the reverse tunnel to the rig, or "
+                "publish the bridge on an address the rig can route to."
+            ) from reach_error
+
+        try:
+            lease = _request_card_relay_json(
+                _lease_url_for_apdu(offer.url),
+                method="GET",
+                timeout_seconds=5,
+                auth_token=offer.token,
+            )
+        except Exception:  # noqa: BLE001
+            # A relay with no lease support is fine; the rig runs unleased.
+            return
+        if bool(lease.get("held")) is True:
+            raise RigBusyError(
+                "offered card is leased by another consumer",
+                payload={
+                    "error": "card_leased",
+                    "rig_id": rig.id,
+                    "message": (
+                        "The card you offered is already held by "
+                        f"{lease.get('holder') or 'another consumer'}."
+                    ),
+                },
+            )
+
+    def modem_rig_health(self, rig: RigConfig) -> dict[str, Any]:
+        """Health for a rig that consumes a card rather than serving one."""
+        consumer = self.consumers.state_for(rig.id)
+        health: dict[str, Any] = {
+            "agent": "ok",
+            "stream_proxy": "not-applicable",
+            "upstream_apdu_backend": "not-applicable",
+            "modem": "unknown",
+            "simtrace2": "unknown",
+            "consumer": "running" if consumer.get("running") else "stopped",
+        }
+        state = _read_supervisor_state()
+        if len(state) == 0:
+            return health
+        health["simtrace2"] = "ok" if bool(state.get("usbPresent")) else "absent"
+        if bool(state.get("bridgeRunning")):
+            health["modem"] = "ok" if bool(state.get("remsimClientRunning")) else "no-client"
+        card_lease = str(state.get("cardLease") or "").strip()
+        if len(card_lease) > 0:
+            health["card_lease"] = card_lease
+        supervisor_status = str(state.get("status") or "").strip()
+        if len(supervisor_status) > 0:
+            health["supervisor"] = supervisor_status
+        return health
+
     def rig_health(self, rig: RigConfig) -> dict[str, Any]:
+        if rig.consumes_card is True:
+            return self.modem_rig_health(rig)
         health: dict[str, Any] = {
             "agent": "ok",
             "stream_proxy": "ok",
@@ -211,6 +453,36 @@ class RemoteLabAgentService:
                 health["reader"] = str(status.get("reader"))
         return health
 
+    def host_occupancy(self) -> dict[str, Any]:
+        """What else is using this host, beyond Remote Lab sessions.
+
+        A card rig's own card can be free while the bench around it is
+        not: a HIL supervisor may be driving the modem from a card
+        somewhere else entirely. That leaves this rig genuinely
+        available to take, and the host genuinely unsafe to reconfigure,
+        so it is reported rather than folded into the rig's status.
+        """
+        state = _read_supervisor_state()
+        if len(state) == 0:
+            return {"hil_rig": "none"}
+        status = str(state.get("status") or "").strip()
+        running = bool(state.get("bridgeRunning"))
+        payload: dict[str, Any] = {
+            "hil_rig": "running" if running else (status or "stopped"),
+            "hil_supervisor_status": status,
+        }
+        card_url = str(state.get("remoteCardUrl") or "").strip()
+        if len(card_url) > 0:
+            # Names where the card is, never the token that reaches it.
+            payload["hil_card_source"] = "remote"
+            payload["hil_card_url"] = card_url
+        elif running is True:
+            payload["hil_card_source"] = "local reader"
+        lease = str(state.get("cardLease") or "").strip()
+        if len(lease) > 0:
+            payload["hil_card_lease"] = lease
+        return payload
+
     def rig_status_payload(self, rig: RigConfig) -> dict[str, Any]:
         session_state, session = self.sessions.status_for_rig(rig.id)
         health = self.rig_health(rig)
@@ -226,6 +498,7 @@ class RemoteLabAgentService:
         payload: dict[str, Any] = {
             "id": rig.id,
             "name": rig.name,
+            "kind": rig.kind,
             "location": rig.location,
             "tags": list(rig.tags),
             "status": status_text,
@@ -236,6 +509,17 @@ class RemoteLabAgentService:
             "notes": rig.notes,
             "capabilities": list(rig.capabilities),
         }
+        # The host is reported whatever the rig's own state, because a
+        # free card on a busy bench is exactly the case that misleads.
+        occupancy = self.host_occupancy()
+        if str(occupancy.get("hil_rig") or "none") != "none":
+            payload["host"] = occupancy
+        if rig.consumes_card is True:
+            payload["requires_card_offer"] = True
+            payload["modem"] = {
+                "label": rig.modem.label or rig.name,
+                "simtrace_vidpid": rig.modem.simtrace_vidpid,
+            }
         if session is not None:
             payload["locked_by"] = session.user
             payload["session_id"] = session.id
@@ -263,17 +547,44 @@ class RemoteLabAgentService:
         rig: RigConfig,
         body: dict[str, Any],
     ) -> dict[str, Any]:
+        # A modem rig needs the card before the rig is worth taking, so the
+        # offer is parsed before any lock is held.
+        offer: CardOffer | None = None
+        if rig.consumes_card is True:
+            if rig.consumer.enabled is False:
+                raise CardOfferError(
+                    f"Rig {rig.id} advertises a modem but is not configured "
+                    "to consume an offered card."
+                )
+            offer = CardOffer.from_payload(body.get("card_offer"))
+
         session = self.sessions.create_session(
             rig.id,
             user=str(body.get("user") or "").strip(),
             client_id=str(body.get("client_id") or "").strip(),
             requested_ttl_seconds=int(body.get("requested_ttl_seconds") or 3600),
         )
-        base_url = self.relay_base_url(handler, rig)
-        return {
+        try:
+            if offer is not None:
+                self.validate_card_offer(rig, offer)
+                self.consumers.start(rig, offer)
+                # This rig serves no APDU stream, so nothing else ever
+                # moves the session out of the reservation window and the
+                # reaper takes it seconds later, mid-stream.
+                self.sessions.mark_consumer_started(session)
+            else:
+                session.card_lease_token = self.claim_card_lease(rig, session)
+        except Exception:
+            # Whatever went wrong, the rig lock goes back. Holding a rig
+            # whose card cannot be reached helps nobody.
+            self.sessions.release(session.id, force=True)
+            raise
+
+        payload: dict[str, Any] = {
             "session_id": session.id,
             "session_token": session.token,
             "rig_id": rig.id,
+            "rig_kind": rig.kind,
             "status": session.state,
             "expires_at": _utc_iso(session.expires_at),
             "reservation_expires_at": _utc_iso(session.reservation_expires_at),
@@ -281,13 +592,24 @@ class RemoteLabAgentService:
                 1,
                 min(10, self.config.defaults.heartbeat_timeout_seconds // 3),
             ),
-            "stream": {
-                "transport": "http-card-bridge",
-                "url": base_url + "/apdu",
-                "status_url": base_url + "/status",
-                "card_reset_url": base_url + "/card/reset",
-            },
         }
+        if offer is not None:
+            # No stream block: the operator holds the card, so there is
+            # nothing for the agent to stream back to them.
+            payload["consumer"] = self.consumers.state_for(rig.id)
+            return payload
+
+        base_url = self.relay_base_url(handler, rig)
+        payload["stream"] = {
+            "transport": "http-card-bridge",
+            "url": base_url + "/apdu",
+            "status_url": base_url + "/status",
+            "card_reset_url": base_url + "/card/reset",
+        }
+        # The agent holds the upstream lease on the caller's behalf and
+        # presents it when forwarding, so the token stays on this side.
+        payload["card_lease"] = {"held": len(session.card_lease_token) > 0}
+        return payload
 
     def validate_relay_session(self, rig: RigConfig, header: str) -> LabSession:
         token = parse_bearer_header(header)
@@ -297,9 +619,16 @@ class RemoteLabAgentService:
         if self._control_server is not None or self._relay_servers:
             raise RuntimeError("Remote Lab agent is already started.")
         relay_servers: list[_RelayServer] = []
+        relay_rigs: list[RigConfig] = []
         control_server: _ControlServer | None = None
         try:
             for rig in self.config.rigs:
+                # A modem rig holds no card, so there is nothing to stream
+                # back and no listener to bind. The operator supplies the
+                # card when the session is reserved.
+                if rig.serves_card is False:
+                    continue
+                relay_rigs.append(rig)
                 relay_servers.append(
                     _RelayServer(
                         (rig.stream_proxy.bind_host, rig.stream_proxy.external_port),
@@ -323,7 +652,7 @@ class RemoteLabAgentService:
         self._control_server = control_server
         self._relay_servers = relay_servers
         try:
-            for rig, server in zip(self.config.rigs, relay_servers):
+            for rig, server in zip(relay_rigs, relay_servers, strict=True):
                 thread = threading.Thread(
                     target=server.serve_forever,
                     name=f"remote-lab-relay-{rig.id}",
@@ -366,6 +695,9 @@ class RemoteLabAgentService:
 
     def stop(self) -> None:
         self._cleanup_stop.set()
+        # Children first: a consumer left running would keep driving a card
+        # whose session is gone.
+        self.consumers.stop_all()
         server = self._control_server
         self._control_server = None
         if server is not None:
@@ -403,8 +735,12 @@ class RemoteLabAgentService:
             if expired:
                 _LOGGER.info(
                     "remote_lab expired %d stale session(s)",
-                    expired,
+                    len(expired),
                 )
+            # Releasing a lease reaches the upstream relay over HTTP, so
+            # it happens here rather than under the session manager's lock.
+            for session in expired:
+                self.release_session_resources(session)
 
 
 class _ControlServer(ThreadingHTTPServer):
@@ -510,6 +846,9 @@ class _ControlHandler(_JsonHandler):
             except PermissionError as exc:
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"error": str(exc)})
                 return
+            heartbeat_rig = self.service.rigs.get(session.rig_id)
+            if heartbeat_rig is not None:
+                self.service.renew_card_lease(heartbeat_rig, session)
             self._send_json(HTTPStatus.OK, {"status": "ok", "expires_at": _utc_iso(session.expires_at)})
             return
 
@@ -526,6 +865,8 @@ class _ControlHandler(_JsonHandler):
                 self._send_json(HTTPStatus.FORBIDDEN, {"error": "admin_required"})
                 return
             previous = self.service.sessions.force_release_rig(rig.id)
+            if previous is not None:
+                self.service.release_session_resources(previous)
             _LOGGER.warning(
                 "remote_lab force_release rig=%s previous=%s by=%s reason=%s",
                 rig.id,
@@ -564,6 +905,8 @@ class _ControlHandler(_JsonHandler):
             except PermissionError as exc:
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"error": str(exc)})
                 return
+            if session is not None:
+                self.service.release_session_resources(session)
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -584,6 +927,7 @@ class _ControlHandler(_JsonHandler):
                 "session-lock",
                 "http-card-bridge-proxy",
                 "resource-locks",
+                "card-offer-consumer",
             ],
         }
 
@@ -659,6 +1003,7 @@ class _RelayHandler(_JsonHandler):
                     request_json={"apdu": apdu_hex, "sessionId": session.id},
                     timeout_seconds=30,
                     auth_token=self.service.upstream_token(self.rig),
+                    extra_headers=_lease_headers(session),
                 )
             except Exception as exc:  # noqa: BLE001
                 self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
@@ -678,6 +1023,7 @@ class _RelayHandler(_JsonHandler):
                 request_json={},
                 timeout_seconds=30,
                 auth_token=self.service.upstream_token(self.rig),
+                extra_headers=_lease_headers(session),
             )
         except Exception as exc:  # noqa: BLE001
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})

@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP decoded-field editor: model builders and payload encoders.
 
 ``build_decoded_value_editor_model`` maps a raw JSON field value to a
-typed editor model (enum, bitmask, roundtrip, raw-hex, …) that the GUI
+typed editor model (enum, bitmask, roundtrip, raw-hex, ...) that the GUI
 renders as a structured form.  ``encode_decoded_value_editor_payload``
-is its inverse — it converts a submitted editor payload back to a
+is its inverse -- it converts a submitted editor payload back to a
 tagged-bytes JSON value ready for splice into the document tree.
 """
 from __future__ import annotations
@@ -61,14 +60,14 @@ _LCSI_STATE_TO_HEX = {
     "initialization": "03",
     "operational_activated": "05",
     "operational_deactivated": "04",
-    "termination": "C0",
+    "termination": "0C",
 }
 
 _SERVICE_TABLE_FILE_DEFS: dict[str, tuple[str, dict[int, str]]] = {
     "ef-ust": ("EF.UST", _UST_SERVICE_NAMES),
     "ef-est": ("EF.EST", _EST_SERVICE_NAMES),
     "ef-ist": ("EF.IST", _ISIM_SERVICE_NAMES),
-    # P1.7 — generic service-table editor scaffold extended to the
+    # P1.7 -- generic service-table editor scaffold extended to the
     # remaining 3GPP / TCA service-table EFs. Each pair reuses the
     # service-name dictionary already defined in saip_asn1_decode so
     # the bit-list editor surfaces human-readable labels instead of
@@ -86,10 +85,10 @@ _SERVICE_TABLE_FILE_DEFS: dict[str, tuple[str, dict[int, str]]] = {
 # Enum registry for the decoded form editor
 #
 # Certain decoded payload keys only accept a fixed set of string values
-# (life-cycle state, file descriptor flags, algorithm identifiers, …).
+# (life-cycle state, file descriptor flags, algorithm identifiers, ...).
 # Typing them by hand is error-prone, so the bulk form editor exposes
 # a pick-list (Ctrl+L) whenever the cursor lands on one. The registry
-# below is the single source of truth for the valid choices — the
+# below is the single source of truth for the valid choices -- the
 # TUI picker, the encoder, and the documentation all read from the
 # same table.
 #
@@ -107,17 +106,17 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
         "choices": sorted(_LCSI_STATE_TO_HEX.keys()),
         "description": "Life Cycle Status Integer (ETSI TS 102 221 §11.1.1.4.9)",
         "labels": {
-            "no_information": "0x00 — No information",
-            "creation": "0x01 — Creation",
-            "initialization": "0x03 — Initialization",
-            "operational_activated": "0x05 — Operational (activated)",
-            "operational_deactivated": "0x04 — Operational (deactivated)",
-            "termination": "0xC0 — Termination",
+            "no_information": "0x00 -- No information",
+            "creation": "0x01 -- Creation",
+            "initialization": "0x03 -- Initialization",
+            "operational_activated": "0x05 -- Operational (activated)",
+            "operational_deactivated": "0x04 -- Operational (deactivated)",
+            "termination": "0x0C -- Termination",
         },
     },
     "fileType": {
         "choices": ["working_ef", "internal_ef", "df"],
-        "description": "File descriptor — file type (ETSI TS 102 221 §11.1.1.4.3)",
+        "description": "File descriptor -- file type (ETSI TS 102 221 §11.1.1.4.3)",
         "labels": {
             "working_ef": "Working EF",
             "internal_ef": "Internal EF",
@@ -132,7 +131,7 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
             "cyclic",
             "ber_tlv",
         ],
-        "description": "File descriptor — EF structure",
+        "description": "File descriptor -- EF structure",
         "labels": {
             "no_info_given": "No information given",
             "transparent": "Transparent",
@@ -141,16 +140,14 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
             "ber_tlv": "BER-TLV (0x39)",
         },
     },
+    # TCA SAIP v3.4.1 §8.4.2 (page 47): AlgoParameter.algorithmID.
     "algorithm": {
-        "choices": ["milenage", "tuak", "xor", "comp128v1", "comp128v2", "comp128v3"],
-        "description": "AKA algorithm identifier",
+        "choices": ["milenage", "tuak", "usim-test-algorithm"],
+        "description": "AKA algorithm identifier (algorithmID)",
         "labels": {
-            "milenage": "MILENAGE (3GPP TS 35.206)",
-            "tuak": "TUAK (3GPP TS 35.231)",
-            "xor": "XOR test (3GPP TS 34.108 §8.1.2)",
-            "comp128v1": "COMP128 v1 (2G, legacy)",
-            "comp128v2": "COMP128 v2 (2G)",
-            "comp128v3": "COMP128 v3 (2G)",
+            "milenage": "MILENAGE (1)",
+            "tuak": "TUAK (2)",
+            "usim-test-algorithm": "USIM test algorithm (3)",
         },
     },
     "shareable": {
@@ -159,13 +156,13 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
     },
     "validEncoding": {
         "choices": ["true", "false"],
-        "description": "Short EF identifier — reserved low bits are zero",
+        "description": "Short EF identifier -- reserved low bits are zero",
     },
     "supported": {
         "choices": ["true", "false"],
-        "description": "Short EF identifier — present on the card",
+        "description": "Short EF identifier -- present on the card",
     },
-    # Connectivity parameters — protocol identifiers (3GPP TS 23.040 §9.2.3.9)
+    # Connectivity parameters -- protocol identifiers (3GPP TS 23.040 §9.2.3.9)
     "connectivityPid": {
         "choices": [
             "sme_to_sme",
@@ -210,42 +207,42 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
         ],
         "description": "SMS Protocol Identifier (3GPP TS 23.040 §9.2.3.9)",
         "labels": {
-            "sme_to_sme": "0x00 — SME-to-SME (no interworking)",
-            "telematic_implicit": "0x20 — Telematic (implicit)",
-            "telematic_telex": "0x21 — Telematic (Telex)",
-            "telematic_group3_fax": "0x22 — Telematic (Group 3 Fax)",
-            "telematic_group4_fax": "0x23 — Telematic (Group 4 Fax)",
-            "telematic_voice": "0x24 — Telematic (Voice)",
-            "telematic_ermes": "0x25 — Telematic (ERMES)",
-            "telematic_national_paging": "0x26 — Telematic (National Paging)",
-            "telematic_videotex": "0x27 — Telematic (Videotex)",
-            "telematic_teletex_unspec": "0x28 — Telematic (Teletex, unspecified)",
-            "telematic_teletex_pspdn": "0x29 — Telematic (Teletex, PSPDN)",
-            "telematic_teletex_cspdn": "0x2A — Telematic (Teletex, CSPDN)",
-            "telematic_teletex_pstn": "0x2B — Telematic (Teletex, analog PSTN)",
-            "telematic_teletex_isdn": "0x2C — Telematic (Teletex, digital ISDN)",
-            "telematic_uci": "0x2D — Telematic (UCI)",
-            "message_handling": "0x30 — Message Handling Facility",
-            "x400": "0x31 — Any public X.400",
-            "internet_email": "0x32 — Internet Electronic Mail",
-            "sc_specific_38": "0x38 — SC-specific (mutual agreement)",
-            "gsm_umts_ms": "0x3F — GSM/UMTS MS",
-            "sm_type_0": "0x40 — Short Message Type 0",
-            "replace_sm_1": "0x41 — Replace SM Type 1",
-            "replace_sm_2": "0x42 — Replace SM Type 2",
-            "replace_sm_3": "0x43 — Replace SM Type 3",
-            "replace_sm_4": "0x44 — Replace SM Type 4",
-            "replace_sm_5": "0x45 — Replace SM Type 5",
-            "replace_sm_6": "0x46 — Replace SM Type 6",
-            "replace_sm_7": "0x47 — Replace SM Type 7",
-            "device_triggering": "0x48 — Device Triggering",
-            "ansi_136": "0x7C — ANSI-136 R-DATA",
-            "me_data_download": "0x7D — ME Data Download",
-            "me_depersonalization": "0x7E — ME De-personalization",
-            "usim_data_download": "0x7F — (U)SIM Data Download",
+            "sme_to_sme": "0x00 -- SME-to-SME (no interworking)",
+            "telematic_implicit": "0x20 -- Telematic (implicit)",
+            "telematic_telex": "0x21 -- Telematic (Telex)",
+            "telematic_group3_fax": "0x22 -- Telematic (Group 3 Fax)",
+            "telematic_group4_fax": "0x23 -- Telematic (Group 4 Fax)",
+            "telematic_voice": "0x24 -- Telematic (Voice)",
+            "telematic_ermes": "0x25 -- Telematic (ERMES)",
+            "telematic_national_paging": "0x26 -- Telematic (National Paging)",
+            "telematic_videotex": "0x27 -- Telematic (Videotex)",
+            "telematic_teletex_unspec": "0x28 -- Telematic (Teletex, unspecified)",
+            "telematic_teletex_pspdn": "0x29 -- Telematic (Teletex, PSPDN)",
+            "telematic_teletex_cspdn": "0x2A -- Telematic (Teletex, CSPDN)",
+            "telematic_teletex_pstn": "0x2B -- Telematic (Teletex, analog PSTN)",
+            "telematic_teletex_isdn": "0x2C -- Telematic (Teletex, digital ISDN)",
+            "telematic_uci": "0x2D -- Telematic (UCI)",
+            "message_handling": "0x30 -- Message Handling Facility",
+            "x400": "0x31 -- Any public X.400",
+            "internet_email": "0x32 -- Internet Electronic Mail",
+            "sc_specific_38": "0x38 -- SC-specific (mutual agreement)",
+            "gsm_umts_ms": "0x3F -- GSM/UMTS MS",
+            "sm_type_0": "0x40 -- Short Message Type 0",
+            "replace_sm_1": "0x41 -- Replace SM Type 1",
+            "replace_sm_2": "0x42 -- Replace SM Type 2",
+            "replace_sm_3": "0x43 -- Replace SM Type 3",
+            "replace_sm_4": "0x44 -- Replace SM Type 4",
+            "replace_sm_5": "0x45 -- Replace SM Type 5",
+            "replace_sm_6": "0x46 -- Replace SM Type 6",
+            "replace_sm_7": "0x47 -- Replace SM Type 7",
+            "device_triggering": "0x48 -- Device Triggering",
+            "ansi_136": "0x7C -- ANSI-136 R-DATA",
+            "me_data_download": "0x7D -- ME Data Download",
+            "me_depersonalization": "0x7E -- ME De-personalization",
+            "usim_data_download": "0x7F -- (U)SIM Data Download",
         },
     },
-    # Connectivity parameters — bearer types (ETSI TS 102 223)
+    # Connectivity parameters -- bearer types (ETSI TS 102 223)
     "bearerType": {
         "choices": [
             "gsm_3gpp_01", "gsm_3gpp_02", "default_bearer", "local_link",
@@ -254,21 +251,21 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
         ],
         "description": "Bearer type (ETSI TS 102 223 §8.16)",
         "labels": {
-            "gsm_3gpp_01": "0x01 — GSM/3GPP",
-            "gsm_3gpp_02": "0x02 — GSM/3GPP",
-            "default_bearer": "0x03 — Default bearer for requested transport",
-            "local_link": "0x04 — Local link (technology independent)",
-            "bluetooth": "0x05 — Bluetooth",
-            "irda": "0x06 — IrDA",
-            "rs232": "0x07 — RS232",
-            "cdma2000": "0x08 — cdma2000 packet data",
-            "gsm_3gpp_09": "0x09 — GSM/3GPP",
-            "iwlan": "0x0A — 3GPP I-WLAN",
-            "eutran": "0x0B — 3GPP E-UTRAN / Mapped UTRAN",
-            "usb": "0x10 — USB",
+            "gsm_3gpp_01": "0x01 -- GSM/3GPP",
+            "gsm_3gpp_02": "0x02 -- GSM/3GPP",
+            "default_bearer": "0x03 -- Default bearer for requested transport",
+            "local_link": "0x04 -- Local link (technology independent)",
+            "bluetooth": "0x05 -- Bluetooth",
+            "irda": "0x06 -- IrDA",
+            "rs232": "0x07 -- RS232",
+            "cdma2000": "0x08 -- cdma2000 packet data",
+            "gsm_3gpp_09": "0x09 -- GSM/3GPP",
+            "iwlan": "0x0A -- 3GPP I-WLAN",
+            "eutran": "0x0B -- 3GPP E-UTRAN / Mapped UTRAN",
+            "usb": "0x10 -- USB",
         },
     },
-    # Connectivity parameters — DCS coding groups (3GPP TS 23.038)
+    # Connectivity parameters -- DCS coding groups (3GPP TS 23.038)
     "dcsCodingGroup": {
         "choices": [
             "general_7bit", "general_8bit", "general_ucs2",
@@ -278,40 +275,40 @@ _COMMON_ENUM_CHOICES: dict[str, dict[str, Any]] = {
         ],
         "description": "DCS coding group (3GPP TS 23.038 §4)",
         "labels": {
-            "general_7bit": "General — GSM 7-bit (uncompressed)",
-            "general_8bit": "General — 8-bit data (uncompressed)",
-            "general_ucs2": "General — UCS2 (uncompressed)",
-            "compressed_7bit": "General — GSM 7-bit (compressed)",
-            "compressed_8bit": "General — 8-bit data (compressed)",
-            "compressed_ucs2": "General — UCS2 (compressed)",
-            "msg_waiting_discard": "Message Waiting — Discard",
-            "msg_waiting_store": "Message Waiting — Store",
-            "msg_waiting_store_ucs2": "Message Waiting — Store (UCS2)",
+            "general_7bit": "General -- GSM 7-bit (uncompressed)",
+            "general_8bit": "General -- 8-bit data (uncompressed)",
+            "general_ucs2": "General -- UCS2 (uncompressed)",
+            "compressed_7bit": "General -- GSM 7-bit (compressed)",
+            "compressed_8bit": "General -- 8-bit data (compressed)",
+            "compressed_ucs2": "General -- UCS2 (compressed)",
+            "msg_waiting_discard": "Message Waiting -- Discard",
+            "msg_waiting_store": "Message Waiting -- Store",
+            "msg_waiting_store_ucs2": "Message Waiting -- Store (UCS2)",
             "data_coding_class": "Data coding / message class",
         },
     },
-    # Connectivity parameters — TON (Type of Number)
+    # Connectivity parameters -- TON (Type of Number)
     "ton": {
         "choices": ["unknown", "international", "national", "network_specific"],
         "description": "Type of Number (3GPP TS 31.102 / EF.ADN)",
         "labels": {
-            "unknown": "0x0 — Unknown",
-            "international": "0x1 — International Number",
-            "national": "0x2 — National Number",
-            "network_specific": "0x3 — Network Specific Number",
+            "unknown": "0x0 -- Unknown",
+            "international": "0x1 -- International Number",
+            "national": "0x2 -- National Number",
+            "network_specific": "0x3 -- Network Specific Number",
         },
     },
-    # Connectivity parameters — NPI (Numbering Plan Identifier)
+    # Connectivity parameters -- NPI (Numbering Plan Identifier)
     "npi": {
         "choices": ["unknown", "isdn_e164", "data_x121", "telex_f69", "private", "extension"],
         "description": "Numbering Plan Identifier (3GPP TS 31.102 / EF.ADN)",
         "labels": {
-            "unknown": "0x0 — Unknown",
-            "isdn_e164": "0x1 — ISDN/Telephony (E.164/E.163)",
-            "data_x121": "0x3 — Data (X.121)",
-            "telex_f69": "0x4 — Telex (F.69)",
-            "private": "0x9 — Private",
-            "extension": "0xF — Reserved for extension",
+            "unknown": "0x0 -- Unknown",
+            "isdn_e164": "0x1 -- ISDN/Telephony (E.164/E.163)",
+            "data_x121": "0x3 -- Data (X.121)",
+            "telex_f69": "0x4 -- Telex (F.69)",
+            "private": "0x9 -- Private",
+            "extension": "0xF -- Reserved for extension",
         },
     },
     # Connectivity section type (add/remove sections)
@@ -367,7 +364,7 @@ def normalize_enum_choice_for_key(payload_key: str, value: Any) -> str | bool | 
     Boolean-valued enums accept the strings ``"true"`` / ``"false"``
     (case-insensitive) and fall back to the native ``bool`` for the
     JSON encoder. Returns ``None`` when the value doesn't match the
-    enum — callers may surface the valid set instead.
+    enum -- callers may surface the valid set instead.
     """
     descriptor = _COMMON_ENUM_CHOICES.get(payload_key)
     if descriptor is None:
@@ -916,6 +913,8 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-cmi",
         "ef-keys",
         "ef-keysPS",
+    # Probed with an already-lowercased EF key; keep both spellings.
+    "ef-keysps",
         "ef-kc",
         "ef-kcgprs",
         "ef-hiddenkey",
@@ -930,7 +929,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-cpbcch",
         "ef-invscan",
         "ef-s7",
-        # 5x10 additions — 5G EFs (DF.5GS).
+        # 5x10 additions -- 5G EFs (DF.5GS).
         "ef-5gs3gpploci",
         "ef-5gsn3gpploci",
         "ef-5gs3gppnsc",
@@ -947,7 +946,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-wlrplmn",
         "ef-5gsedrx",
         "ef-5gnswo-conf",
-        # 5x10 additions — Phonebook family.
+        # 5x10 additions -- Phonebook family.
         "ef-pbr",
         "ef-iap",
         "ef-sne",
@@ -960,7 +959,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-psc",
         "ef-cc",
         "ef-puid",
-        # 5x10 additions — legacy 3GPP.
+        # 5x10 additions -- legacy 3GPP.
         "ef-phase",
         "ef-plmnsel",
         "ef-bcch",
@@ -968,7 +967,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-fdnuri",
         "ef-sdnuri",
         "ef-lnduri",
-        # 5x10 additions — ISIM + multimedia extras.
+        # 5x10 additions -- ISIM + multimedia extras.
         "ef-pcscf-urn",
         "ef-muddomain",
         "ef-psismsc",
@@ -999,7 +998,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-mexe-st",
         "ef-prose-pfsr",
         "ef-vsuri",
-        # 5x20 Pass B — CSIM family.
+        # 5x20 Pass B -- CSIM family.
         "ef-csim-spc",
         "ef-csim-smscap",
         "ef-csim-min",
@@ -1020,7 +1019,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-csim-ssci",
         "ef-csim-mlpl",
         "ef-csim-meruiid",
-        # 5x20 Pass C — Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
+        # 5x20 Pass C -- Specialized (ISIM/MCPTT/V2X/ProSe/MCS).
         "ef-prose-pfidg",
         "ef-prose-pfddn",
         "ef-v2x-cfg",
@@ -1041,7 +1040,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
         "ef-mcs-keyset",
         "ef-mcs-stat",
         "ef-mcs-sec-profile",
-        # 5x20 Pass D — Operator / vendor / auxiliary.
+        # 5x20 Pass D -- Operator / vendor / auxiliary.
         "ef-opcust1",
         "ef-opcust2",
         "ef-opcust3",
@@ -1067,7 +1066,7 @@ _HEX_HINTED_EF_KEYS: frozenset[str] = frozenset(
 _LOSSY_SPLICE_EDITOR_NOTE = (
     "Lossy-splice decoded editor. Undecoded bytes (alpha-id padding, CCI, "
     "inner security TLVs) are preserved from the original record via the "
-    "'_ygg_original_hex' hint — do not edit or remove that field. Edit only "
+    "'_ygg_original_hex' hint -- do not edit or remove that field. Edit only "
     "the semantic fields you want to change; the splicer rewrites only the "
     "bytes whose decoded value differs from the original."
 )
@@ -1075,57 +1074,57 @@ _LOSSY_SPLICE_EDITOR_NOTE = (
 
 # Friendly titles for EFs whose roundtrip editor benefits from a spec
 # citation in the editor header. The gap analysis flagged these as
-# "missing dedicated wizards" — the underlying editor is already
+# "missing dedicated wizards" -- the underlying editor is already
 # round-trip capable, so the only thing missing was a per-EF label that
 # named the file plus the standards section it implements. New entries
 # go here rather than scattering them across the EF decoders.
 _EF_FRIENDLY_TITLES: dict[str, str] = {
-    "ef-dir": "EF.DIR — Application Directory · TS 102 221 §13.1",
+    "ef-dir": "EF.DIR -- Application Directory · TS 102 221 §13.1",
     "ef-routing-indicator": (
-        "EF.Routing_Indicator — TS 31.102 §4.4.11.10"
+        "EF.Routing_Indicator -- TS 31.102 §4.4.11.10"
     ),
     "ef-suci-calc-info": (
-        "EF.SUCI_Calc_Info — 5GS SUCI Calculation · TS 31.102 §4.4.11.8"
+        "EF.SUCI_Calc_Info -- 5GS SUCI Calculation · TS 31.102 §4.4.11.8"
     ),
     "ef-suci-calc-info-usim": (
-        "EF.SUCI_Calc_Info (USIM 4F01) — TS 31.102 §4.4.11.8"
+        "EF.SUCI_Calc_Info (USIM 4F01) -- TS 31.102 §4.4.11.8"
     ),
     "ef-ursp": (
-        "EF.URSP — UE Route Selection Policy · TS 31.102 §4.4.11.10 / TS 24.526"
+        "EF.URSP -- UE Route Selection Policy · TS 31.102 §4.4.11.10 / TS 24.526"
     ),
-    "ef-imsi": "EF.IMSI — TS 31.102 §4.4.11.1",
-    "ef-iccid": "EF.ICCID — TS 102 221 §13.2",
-    "ef-arr": "EF.ARR — Access Rule Reference · TS 102 221 §11.1.1.4",
-    "ef-ust": "EF.UST — USIM Service Table · TS 31.102 §4.2.8",
-    "ef-est": "EF.EST — Enabled Services Table · TS 31.102 §4.2.24",
-    "ef-ist": "EF.IST — ISIM Service Table · TS 31.103 §4.2.7",
-    "ef-spn": "EF.SPN — Service Provider Name · TS 31.102 §4.2.12",
-    "ef-pl": "EF.PL — Preferred Languages · TS 102 221 §13.3",
-    "ef-li": "EF.LI — Language Indication · TS 31.102 §4.2.6",
-    "ef-acc": "EF.ACC — Access Control Class · TS 31.102 §4.2.15",
-    "ef-ad": "EF.AD — Administrative Data · TS 31.102 §4.2.18",
-    "ef-pnn": "EF.PNN — PLMN Network Name · TS 31.102 §4.2.58",
-    "ef-opl": "EF.OPL — Operator PLMN List · TS 31.102 §4.2.59",
-    "ef-spdi": "EF.SPDI — Service Provider Display · TS 31.102 §4.2.66",
-    "ef-msisdn": "EF.MSISDN — TS 31.102 §4.2.26",
-    "ef-fdn": "EF.FDN — Fixed Dialling Numbers · TS 31.102 §4.4.2",
-    "ef-adn": "EF.ADN — Abbreviated Dialling Numbers · TS 31.102 §4.4.2",
-    "ef-sdn": "EF.SDN — Service Dialling Numbers · TS 31.102 §4.4.2",
-    "ef-ecc": "EF.ECC — Emergency Call Codes · TS 31.102 §4.2.43",
-    "ef-impi": "EF.IMPI — IMS Private User Identity · TS 31.103 §4.2.2",
-    "ef-impu": "EF.IMPU — IMS Public User Identity · TS 31.103 §4.2.4",
-    "ef-domain": "EF.DOMAIN — IMS Home Network Domain · TS 31.103 §4.2.3",
-    "ef-pcscf": "EF.P-CSCF — IMS P-CSCF Address · TS 31.103 §4.2.8",
-    "ef-5g-suci-calc-info": "EF.5G_SUCI_Calc_Info — TS 31.102 §4.4.11.8",
-    "ef-5gauthkeys": "EF.5G_AUTH_KEYS — TS 31.102 §4.4.11.6",
-    "ef-uac-aic": "EF.UAC_AIC — Access Identities Configuration · TS 31.102 §4.4.11.7",
-    "ef-opl5g": "EF.OPL5G — 5GS Operator PLMN List · TS 31.102 §4.4.11.9",
-    "ef-uplmnwlan": "EF.UPLMNWLAN — I-WLAN User PLMN List · TS 31.102 §4.2.82",
-    "ef-oplmnwlan": "EF.OPLMNWLAN — I-WLAN Operator PLMN List · TS 31.102 §4.2.83",
-    "ef-wlrplmn": "EF.WLRPLMN — I-WLAN Last Registered PLMN · TS 31.102 §4.2.91",
-    "ef-tn3gppsnn": "EF.TN3GPPSNN — Trusted Non-3GPP SSID · TS 31.102 §4.4.11.11",
-    "ef-supinai": "EF.SUPI_NAI — TS 31.102 §4.4.11.13",
-    "ef-cag": "EF.CAG — Pre-configured CAG list · TS 31.102 §4.4.11.14",
+    "ef-imsi": "EF.IMSI -- TS 31.102 §4.4.11.1",
+    "ef-iccid": "EF.ICCID -- TS 102 221 §13.2",
+    "ef-arr": "EF.ARR -- Access Rule Reference · TS 102 221 §11.1.1.4",
+    "ef-ust": "EF.UST -- USIM Service Table · TS 31.102 §4.2.8",
+    "ef-est": "EF.EST -- Enabled Services Table · TS 31.102 §4.2.24",
+    "ef-ist": "EF.IST -- ISIM Service Table · TS 31.103 §4.2.7",
+    "ef-spn": "EF.SPN -- Service Provider Name · TS 31.102 §4.2.12",
+    "ef-pl": "EF.PL -- Preferred Languages · TS 102 221 §13.3",
+    "ef-li": "EF.LI -- Language Indication · TS 31.102 §4.2.6",
+    "ef-acc": "EF.ACC -- Access Control Class · TS 31.102 §4.2.15",
+    "ef-ad": "EF.AD -- Administrative Data · TS 31.102 §4.2.18",
+    "ef-pnn": "EF.PNN -- PLMN Network Name · TS 31.102 §4.2.58",
+    "ef-opl": "EF.OPL -- Operator PLMN List · TS 31.102 §4.2.59",
+    "ef-spdi": "EF.SPDI -- Service Provider Display · TS 31.102 §4.2.66",
+    "ef-msisdn": "EF.MSISDN -- TS 31.102 §4.2.26",
+    "ef-fdn": "EF.FDN -- Fixed Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-adn": "EF.ADN -- Abbreviated Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-sdn": "EF.SDN -- Service Dialling Numbers · TS 31.102 §4.4.2",
+    "ef-ecc": "EF.ECC -- Emergency Call Codes · TS 31.102 §4.2.21",
+    "ef-impi": "EF.IMPI -- IMS Private User Identity · TS 31.103 §4.2.2",
+    "ef-impu": "EF.IMPU -- IMS Public User Identity · TS 31.103 §4.2.4",
+    "ef-domain": "EF.DOMAIN -- IMS Home Network Domain · TS 31.103 §4.2.3",
+    "ef-pcscf": "EF.P-CSCF -- IMS P-CSCF Address · TS 31.103 §4.2.8",
+    "ef-5g-suci-calc-info": "EF.5G_SUCI_Calc_Info -- TS 31.102 §4.4.11.8",
+    "ef-5gauthkeys": "EF.5G_AUTH_KEYS -- TS 31.102 §4.4.11.6",
+    "ef-uac-aic": "EF.UAC_AIC -- Access Identities Configuration · TS 31.102 §4.4.11.7",
+    "ef-opl5g": "EF.OPL5G -- 5GS Operator PLMN List · TS 31.102 §4.4.11.9",
+    "ef-uplmnwlan": "EF.UPLMNWLAN -- I-WLAN User PLMN List · TS 31.102 §4.4.5.2",
+    "ef-oplmnwlan": "EF.OPLMNWLAN -- I-WLAN Operator PLMN List · TS 31.102 §4.4.5.3",
+    "ef-wlrplmn": "EF.WLRPLMN -- I-WLAN Last Registered PLMN · TS 31.102 §4.4.5.10",
+    "ef-tn3gppsnn": "EF.TN3GPPSNN -- Trusted Non-3GPP SSID · TS 31.102 §4.4.11.13",
+    "ef-supinai": "EF.SUPI_NAI -- TS 31.102 §4.4.11.10",
+    "ef-cag": "EF.CAG -- Pre-configured CAG list · TS 31.102 §4.4.11.14",
 }
 
 
@@ -1135,16 +1134,16 @@ def _roundtrip_editor_title(field_name: str, last_ef_key: str | None) -> str:
     ef_token_lower = ef_token_raw.lower()
     friendly = _EF_FRIENDLY_TITLES.get(ef_token_lower)
     if base == "fillFileContent" and friendly is not None:
-        return f"File data — {friendly}"
+        return f"File data -- {friendly}"
     if base == "fillFileContent" and len(ef_token_raw) > 0:
-        return f"File data — {ef_token_raw}"
+        return f"File data -- {ef_token_raw}"
     if base == "fillFileContent":
         return "File data"
     if len(ef_token_raw) > 0:
         if friendly is not None:
-            return f"Decoded — {friendly} / {base}"
-        return f"Decoded — {ef_token_raw} / {base}"
-    return f"Decoded — {base}"
+            return f"Decoded -- {friendly} / {base}"
+        return f"Decoded -- {ef_token_raw} / {base}"
+    return f"Decoded -- {base}"
 
 
 def _roundtrip_editor_payload(decoded: Any) -> dict[str, Any]:
@@ -1169,7 +1168,7 @@ def build_decoded_value_roundtrip_model(
     ``build_decoded_value_editor_model`` decline the field.
 
     ``pe_section_key`` carries the enclosing PE section (``usim``,
-    ``telecom``, ``isim``, ``csim`` …) through to
+    ``telecom``, ``isim``, ``csim`` ...) through to
     ``_decode_known_ef_payload`` / ``_decode_special_field`` as the
     ``parent_hint`` so colliding FIDs resolve correctly.
 
@@ -1202,6 +1201,13 @@ def build_decoded_value_roundtrip_model(
             return None
         if isinstance(decoded_ef, (dict, list)) is False:
             return None
+        # A decode that stopped early describes a prefix, not the file. EF.ARR
+        # holds several linear-fixed records and the walk runs out of the first
+        # one, so a rule editor here would only ever show part of the content
+        # and could not save it back. Decline, and let the hex editor take it.
+        if isinstance(decoded_ef, dict):
+            if decoded_ef.get("parseErrorOffset") is not None:
+                return None
         target_length = len(raw_hex) // 2
         editor_payload = _roundtrip_editor_payload(decoded_ef)
         editor_note = _ROUNDTRIP_EDITOR_NOTE
@@ -1514,14 +1520,24 @@ def encode_decoded_value_editor_payload(
         return _tagged_bytes(_clean_hex(payload.get("fid"), label="fid", expected_nibbles=4))
     if normalized_field == "iccid":
         iccid = str(payload.get("iccid", "") or "").strip()
+        if not iccid and str(payload.get("hex", "") or "").strip():
+            # The field's bytes themselves: a placeholder's sentinel stands
+            # in for the digits.
+            return _tagged_bytes(_clean_hex(payload.get("hex"), label="hex", expected_nibbles=20))
         return _tagged_bytes(encode_iccid_ef_hex(iccid).upper())
     if normalized_field == "fillFileContent" and _service_table_definition(last_ef_key) is not None:
         return _encode_service_table_payload(payload)
     if normalized_field == "fillFileContent" and str(last_ef_key or "").strip() == "ef-imsi":
         imsi = str(payload.get("imsi", "") or "").strip()
+        if not imsi and str(payload.get("hex", "") or "").strip():
+            # The field's bytes themselves: a placeholder stands in for the
+            # digits (its sentinel arrives here), the length byte in front.
+            return _tagged_bytes(_clean_hex(payload.get("hex"), label="hex", expected_nibbles=18))
         return _tagged_bytes(encode_imsi_ef_hex(imsi).upper())
     if normalized_field == "fillFileContent" and str(last_ef_key or "").strip() == "ef-iccid":
         iccid = str(payload.get("iccid", "") or "").strip()
+        if not iccid and str(payload.get("hex", "") or "").strip():
+            return _tagged_bytes(_clean_hex(payload.get("hex"), label="hex", expected_nibbles=20))
         return _tagged_bytes(encode_iccid_ef_hex(iccid).upper())
     # Fall through: try the roundtrip encoder registry for any field that
     # isn't wired to a hand-written editor above.
@@ -1570,17 +1586,17 @@ def _summarize_for_picker(
     if hex_value is not None:
         compact = str(hex_value or "").upper()
         byte_len = len(compact) // 2
-        preview = compact[:24] + ("…" if len(compact) > 24 else "")
+        preview = compact[:24] + ("..." if len(compact) > 24 else "")
         return f"{kind_label} · {byte_len}B · {preview}"
     if isinstance(payload, dict):
         flat_parts: list[str] = []
         for key, value in list(payload.items())[:3]:
             value_text = str(value)
             if len(value_text) > 24:
-                value_text = value_text[:24] + "…"
+                value_text = value_text[:24] + "..."
             flat_parts.append(f"{key}={value_text}")
         if len(payload) > 3:
-            flat_parts.append("…")
+            flat_parts.append("...")
         return f"{kind_label} · {' '.join(flat_parts)}" if flat_parts else kind_label
     if isinstance(payload, (list, tuple)):
         return f"{kind_label} · [{len(payload)} entries]"
@@ -1588,7 +1604,7 @@ def _summarize_for_picker(
         return kind_label
     value_text = str(payload)
     if len(value_text) > 48:
-        value_text = value_text[:48] + "…"
+        value_text = value_text[:48] + "..."
     return f"{kind_label} · {value_text}"
 
 
@@ -1764,6 +1780,52 @@ def _gfm_create_fcp_is_container(create_fcp_value: Any) -> bool:
     return isinstance(desc, dict) and desc.get("fileType") == "df"
 
 
+def _inline_placeholder_enumeration_model(
+    *,
+    field_name: str,
+    raw_value: Any,
+    last_ef_key: str | None,
+) -> dict[str, Any] | None:
+    """Read-only model for a tagged-bytes field that carries a template placeholder.
+
+    A varder / ASN.1 template session shows ``[nameTYPElen]`` literals in
+    its hex leaves. No decoder can interpret those, so the field is listed
+    as a read-only placeholder view instead of being dropped from the
+    panel; the value is bound through the token editor.
+    """
+    if isinstance(raw_value, dict) is False:
+        return None
+    hex_text = raw_value.get(_TAG_BYTES)
+    if isinstance(hex_text, str) is False:
+        return None
+    from .saip_hex_template import (
+        describe_inline_placeholder_hex,
+        detect_inline_placeholders,
+    )
+
+    if detect_inline_placeholders(hex_text) is False:
+        return None
+    payload = describe_inline_placeholder_hex(
+        hex_text,
+        field_name=field_name,
+        ef_key=last_ef_key,
+    )
+    if isinstance(payload, dict) is False:
+        return None
+    placeholder_count = len(payload.get("placeholders") or [])
+    plural = "" if placeholder_count == 1 else "s"
+    return {
+        "editor_kind": "readonly_json",
+        "read_only": True,
+        "title": f"{field_name} -- inline template placeholder{plural}",
+        "note": (
+            "This field holds a template placeholder. Set its value in the "
+            "token editor; a DER / HEX export substitutes the stored value."
+        ),
+        "payload": copy.deepcopy(payload),
+    }
+
+
 def _resolve_pe_editor_model_for_enumeration(
     *,
     field_name: str,
@@ -1790,12 +1852,20 @@ def _resolve_pe_editor_model_for_enumeration(
        surface it without accepting edits.
     4. Raw-hex fallback (``build_decoded_value_raw_hex_model``) for
        any remaining tagged-bytes field so the whole PE stays
-       editable — even legacy or niche fields the project hasn't
+       editable -- even legacy or niche fields the project hasn't
        decoded yet.
 
     Returns ``None`` only when the field carries no tagged bytes and
     no scalar decoder recognises it (i.e. nothing editable is left).
     """
+    inline_placeholder = _inline_placeholder_enumeration_model(
+        field_name=field_name,
+        raw_value=raw_value,
+        last_ef_key=last_ef_key,
+    )
+    if inline_placeholder is not None:
+        return inline_placeholder
+
     hand_written = build_decoded_value_editor_model(
         field_name=field_name,
         raw_value=raw_value,
@@ -1829,7 +1899,7 @@ def _resolve_pe_editor_model_for_enumeration(
         pe_section_key=pe_section_key,
     )
     if isinstance(readonly, dict):
-        # Fall through to raw-hex — semantic decode succeeded but no
+        # Fall through to raw-hex -- semantic decode succeeded but no
         # round-trip encoder exists. The decoded form is surfaced as a
         # reference summary; editing happens via the raw hex surface.
         pass
@@ -1878,13 +1948,13 @@ def enumerate_pe_decodable_fields(
     round-trip encoders, read-only decoders, and raw-hex fallbacks
     are all surfaced. The bulk PE form can therefore present every
     non-trivial field of the PE in one place (application / domain
-    PEs benefit the most — file-system PEs still route through the
+    PEs benefit the most -- file-system PEs still route through the
     EF-scoped form).
 
     Recognised shapes:
 
-    * ``{"<field>": {"hex": "..."}}`` — plain hex-valued field on a dict.
-    * ``{"@": ["<field>", <value>]}`` — tagged tuple (SAIP profile-element
+    * ``{"<field>": {"hex": "..."}}`` -- plain hex-valued field on a dict.
+    * ``{"@": ["<field>", <value>]}`` -- tagged tuple (SAIP profile-element
       items commonly used for ``fillFileContent`` and similar).
 
     Duplicate field names across different EFs are retained (each is a
@@ -2143,7 +2213,7 @@ def _insert_payload_at_path(
     extend a list; string segments create/use a dict. Pre-existing
     container mismatches raise ``ValueError`` because that would
     indicate two entries pointing at the same slot with different
-    structures — a decoder bug worth surfacing.
+    structures -- a decoder bug worth surfacing.
     """
     if len(path) == 0:
         raise ValueError("Cannot insert payload at an empty path.")
@@ -2188,7 +2258,7 @@ def build_pe_form_document(
     """
     Build a nested JSON document that mirrors the PE structure, with
     each entry's decoded payload placed at its insertion path. Matches
-    the visual layout of the decoded pane — the operator sees the same
+    the visual layout of the decoded pane -- the operator sees the same
     semantic tree they would navigate field-by-field, just laid out in
     full so they can edit everything in one pass.
     """
@@ -2255,7 +2325,7 @@ def enumerate_pe_form_unknown_paths(
     entry (neither as a terminal leaf nor as a prefix of one). Used by
     the apply step to flag unknown keys before any encoding happens.
     Descent stops at every terminal path so the payload dicts
-    themselves are not scrutinised — their schema is the encoder's
+    themselves are not scrutinised -- their schema is the encoder's
     concern.
     """
     expected: set[tuple[Any, ...]] = {

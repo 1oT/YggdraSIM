@@ -65,10 +65,12 @@ class ActionSpecRegistrationTests(unittest.TestCase):
         self.assertTrue(expected.issubset(registered))
 
     def test_actions_share_subsystem_label(self) -> None:
+        # The AKMA actions read the AAnF stub the stub AUSF writes, so they sit
+        # in the YggdraCore module beside it.
         registry = get_registry()
         for action_id in ("akma.derive_keys", "akma.aanf_register", "akma.af_session_establish"):
             spec = registry.get(action_id)
-            self.assertEqual(spec.subsystem, "AKMA")
+            self.assertEqual(spec.subsystem, "YggdraCore")
             self.assertEqual(spec.output_kind, "json")
             self.assertFalse(spec.requires_card)
 

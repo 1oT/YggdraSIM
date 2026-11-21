@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Cross-surface regression tests for EPS/5GS location-file layouts.
 
 The embedded mobile identities include their TS 24.301/24.501 length and

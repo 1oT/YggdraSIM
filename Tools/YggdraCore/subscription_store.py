@@ -64,12 +64,14 @@ class SubscriptionRecord:
         return format_home_network_identifier(mcc=self.mcc, mnc=self.mnc)
 
     def public_view(self) -> dict[str, object]:
-        """Sanitised dict for GUI / HTTP responses (no key material)."""
+        """Dict for GUI / HTTP responses, key material included."""
         return {
             "supi": self.supi,
             "mcc": self.mcc,
             "mnc": self.mnc,
             "routing_indicator": self.routing_indicator,
+            "k_hex": self.k.hex().upper(),
+            "opc_hex": self.opc.hex().upper(),
             "amf_hex": self.amf.hex().upper(),
             "sqn_hex": self.sqn.hex().upper(),
             "akma_enabled": self.akma_enabled,

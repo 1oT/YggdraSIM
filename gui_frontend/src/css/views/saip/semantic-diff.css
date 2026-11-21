@@ -26,7 +26,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: lowercase;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid transparent;
 }
 
@@ -114,7 +114,7 @@
 .saip-cmp-sem-group {
   margin: 6px 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
@@ -209,13 +209,13 @@
 }
 
 .cc-chip--a {
-  background: rgba(255, 154, 106, 0.18);
-  color: #ff9a6a;
-  border-color: rgba(255, 154, 106, 0.35);
+  background: var(--fail-soft);
+  color: var(--fail);
+  border-color: color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .cc-chip--b {
-  background: rgba(120, 220, 130, 0.18);
-  color: #78dc82;
-  border-color: rgba(120, 220, 130, 0.35);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 45%, transparent);
 }

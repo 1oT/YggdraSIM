@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for `_apply_hex_mutation` proprietary-nested support.
 
 `saip.update_file_field` originally only addressed top-level CHOICE-payload
-keys (shortEFID, fileDescriptor, …). The proprietary block lives one level
+keys (shortEFID, fileDescriptor, ...). The proprietary block lives one level
 deeper inside `fileDescriptor / proprietaryEFInfo`, so the mutation helper
 now resolves a single dotted path before substituting bytes.
 """
@@ -88,7 +87,7 @@ class TestApplyHexMutationProprietary(unittest.TestCase):
         self.assertEqual(proprietary["fileDetails"], b"\x42")
 
     def test_dotted_path_grows_container_when_outer_missing(self) -> None:
-        # PEDocumentation ProprietaryEFInfo is optional — SAIP packages
+        # PEDocumentation ProprietaryEFInfo is optional -- SAIP packages
         # often omit it when default. The mutation helper grows it on
         # demand when the host CHOICE payload carries FCP siblings,
         # so a freshly cloned EF can land its first proprietary value
@@ -107,7 +106,11 @@ class TestApplyHexMutationProprietary(unittest.TestCase):
         proprietary = choice_list[0][1]["proprietaryEFInfo"]
         self.assertEqual(proprietary["specialFileInformation"], b"\x80")
 
-    def test_dotted_path_returns_false_when_no_fcp_host(self) -> None:
+    def test_dotted_path_grows_fcp_arm_ahead_of_fill_entries(self) -> None:
+        # A file that inherits its whole FCP from the template carries no
+        # fileDescriptor arm at all. TCA SAIP v3.4.1 §8.3.2 Figure 2 has
+        # the Fcp create the file and the fill entries update the last
+        # file created, so the new arm lands at index 0.
         choice_list = [
             ("fillFileContent", OrderedDict([("body", b"\xFF\xFF")])),
         ]
@@ -118,10 +121,16 @@ class TestApplyHexMutationProprietary(unittest.TestCase):
             b"\x80",
         )
 
-        self.assertFalse(applied)
+        self.assertTrue(applied)
+        self.assertEqual(choice_list[0][0], "fileDescriptor")
+        self.assertEqual(
+            choice_list[0][1]["proprietaryEFInfo"]["specialFileInformation"],
+            b"\x80",
+        )
+        self.assertEqual(choice_list[1][0], "fillFileContent")
 
     def test_dotted_path_grows_container_for_fill_pattern(self) -> None:
-        # ETSI TS 102 222 §6.3.2.2 — fillPattern is a leaf inside
+        # ETSI TS 102 222 §6.3.2.2 -- fillPattern is a leaf inside
         # proprietaryEFInfo; the mutation helper must let the GUI add
         # it even when the package omitted the proprietary block.
         choice_list = [
@@ -139,15 +148,27 @@ class TestApplyHexMutationProprietary(unittest.TestCase):
         self.assertEqual(proprietary["fillPattern"], b"\xDE\xAD\xBE\xEF")
 
     def test_summary_extracts_proprietary_pair(self) -> None:
-        choice_list = _build_choice_list_with_proprietary(b"\x80", b"\x01")
+        choice_list = _build_choice_list_with_proprietary(b"\x80", b"\x00")
         summary = _summarise_file_choices(choice_list)
 
         self.assertIsNotNone(summary)
         assert summary is not None  # type narrowing for mypy
         self.assertEqual(summary["proprietary_special_info"], "80")
-        self.assertEqual(summary["proprietary_details"], "01")
+        self.assertEqual(summary["proprietary_details"], "00")
         # Top-level descriptor + sentinel still detected.
         self.assertEqual(summary["descriptor"], "4221001416")
+
+    def test_summary_leaves_out_the_asn1_defaults(self) -> None:
+        # TCA SAIP V3.4.1 section 8.3.2: specialFileInformation DEFAULT '00'H,
+        # fileDetails DEFAULT '01'H. DER never encodes either (X.690 11.5) and
+        # the decoder fills them in, so they read as absent.
+        summary = _summarise_file_choices(
+            _build_choice_list_with_proprietary(b"\x00", b"\x01")
+        )
+
+        assert summary is not None  # type narrowing for mypy
+        self.assertEqual(summary["proprietary_special_info"], "")
+        self.assertEqual(summary["proprietary_details"], "")
 
     def test_summary_extracts_pattern_and_max_size(self) -> None:
         # PEDocumentation ProprietaryEFInfo includes fillPattern,

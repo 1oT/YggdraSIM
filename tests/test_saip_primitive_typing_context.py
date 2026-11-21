@@ -18,9 +18,9 @@ in places the specification does not mandate such rendering):
   when the containing spec field is text / BCD-typed.
 
 Concrete EFs exercised:
-  * ef-eapkeys — MSK / EMSK must never be ASCII-rendered.
-  * ef-mmsicp  — MMS relay URL (tag 81) is declared text.
-  * ef-xcapconfigdata — URI / username are text; password stays raw.
+  * ef-eapkeys -- MSK / EMSK must never be ASCII-rendered.
+  * ef-mmsicp  -- MMS relay URL (tag 81) is declared text.
+  * ef-xcapconfigdata -- URI / username are text; password stays raw.
 """
 
 from __future__ import annotations
@@ -210,5 +210,5 @@ class TestXcapConfigDataContextualTyping:
         tags = {item["tag"]: item for item in decoded["items"]}
         assert tags["84"]["decoded"] == "http://xcap.op/abc"
         assert tags["85"]["decoded"] == "alice"
-        # Password stays opaque — no text inference for credentials.
+        # Password stays opaque -- no text inference for credentials.
         assert "decoded" not in tags["86"]

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 from __future__ import annotations
 
@@ -39,8 +38,20 @@ class SaipPeGuiGapTests(unittest.TestCase):
 
     def test_sparse_pe_branch(self) -> None:
         self.assertEqual(
-            classify_pe_gui_tier("cdmaParameter"),
+            classify_pe_gui_tier("ssimEapTlsParameters"),
             "sparse_identity_card_section_wizard",
+        )
+
+    def test_cdma_has_a_typed_card(self) -> None:
+        self.assertEqual(
+            classify_pe_gui_tier("cdmaParameter"),
+            "typed_summary_cards_wizard",
+        )
+
+    def test_eap_uses_the_template_workbench(self) -> None:
+        self.assertEqual(
+            classify_pe_gui_tier("eap"),
+            "filesystem_template_catalog_no_pe_decoded_panel",
         )
 
     def test_union_contains_diff_only_labels(self) -> None:
@@ -68,10 +79,10 @@ class SaipPeGuiGapTests(unittest.TestCase):
             "typed_summary_cards_wizard",
         )
 
-    def test_nonstandard_sparse_tier(self) -> None:
+    def test_nonstandard_has_a_typed_card(self) -> None:
         self.assertEqual(
             classify_pe_gui_tier("nonStandard"),
-            "nonstandard_sparse_card_untyped_section_wizard",
+            "typed_summary_cards_wizard",
         )
 
     def test_isdr_security_tier(self) -> None:

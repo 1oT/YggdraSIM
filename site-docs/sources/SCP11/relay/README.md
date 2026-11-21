@@ -5,33 +5,30 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 # SCP11 Relay Compatibility Namespace
 
-`SCP11/relay` preserves the historical relay namespace. It is still runnable,
-but it is no longer the preferred place to start new operator documentation or
-new day-to-day workflows.
+`SCP11/relay` preserves the historical relay import path and the
+`python -m SCP11.relay` / `yggdrasim-scp11-relay` entry points. Every
+module in it is an alias of the matching `SCP11/live` module: the
+orchestrator, console, ES9+ client, configuration, factory, models and
+entry point are the eSIM management relay's own. The namespace therefore
+runs the same shell, reads the same `Workspace/SCP11/live` runtime tree,
+loads the same plugins and registers the same commands, including the
+verb spellings the old standalone relay console used: `DOWNLOAD-AC`,
+`GET-METADATA`, `EIM-DISCOVER` and `EIM-DOWNLOAD` remain aliases of
+`DOWNLOAD-PROFILE`, `METADATA`, `DISCOVER` and `DOWNLOAD`.
 
 ## Use this namespace when
 
 - an older script imports `SCP11.relay`
 - an automation contract still expects the legacy relay entrypoint
-- a transition needs the old namespace while the operator model is being
-  migrated to the split `live` / `test` layout
 
 ## Preferred relay entry points
 
 For new operator work, use:
 
-- `SCP11/live` for live-default relay work
-- `SCP11/test` for lab/test relay work
+- `SCP11/live` for relay work
+- `SCP11/test` only where an older import path still names it; it is the
+  same kind of alias as this namespace
 - `SCP11/relay` only when an older script still depends on the compatibility namespace
-
-## Relay command model
-
-The compatibility namespace follows the same broad relay shape:
-
-- relay utilities and snapshot inspection
-- `LPAd` activation-code download
-- `IPAd` discovery and eIM-driven download
-- compatibility and expert commands behind `HELP EXPERT`
 
 Simulator note:
 

@@ -61,7 +61,7 @@
   font-weight: 700;
   letter-spacing: 0.05em;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-hover);
 }
 

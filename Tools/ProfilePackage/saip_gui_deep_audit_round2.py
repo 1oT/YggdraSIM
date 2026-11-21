@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Second-pass SAIP GUI / backend consistency checks.
 
 Complements :mod:`Tools.ProfilePackage.saip_ef_wizard_gui_audit` with angles
@@ -105,7 +104,7 @@ def hand_written_fill_ef_keys_backed_by_file_specs() -> list[str]:
 
 
 def _else_if_dispatch_pe_types(body: str) -> list[str]:
-    """PE strings only from ``} else if (t === …) {`` dispatch lines."""
+    """PE strings only from ``} else if (t === ...) {`` dispatch lines."""
     types: list[str] = []
     for line in body.splitlines():
         if "} else if (t ===" not in line:

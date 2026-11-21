@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """eIM-local data models: handover context, runtime state, and transaction helpers for the local eIM session."""
 from dataclasses import asdict, dataclass, field
 from typing import Any

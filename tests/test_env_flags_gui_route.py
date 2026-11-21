@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Route-level tests for the GUI environment-flag surface."""
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ except ImportError:
 
 _needs_gui_stack = pytest.mark.skipif(
     not _FASTAPI_AVAILABLE,
-    reason="FastAPI / Starlette not installed — gui extra missing.",
+    reason="FastAPI / Starlette not installed -- gui extra missing.",
 )
 
 
@@ -67,3 +66,34 @@ def test_clear_flag_handler_removes_session_value(monkeypatch) -> None:
     assert response.flag.is_set is False
     assert flag.name in response.note
     assert flag.name not in os.environ
+
+
+def test_every_opt_in_gui_capability_is_discoverable() -> None:
+    """A gate an operator must set has to be findable in the registry."""
+    from yggdrasim_common.env_flags import FLAG_REGISTRY
+
+    flags = {flag.name: flag for flag in FLAG_REGISTRY}
+    assert "YGGDRASIM_GUI_HOST_SHELL" in flags
+
+
+def test_the_modem_terminal_is_not_gated_by_a_flag() -> None:
+    """It was one, and the flag was the whole problem.
+
+    Read once at startup, it could not be turned on from the window that
+    needed it, and it guarded a scope already constrained to a known
+    serial terminal against an explicit device path.
+    """
+    from yggdrasim_common.env_flags import FLAG_REGISTRY
+
+    assert "YGGDRASIM_GUI_HIL_MODEM" not in {flag.name for flag in FLAG_REGISTRY}
+
+
+def test_the_registry_lists_each_flag_once() -> None:
+    from collections import Counter
+
+    from yggdrasim_common.env_flags import FLAG_REGISTRY
+
+    duplicated = [
+        name for name, count in Counter(f.name for f in FLAG_REGISTRY).items() if count > 1
+    ]
+    assert duplicated == []

@@ -17,12 +17,24 @@ the workbench and is deliberately not changed by materialization.
 from __future__ import annotations
 
 import copy
+import json
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from .saip_hex_template import InlinePlaceholderRecord
+from yggdrasim_common.secure_files import (
+    atomic_write_bytes,
+    read_bounded_regular_file,
+)
+
+from .saip_hex_template import (
+    InlinePlaceholderRecord,
+    normalise_placeholder_modifier,
+    placeholder_key_fold,
+    placeholder_key_fold_relaxed,
+)
 from .saip_profile_template import (
     encode_iccid_ef_hex,
     encode_iccid_header_hex,
@@ -35,6 +47,14 @@ LEGACY_VARIABLE_CATALOG_SCHEMAS = frozenset(
 )
 
 _HEX_RE = re.compile(r"^[0-9A-F]+$")
+
+# Stored inline-variable values travel beside a varder / ASN.1 template in
+# a ``<stem>.variables.json`` sidecar (tagged JSON embeds the same map in
+# its ``__ygg_inline_placeholders__`` block). The value is the operator's
+# typed input, encoded per occurrence at export time.
+INLINE_VARIABLE_SIDECAR_SCHEMA = "yggdrasim.saip-inline-variables/v1"
+_INLINE_VARIABLE_SIDECAR_SUFFIX = ".variables.json"
+_MAX_INLINE_VARIABLE_SIDECAR_BYTES = 4 * 1024 * 1024
 _SECRET_NAME_RE = re.compile(
     r"(?:^|_)(?:K|KI|OPC|PIN\d*|PUK\d*|ADM\d*|KIC|KIK|KID|DEK|KEK|PSK)(?:$|_)",
     re.IGNORECASE,
@@ -210,11 +230,13 @@ def encode_inline_placeholder_value(record: InlinePlaceholderRecord, value: str)
     """Encode a compact typed placeholder value to its exact declared width."""
 
     type_name = str(record.type_name or "").strip().upper()
-    modifier = str(record.modifier or "").strip().casefold()
-    if type_name == "BINARY":
+    # ``NibbleSwap``, ``nibble_swap`` and ``SwapNibbles`` are one modifier and
+    # ``utf8`` on TEXT folds away (saip_hex_template.normalise_placeholder_modifier).
+    modifier = normalise_placeholder_modifier(record.modifier, type_name)
+    if type_name in {"BINARY", "RI", "OPLMN"}:
         payload = _hex_bytes(value, label=record.variable_name)
     elif type_name == "TEXT":
-        if modifier not in {"", "utf8", "utf-8"}:
+        if modifier:
             raise SaipVariableMaterializationError(
                 f"Inline TEXT variable {record.variable_name!r} has unsupported modifier "
                 f"{record.modifier!r}."
@@ -224,7 +246,7 @@ def encode_inline_placeholder_value(record: InlinePlaceholderRecord, value: str)
         try:
             encoded_hex = (
                 encode_iccid_ef_hex(value)
-                if modifier in {"nibbleswap", "swapnibbles"}
+                if modifier == "nibbleswap"
                 else encode_iccid_header_hex(value)
             )
         except ValueError as error:
@@ -244,6 +266,104 @@ def encode_inline_placeholder_value(record: InlinePlaceholderRecord, value: str)
             f"{record.byte_length} bytes, got {len(payload)}."
         )
     return payload
+
+
+def decode_inline_placeholder_value(record: Any, payload: bytes) -> str | None:
+    """The typed value that encodes to ``payload`` for ``record``, or ``None``.
+
+    The inverse of :func:`encode_inline_placeholder_value`: BINARY, RI and
+    OPLMN read back as hex, TEXT as UTF-8, ICCID (header or EF form by the
+    modifier), IMSI (TS 24.008 section 10.5.1.4 digit coding, without the
+    length byte) and MSISDN (nibble-swapped BCD, F filler) as digits. The
+    answer is proven by re-encoding; bytes that no value of the type
+    produces give ``None``, so a caller stores them per occurrence instead.
+    """
+
+    data = bytes(payload or b"")
+    type_name = str(getattr(record, "type_name", "") or "").strip().upper()
+    modifier = normalise_placeholder_modifier(getattr(record, "modifier", None), type_name)
+    width = int(getattr(record, "byte_length", 0) or 0)
+    if not data or (width and len(data) != width):
+        return None
+    if type_name in {"BINARY", "RI", "OPLMN"}:
+        return data.hex().upper()
+    if type_name == "TEXT":
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        return text if text.encode("utf-8") == data else None
+    hex_text = data.hex().upper()
+    if type_name == "ICCID":
+        natural = (
+            "".join(hex_text[index + 1] + hex_text[index] for index in range(0, len(hex_text), 2))
+            if modifier == "nibbleswap"
+            else hex_text
+        )
+        for digits in (natural, natural.rstrip("F")):
+            if not digits or digits.isdigit() is False:
+                continue
+            try:
+                encoded = (
+                    encode_iccid_ef_hex(digits)
+                    if modifier == "nibbleswap"
+                    else encode_iccid_header_hex(digits)
+                )
+            except ValueError:
+                continue
+            if encoded.upper() == hex_text:
+                return digits
+        return None
+    if type_name == "IMSI":
+        digits = hex_text[0]
+        for index in range(2, len(hex_text), 2):
+            digits += hex_text[index + 1] + hex_text[index]
+        digits = digits.rstrip("F")
+        if digits.isdigit() is False:
+            return None
+        try:
+            encoded = _encode_imsi_ef(digits)[1:]
+        except SaipVariableMaterializationError:
+            return None
+        return digits if encoded == data else None
+    if type_name == "MSISDN":
+        digits = "".join(
+            hex_text[index + 1] + hex_text[index] for index in range(0, len(hex_text), 2)
+        ).rstrip("F")
+        if not digits or digits.isdigit() is False:
+            return None
+        try:
+            encoded = _encode_msisdn_bcd(digits, len(data))
+        except SaipVariableMaterializationError:
+            return None
+        return digits if encoded == data else None
+    return None
+
+
+def placeholder_value_to_wire_hex(record: Any, value_text: str) -> str:
+    """The bytes a list entry stores for ``value_text``, as upper-case hex.
+
+    BINARY, RI and OPLMN take the exact bytes as hex. The other types take
+    their typed input (digits, text) through :func:`encode_inline_placeholder_value`
+    and fall back to exact-width hex, so ``0100000000F1`` answers an MSISDN
+    placeholder as readily as the digits do. Raises
+    :class:`SaipVariableMaterializationError` naming the literal otherwise.
+    """
+
+    type_name = str(getattr(record, "type_name", "") or "").strip().upper()
+    literal = str(getattr(record, "literal", "") or "placeholder")
+    if type_name in {"BINARY", "RI", "OPLMN"}:
+        try:
+            return validate_inline_raw_value(record, value_text).hex().upper()
+        except SaipVariableMaterializationError as error:
+            raise SaipVariableMaterializationError(f"{literal}: {error}") from error
+    try:
+        return encode_inline_placeholder_value(record, value_text).hex().upper()
+    except SaipVariableMaterializationError as typed_error:
+        try:
+            return validate_inline_raw_value(record, value_text).hex().upper()
+        except SaipVariableMaterializationError:
+            raise SaipVariableMaterializationError(f"{literal}: {typed_error}") from typed_error
 
 
 def materialize_catalog_variable(
@@ -434,8 +554,11 @@ def _encode_imsi_ef(value: str) -> bytes:
         body.append((high << 4) | low)
     if len(body) > 8:
         raise SaipVariableMaterializationError("IMSI does not fit the eight-byte EF payload.")
+    # TS 31.102 §4.2.2: the length byte counts the significant bytes that
+    # follow it, so a shorter IMSI reads less than 0x08.
+    significant = len(body)
     body.extend(b"\xff" * (8 - len(body)))
-    return b"\x08" + bytes(body)
+    return bytes([significant]) + bytes(body)
 
 
 def _encode_msisdn_bcd(value: str, byte_length: int) -> bytes:
@@ -887,13 +1010,455 @@ def _replace_byte_run(node: Any, needle: bytes, replacement: bytes) -> tuple[Any
     return node, 0
 
 
+def inline_variable_names(records: Iterable[InlinePlaceholderRecord]) -> list[str]:
+    """Return the canonical inline variable names in order of first appearance."""
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        name = str(getattr(record, "variable_name", "") or "").strip()
+        if not name or name.casefold() in seen:
+            continue
+        seen.add(name.casefold())
+        names.append(name)
+    return names
+
+
+def inline_record_key(record: Any) -> str:
+    """Return the compact literal body that names one occurrence.
+
+    ``<var><TYPE><byte_length>[<modifier>]`` is the form the sidecars and
+    the session store raw values by, so ``{iccid:ICCID:10:NibbleSwap}`` and
+    ``{iccidICCID10NibbleSwap}`` share the key ``iccidICCID10NibbleSwap``.
+    The modifier is kept as written; comparisons across spellings go
+    through ``saip_hex_template.placeholder_key_fold``.
+    """
+
+    modifier = str(getattr(record, "modifier", "") or "")
+    return (
+        f"{str(getattr(record, 'variable_name', '') or '')}"
+        f"{str(getattr(record, 'type_name', '') or '')}"
+        f"{int(getattr(record, 'byte_length', 0) or 0)}{modifier}"
+    )
+
+
+def validate_inline_raw_value(record: Any, value: Any) -> bytes:
+    """Return the bytes a pre-encoded value supplies for one occurrence.
+
+    The value must be hex of exactly the declared width. Type and modifier
+    are not consulted: the bytes are already in wire form.
+    """
+
+    literal = str(getattr(record, "literal", "") or inline_record_key(record))
+    payload = _hex_bytes(value, label=literal)
+    width = int(getattr(record, "byte_length", 0) or 0)
+    if len(payload) != width:
+        raise SaipVariableMaterializationError(
+            f"Inline placeholder {literal!r} requires exactly {width} bytes, "
+            f"got {len(payload)}."
+        )
+    return payload
+
+
+def match_inline_raw_values(
+    records: Iterable[Any],
+    raw_values: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    """Pair pre-encoded values with occurrences by compact key.
+
+    Keys match exactly first, then case-insensitively, then by the
+    spelling-independent fold, so a value stored as
+    ``{iccid:ICCID:10:nibble_swap}`` serves a ``[iccidICCID10NibbleSwap]``
+    occurrence, and last with underscores dropped from the variable, so a
+    sidecar written as ``scp80kic1BINARY16`` still serves
+    ``{scp80_kic1:BINARY:16}``. Every returned value has been checked
+    against its occurrence's width, so a caller splices it without a
+    second look. Keys are the canonical record keys.
+    """
+
+    supplied = {
+        str(key).strip(): str(value)
+        for key, value in dict(raw_values or {}).items()
+        if str(key).strip()
+    }
+    folded = {key.casefold(): value for key, value in supplied.items()}
+    by_fold: dict[str, str] = {}
+    by_relaxed: dict[str, str] = {}
+    for key, value in supplied.items():
+        by_fold.setdefault(placeholder_key_fold(key), value)
+        loose = placeholder_key_fold_relaxed(key)
+        if loose:
+            by_relaxed.setdefault(loose, value)
+    matched: dict[str, str] = {}
+    for record in records:
+        key = inline_record_key(record)
+        value = supplied.get(key)
+        if value is None:
+            value = folded.get(key.casefold())
+        if value is None:
+            value = by_fold.get(placeholder_key_fold(key))
+        if value is None:
+            loose = placeholder_key_fold_relaxed(key)
+            value = by_relaxed.get(loose) if loose else None
+        if value is None or str(value).strip() == "":
+            continue
+        matched[key] = validate_inline_raw_value(record, value).hex().upper()
+    return matched
+
+
+def records_for_raw_key(records: Iterable[Any], key: Any) -> list[Any]:
+    """Return the occurrences a stored raw value named ``key`` belongs to.
+
+    The ladder of :func:`match_inline_raw_values` seen from the key's side:
+    the occurrences whose record key folds like ``key``, else those that
+    match once underscores are dropped from the variable. Empty when the
+    template has no such occurrence.
+    """
+
+    text = str(key or "").strip()
+    if not text:
+        return []
+    ordered = list(records)
+    wanted = placeholder_key_fold(text)
+    hits = [
+        record for record in ordered if placeholder_key_fold(inline_record_key(record)) == wanted
+    ]
+    if hits:
+        return hits
+    loose = placeholder_key_fold_relaxed(text)
+    if not loose:
+        return []
+    return [
+        record
+        for record in ordered
+        if placeholder_key_fold_relaxed(inline_record_key(record)) == loose
+    ]
+
+
+def lookup_raw_value(raw_values: Mapping[str, Any] | None, key: Any) -> str | None:
+    """Return the pre-encoded value stored under ``key`` in any spelling.
+
+    The same ladder as :func:`match_inline_raw_values` for one key: exact,
+    case-insensitive, the spelling-independent fold, then the fold with
+    underscores dropped from the variable. ``None`` when nothing usable is
+    stored.
+    """
+
+    wanted = str(key or "").strip()
+    if not wanted:
+        return None
+    supplied = {
+        str(name).strip(): str(value)
+        for name, value in dict(raw_values or {}).items()
+        if str(name).strip()
+    }
+    value = supplied.get(wanted)
+    if value is None:
+        folded = wanted.casefold()
+        value = next((v for k, v in supplied.items() if k.casefold() == folded), None)
+    if value is None:
+        fold = placeholder_key_fold(wanted)
+        value = next((v for k, v in supplied.items() if placeholder_key_fold(k) == fold), None)
+    if value is None:
+        loose = placeholder_key_fold_relaxed(wanted)
+        if loose:
+            value = next(
+                (v for k, v in supplied.items() if placeholder_key_fold_relaxed(k) == loose),
+                None,
+            )
+    if value is None or value.strip() == "":
+        return None
+    return value
+
+
+def resolve_inline_records(
+    records: Iterable[Any],
+    values: Mapping[str, Any],
+    raw_values: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """Return ``(typed, raw, unresolved)`` for a record set.
+
+    A variable is resolved by a typed value, or by a pre-encoded value for
+    every one of its occurrences. ``unresolved`` lists the variables with
+    neither, in order of first appearance.
+    """
+
+    all_records = list(records)
+    typed, _missing = match_inline_variable_values(all_records, values)
+    raw = match_inline_raw_values(all_records, raw_values)
+    typed_folded = {name.casefold() for name in typed}
+    unresolved: list[str] = []
+    for name in inline_variable_names(all_records):
+        if name.casefold() in typed_folded:
+            continue
+        group = [
+            record
+            for record in all_records
+            if str(getattr(record, "variable_name", "") or "").casefold() == name.casefold()
+        ]
+        if group and all(inline_record_key(record) in raw for record in group):
+            continue
+        unresolved.append(name)
+    return typed, raw, unresolved
+
+
+def match_inline_variable_values(
+    records: Iterable[InlinePlaceholderRecord],
+    values: Mapping[str, Any],
+) -> tuple[dict[str, str], list[str]]:
+    """Pair stored values with the template's inline variables.
+
+    Lookup is case-insensitive so ``ICCID`` satisfies a ``[iccidICCID10]``
+    placeholder. Returns ``(matched, unresolved)``: ``matched`` maps each
+    canonical record name to its stored value, ``unresolved`` lists the
+    names that still have none.
+    """
+
+    folded_values: dict[str, str] = {}
+    for raw_name, raw_value in dict(values or {}).items():
+        folded_values[str(raw_name).strip().casefold()] = str(raw_value)
+    matched: dict[str, str] = {}
+    unresolved: list[str] = []
+    for name in inline_variable_names(records):
+        value = folded_values.get(name.casefold())
+        if value is None or value == "":
+            unresolved.append(name)
+            continue
+        matched[name] = value
+    return matched, unresolved
+
+
+def validate_inline_variable_value(
+    records: Iterable[InlinePlaceholderRecord],
+    variable_name: str,
+    value: str,
+) -> list[InlinePlaceholderRecord]:
+    """Encode ``value`` for every occurrence of ``variable_name`` without applying it.
+
+    Returns the matching records so the caller can report the occurrence
+    count. Raises when the name has no occurrence or when any occurrence's
+    typed encoder rejects the value, so a stored value is always one the
+    later export can materialise.
+    """
+
+    wanted = str(variable_name or "").strip().casefold()
+    matching = [
+        record
+        for record in records
+        if str(getattr(record, "variable_name", "") or "").casefold() == wanted
+    ]
+    if not matching:
+        raise SaipVariableMaterializationError(
+            f"Inline variable {variable_name!r} has no occurrence in the template."
+        )
+    for record in matching:
+        encode_inline_placeholder_value(record, value)
+    return matching
+
+
+def materialize_inline_records(
+    document: Mapping[str, Any],
+    records: Iterable[Any],
+    values: Mapping[str, Any],
+    *,
+    raw_values: Mapping[str, Any] | None = None,
+    require_complete: bool = True,
+) -> tuple[dict[str, Any], list[Any], list[VariableMaterializationResult]]:
+    """Apply every stored value to a copy of ``document`` in one pass.
+
+    ``values`` are typed per variable; ``raw_values`` are pre-encoded per
+    occurrence, keyed as :func:`inline_record_key` (a universal token
+    list). A typed value wins for its variable; raw values fill the
+    occurrences that have none. Returns ``(document, remaining_records,
+    results)``. The input document and record list are never mutated, so
+    a session keeps its template while an export takes the materialised
+    copy. With ``require_complete`` the call refuses when any variable has
+    no value, naming the unresolved ones, so a concrete export can never
+    ship sentinel bytes.
+    """
+
+    all_records = list(records)
+    typed, raw, unresolved = resolve_inline_records(all_records, values, raw_values)
+    if require_complete and unresolved:
+        raise SaipVariableMaterializationError(
+            "Unresolved inline template variable(s): "
+            + ", ".join(unresolved)
+            + ". Set a value for each one before a concrete export."
+        )
+    candidate: dict[str, Any] = copy.deepcopy(dict(document))
+    remaining = all_records
+    results: list[VariableMaterializationResult] = []
+    for name, value in typed.items():
+        candidate, remaining, result = materialize_inline_variable(
+            candidate,
+            remaining,
+            name,
+            value,
+        )
+        results.append(result)
+    raw_groups: dict[str, list[Any]] = {}
+    still_open: list[Any] = []
+    for record in remaining:
+        key = inline_record_key(record)
+        hex_value = raw.get(key)
+        if hex_value is None:
+            still_open.append(record)
+            continue
+        payload = validate_inline_raw_value(record, hex_value)
+        sentinel = _hex_bytes(record.sentinel_hex, label=f"{record.variable_name} sentinel")
+        candidate, count = _replace_byte_run(candidate, sentinel, payload)
+        if count != 1:
+            raise SaipVariableMaterializationError(
+                f"Inline placeholder {record.literal!r} occurrence #{record.index} "
+                f"resolved to {count} byte regions instead of one."
+            )
+        raw_groups.setdefault(str(record.variable_name), []).append(record)
+    for name, group in raw_groups.items():
+        results.append(
+            VariableMaterializationResult(
+                variable_name=name,
+                binding_count=len(group),
+                secret=variable_is_secret(name),
+                source="universal_tokens",
+            )
+        )
+    return candidate, still_open, results
+
+
+def inline_variable_sidecar_path_for(template_path: Path) -> Path:
+    """Return ``<stem>.variables.json`` next to ``template_path``."""
+
+    return Path(template_path).with_suffix(_INLINE_VARIABLE_SIDECAR_SUFFIX)
+
+
+def write_inline_variable_sidecar(
+    path: Path,
+    values: Mapping[str, Any],
+    *,
+    created_from: str = "",
+    raw_values: Mapping[str, Any] | None = None,
+    test_value_list: str = "",
+) -> None:
+    """Write stored inline-variable values as a JSON sidecar.
+
+    Secret values are written too: the sidecar is what lets a reopened
+    template export a complete profile again, and it sits beside the
+    template under the same file permissions. ``raw_values`` are the
+    pre-encoded per-occurrence bytes (test values from a list), keyed as
+    :func:`inline_record_key`. ``test_value_list`` is the selector of the
+    list bound to the template (a library name or a path); empty means
+    the universal list alone.
+    """
+
+    payload: dict[str, Any] = {
+        "schema": INLINE_VARIABLE_SIDECAR_SCHEMA,
+        "values": {str(name): str(value) for name, value in dict(values).items()},
+    }
+    raw_payload = {
+        str(key): str(value)
+        for key, value in dict(raw_values or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    if raw_payload:
+        payload["raw_values"] = raw_payload
+    if str(test_value_list or "").strip():
+        payload["test_value_list"] = str(test_value_list).strip()
+    if created_from:
+        payload["created_from"] = str(created_from)
+    encoded = (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if len(encoded) > _MAX_INLINE_VARIABLE_SIDECAR_BYTES:
+        raise SaipVariableMaterializationError(
+            "Inline-variable sidecar exceeds the safety limit."
+        )
+    atomic_write_bytes(Path(path), encoded, overwrite=True)
+
+
+def read_inline_variable_sidecar_document(path: Path) -> dict[str, Any]:
+    """Load ``{"values", "raw_values", "test_value_list"}`` from a variables sidecar.
+
+    ``test_value_list`` is the bound list's selector, ``""`` when the
+    sidecar names none.
+    """
+
+    encoded = read_bounded_regular_file(Path(path), _MAX_INLINE_VARIABLE_SIDECAR_BYTES)
+    try:
+        loaded = json.loads(encoded.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SaipVariableMaterializationError(
+            f"Inline-variable sidecar is not valid JSON: {error}"
+        ) from error
+    if not isinstance(loaded, dict):
+        raise SaipVariableMaterializationError("Inline-variable sidecar must be a JSON object.")
+    schema = str(loaded.get("schema") or "")
+    if schema != INLINE_VARIABLE_SIDECAR_SCHEMA:
+        raise SaipVariableMaterializationError(
+            f"Unsupported inline-variable sidecar schema {schema!r}."
+        )
+    raw_values = loaded.get("values")
+    if not isinstance(raw_values, dict):
+        raise SaipVariableMaterializationError(
+            "Inline-variable sidecar has no 'values' object."
+        )
+    document: dict[str, Any] = {"values": {}, "raw_values": {}, "test_value_list": ""}
+    bound = loaded.get("test_value_list")
+    if bound is not None:
+        if not isinstance(bound, str):
+            raise SaipVariableMaterializationError(
+                "Inline-variable sidecar 'test_value_list' must be a string."
+            )
+        document["test_value_list"] = bound.strip()
+    for section, label in (("values", "value"), ("raw_values", "raw value")):
+        block = loaded.get(section)
+        if block is None:
+            continue
+        if not isinstance(block, dict):
+            raise SaipVariableMaterializationError(
+                f"Inline-variable sidecar '{section}' must be a JSON object."
+            )
+        for raw_name, raw_value in block.items():
+            name = str(raw_name).strip()
+            if not name:
+                raise SaipVariableMaterializationError(
+                    "Inline-variable sidecar contains an empty variable name."
+                )
+            if not isinstance(raw_value, str):
+                raise SaipVariableMaterializationError(
+                    f"Inline-variable sidecar {label} for {name!r} must be a string."
+                )
+            document[section][name] = raw_value
+    return document
+
+
+def read_inline_variable_sidecar(path: Path) -> dict[str, str]:
+    """Load ``name -> value`` from a sidecar written by :func:`write_inline_variable_sidecar`."""
+
+    return read_inline_variable_sidecar_document(path)["values"]
+
+
 __all__ = [
+    "INLINE_VARIABLE_SIDECAR_SCHEMA",
     "SaipVariableMaterializationError",
     "VariableMaterializationResult",
     "catalog_variables",
+    "decode_inline_placeholder_value",
     "encode_inline_placeholder_value",
     "find_catalog_variable",
+    "inline_record_key",
+    "inline_variable_names",
+    "lookup_raw_value",
+    "match_inline_raw_values",
+    "records_for_raw_key",
+    "read_inline_variable_sidecar_document",
+    "resolve_inline_records",
+    "validate_inline_raw_value",
+    "inline_variable_sidecar_path_for",
+    "match_inline_variable_values",
     "materialize_catalog_variable",
+    "materialize_inline_records",
     "materialize_inline_variable",
+    "placeholder_value_to_wire_hex",
+    "read_inline_variable_sidecar",
+    "validate_inline_variable_value",
     "variable_is_secret",
+    "write_inline_variable_sidecar",
 ]

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """GlobalPlatform card-side logic: SSD secure session emulation, INSTALL/LOAD/DELETE command dispatch (GP Card Spec v2.3)."""
 from __future__ import annotations
 
@@ -20,6 +19,16 @@ GP_LCS_PERSONALIZED = 0x0F
 GP_LCS_LOCKED_APPLICATION = 0x83
 GP_LCS_SD_PERSONALIZED = 0x0F
 GP_LCS_SD_LOCKED = 0x7F
+
+# Upper bound on the reassembled INSTALL data field (§11.5.2.1 P1.b8
+# segmentation). Tables 11-42 to 11-46 cap a single BER-coded field at
+# '82 FF FF', so a chain that passes this is malformed rather than long.
+MAX_INSTALL_CHAIN_BYTES = 0x10000
+
+# Upper bound on the reassembled DELETE data field (§11.2.2.1 P1.b8
+# segmentation). Table 11-23 carries one AID, a Control Reference Template and
+# a token, so a longer chain is malformed rather than long.
+MAX_DELETE_CHAIN_BYTES = 0x4000
 
 
 class SimulatedSecureSession:
@@ -53,7 +62,9 @@ class GpLogic:
     Coverage:
 
     - 0xCA GET DATA (limited tag set)
-    - 0xF2 GET STATUS  (P1 = 0x80 / 0x40 / 0x20 / 0x10 / 0x60)
+    - 0xF2 GET STATUS  (P1 = 0x80 ISD / 0x40 applications and SSDs /
+      0x20 Executable Load Files / 0x10 those plus their Executable
+      Modules / 0x60 as 0x10, Table 11-33)
     - 0xE6 INSTALL     (P1 sub-functions 0x02 / 0x04 / 0x08 / 0x0C / 0x10 / 0x20 / 0x40)
     - 0xE8 LOAD        (block-chained CAP file delivery)
     - 0xE4 DELETE      (object / object+related)
@@ -69,13 +80,17 @@ class GpLogic:
 
     def __init__(self, state: SimCardState) -> None:
         self.state = state
+        # §11.5.2.1 P1.b8 segmentation buffer. Reset on every
+        # dispatched INSTALL, so it holds at most one command chain.
+        self._install_chain: bytes = b""
+        self._delete_chain: bytes = b""
 
     # ------------------------------------------------------------------
     # GET DATA / GET STATUS
     # ------------------------------------------------------------------
 
     def handle_get_data(self, p1: int, p2: int) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.3 GET DATA — returns card/SD status data objects.
+        """GP Card Spec v2.3 §11.3 GET DATA -- returns card/SD status data objects.
 
         Supported tags: 005A (EID), 9F7F (CPLC), 9F70 (card life-cycle state).
         """
@@ -119,64 +134,64 @@ class GpLogic:
         return b"", 0x6A, 0x88
 
     def handle_get_status(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.4 GET STATUS — reports installed applications and SDs.
+        """GP Card Spec v2.3.1 §11.4 GET STATUS -- reports installed applications and SDs.
 
-        P1 scope: 0x80 = ISD, 0x40 = Applications/SDs, 0x20 = load-files,
-        0x10 = load-file + modules. Searches *data* AID filter if present.
+        §11.4.2.1 P1: '80' Issuer Security Domain, '40' Applications
+        including Supplementary Security Domains, '20' Executable Load
+        Files only, '10' Executable Load Files and their Executable
+        Modules. §11.4.2.2 P2.b1 selects first/next occurrences and
+        P2.b2 selects the Table 11-36 / 11-37 response format; the
+        simulator returns every match in one response, so a [get next
+        occurrence] request has nothing left to report.
         """
-        del p2
         scope = int(p1) & 0xFF
+        if (int(p2) & 0x01) != 0:
+            # Table 11-38 '63 10' (more data) is never returned, so the
+            # follow-up read has no occurrences left: §11.4.3.2 '6A 88'.
+            return b"", 0x6A, 0x88
         search_aid = self._extract_search_aid(bytes(data or b""))
 
         if scope == 0x80:
-            entries = [
-                self._status_entry(self.state.isdr_aid, GP_LCS_SD_PERSONALIZED, bytes.fromhex("9EFE80")),
-                self._status_entry(self.state.ecasd_aid, GP_LCS_SD_PERSONALIZED, bytes.fromhex("9EFE80")),
-                self._status_entry(self.state.mno_sd_aid, GP_LCS_SELECTABLE, bytes.fromhex("80")),
+            # §11.4.2.1: '80' reports the Issuer Security Domain only, and any
+            # search criteria in the data field are ignored. On an eUICC the
+            # ISD-R is that domain; ECASD and the MNO-SD are supplementary and
+            # are reported under '40'.
+            entries: list[tuple[str, bytes]] = [
+                self._registry_entry(self.state.isdr_aid, GP_LCS_SD_PERSONALIZED, bytes.fromhex("9EFE80")),
             ]
-            return self._filtered_status_response(entries, search_aid)
+            return self._filtered_status_response(entries, b"")
 
         if scope == 0x40:
-            entries: list[bytes] = [
-                self._status_entry(USIM_AID, GP_LCS_SELECTABLE, b""),
-                self._status_entry(ISIM_AID, GP_LCS_SELECTABLE, b""),
+            # §11.4.2.1: '40' reports Applications and Supplementary Security
+            # Domains; the privileges byte tells the two apart (table 11-7 b8).
+            entries = [
+                self._registry_entry(self.state.ecasd_aid, GP_LCS_SD_PERSONALIZED, bytes.fromhex("9EFE80")),
+                self._registry_entry(self.state.mno_sd_aid, GP_LCS_SELECTABLE, bytes.fromhex("80")),
+                self._registry_entry(USIM_AID, GP_LCS_SELECTABLE, b""),
+                self._registry_entry(ISIM_AID, GP_LCS_SELECTABLE, b""),
             ]
             entries.extend(
-                self._status_entry(profile.aid, GP_LCS_SELECTABLE, b"") for profile in self.state.profiles
+                self._registry_entry(profile.aid, GP_LCS_SELECTABLE, b"") for profile in self.state.profiles
             )
             entries.extend(
-                self._status_entry(app.aid, app.lifecycle_state, app.privileges)
+                self._registry_entry(app.aid, app.lifecycle_state, app.privileges)
                 for app in self.state.gp_apps
                 if app.kind == "application"
             )
             return self._filtered_status_response(entries, search_aid)
 
-        if scope == 0x10:
+        if scope in (0x20, 0x10, 0x60):
+            # Table 11-37 Note 2: the Executable Module AIDs (tag '84')
+            # are listed under their Executable Load File and only when
+            # P1.b5 asks for them. §11.4.2.1 leaves a multi-bit P1
+            # implementation dependent; '60' keeps the load-file view
+            # with modules that this simulator has always exposed.
+            with_modules = (scope & 0x10) != 0 or scope == 0x60
             entries = [
-                self._status_entry(app.aid, app.lifecycle_state, b"")
+                self._load_file_entry(app, with_modules=with_modules)
                 for app in self.state.gp_apps
                 if app.kind == "elf"
             ]
-            return self._filtered_status_response(entries, search_aid)
-
-        if scope == 0x20:
-            entries = [
-                self._status_entry(app.aid, app.lifecycle_state, b"")
-                for app in self.state.gp_apps
-                if app.kind == "module"
-            ]
-            return self._filtered_status_response(entries, search_aid)
-
-        if scope == 0x60:
-            entries = []
-            for app in self.state.gp_apps:
-                if app.kind == "elf":
-                    body = tlv("4F", bytes.fromhex(app.aid)) + tlv("9F70", bytes([app.lifecycle_state & 0xFF]))
-                    for module_aid in app.modules:
-                        if len(module_aid) == 0:
-                            continue
-                        body += tlv("84", bytes.fromhex(module_aid))
-                    entries.append(tlv("E3", body))
             return self._filtered_status_response(entries, search_aid)
 
         return b"", 0x6A, 0x86
@@ -186,32 +201,60 @@ class GpLogic:
     # ------------------------------------------------------------------
 
     def handle_install(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.5 INSTALL — records install parameters in the GP context.
+        """GP Card Spec v2.3.1 §11.5 INSTALL -- records install parameters in the GP context.
 
-        P1 0x02 = INSTALL for load; 0x04 = INSTALL for install; 0x08 = INSTALL for make-selectable.
+        Table 11-41 codes P1.b8 as the segmentation flag (1 = more
+        INSTALL commands follow, 0 = last or only component) and
+        P1.b7..b2 as the sub-function; b1 is always 0. Table 11-40
+        restricts P2 to '00' (no information), '01' (beginning of the
+        combined load, install and make selectable process) and '03'
+        (end of that process) -- P2 never carried the segmentation
+        flag.
         """
-        sub_function = int(p1) & 0xFF
-        more_blocks = (int(p2) & 0x80) == 0
-        del more_blocks  # multi-block INSTALL is rare and not modelled
+        p1_byte = int(p1) & 0xFF
+        p2_byte = int(p2) & 0xFF
+        if p2_byte not in (0x00, 0x01, 0x03):
+            return b"", 0x6A, 0x86
 
-        if sub_function == 0x02:
-            return self._install_for_load(bytes(data or b""))
-        if sub_function == 0x04:
-            return self._install_for_install(bytes(data or b""), make_selectable=False)
-        if sub_function == 0x08:
-            return self._install_for_make_selectable(bytes(data or b""))
-        if sub_function == 0x0C:
-            return self._install_for_install(bytes(data or b""), make_selectable=True)
-        if sub_function == 0x10:
-            return self._install_for_extradition(bytes(data or b""))
-        if sub_function == 0x20:
-            return self._install_for_personalization(bytes(data or b""))
+        sub_function = p1_byte & 0x7E
+        payload = self._install_chain + bytes(data or b"")
+        if len(payload) > MAX_INSTALL_CHAIN_BYTES:
+            self._install_chain = b""
+            return b"", 0x6A, 0x80
+        if (p1_byte & 0x80) != 0:
+            # Segmented command data: hold the component and answer
+            # 90 00 until the last one arrives. The buffer is reset on
+            # every dispatch and capped at MAX_INSTALL_CHAIN_BYTES, so
+            # an unterminated chain cannot grow without bound.
+            self._install_chain = payload
+            return b"", 0x90, 0x00
+        self._install_chain = b""
+
+        # Table 11-41 gives [for registry update], [for personalization]
+        # and [for extradition] as exclusive sub-functions; only [for
+        # load], [for install] and [for make selectable] combine.
         if sub_function == 0x40:
-            return self._install_for_registry_update(bytes(data or b""))
+            return self._install_for_registry_update(payload)
+        if sub_function == 0x20:
+            return self._install_for_personalization(payload)
+        if sub_function == 0x10:
+            return self._install_for_extradition(payload)
+        if (sub_function & 0x02) != 0:
+            # §11.5.2.3.1: the first command of a combined [for load,
+            # install and make selectable] carries the Table 11-42
+            # data field, same as a plain INSTALL [for load].
+            return self._install_for_load(payload)
+        if (sub_function & 0x04) != 0:
+            return self._install_for_install(
+                payload,
+                make_selectable=(sub_function & 0x08) != 0,
+            )
+        if (sub_function & 0x08) != 0:
+            return self._install_for_make_selectable(payload)
         return b"", 0x6A, 0x86
 
     def handle_load(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.6 LOAD — accumulates CAP/IJC block chunks and commits on last block."""
+        """GP Card Spec v2.3 §11.6 LOAD -- accumulates CAP/IJC block chunks and commits on last block."""
         last_block = (int(p1) & 0x80) != 0
         block_number = int(p2) & 0xFF
         ctx: SimGpInstallContext = self.state.gp_install
@@ -242,14 +285,47 @@ class GpLogic:
         ctx.load_buffer = b""
         return b"", 0x90, 0x00
 
-    def handle_delete(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.2 DELETE — removes an application or load-file by AID.
+    # §11.2.2.2 Table 11-22: b8 deletes the object together with its related
+    # objects, b7 (with b8 clear) a Security Domain and everything associated
+    # with it, and b6 a Security Domain removing itself. b5..b1 are RFU.
+    DELETE_P2_RELATED = 0x80
+    DELETE_P2_SD_HIERARCHY = 0x40
+    DELETE_P2_SELF_REMOVAL = 0x20
+    DELETE_P2_RFU = 0x1F
+    # §11.2.3.1 Table 11-25: the response always carries the length of the
+    # delete confirmation; the simulator issues no Delegated Management
+    # receipt, so the length is zero and no confirmation follows.
+    DELETE_NO_CONFIRMATION = b"\x00"
 
-        P2 0x80 requests delete-related (cascade-delete all instances).
+    def handle_delete(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
+        """GPC v2.3.1 §11.2 DELETE -- remove an Application, Executable Load File or Security Domain.
+
+        §11.2.2.1 Table 11-21 puts the segmentation flag in P1.b8; §11.2.2.2
+        Table 11-22 selects what is deleted through P2; §11.2.3.1 Table 11-25
+        makes a data field mandatory in the response.
         """
-        del p1
-        delete_related = (int(p2) & 0x80) != 0
-        payload = bytes(data or b"")
+        p1_byte = int(p1) & 0xFF
+        p2_byte = int(p2) & 0xFF
+        if (p1_byte & 0x7F) != 0 or (p2_byte & self.DELETE_P2_RFU) != 0:
+            self._delete_chain = b""
+            return b"", 0x6A, 0x86
+
+        payload = self._delete_chain + bytes(data or b"")
+        if len(payload) > MAX_DELETE_CHAIN_BYTES:
+            self._delete_chain = b""
+            return b"", 0x6A, 0x80
+        if (p1_byte & 0x80) != 0:
+            # Segmented command data: hold the component and answer 90 00
+            # until the last one arrives. The buffer is reset on every
+            # dispatch and capped, so an unterminated chain cannot grow
+            # without bound.
+            self._delete_chain = payload
+            return b"", 0x90, 0x00
+        self._delete_chain = b""
+
+        delete_related = (p2_byte & self.DELETE_P2_RELATED) != 0
+        delete_hierarchy = (p2_byte & self.DELETE_P2_SD_HIERARCHY) != 0
+        self_removal = (p2_byte & self.DELETE_P2_SELF_REMOVAL) != 0
         if len(payload) < 2 or payload[0] != 0x4F:
             return b"", 0x6A, 0x80
         aid_length = payload[1]
@@ -258,11 +334,24 @@ class GpLogic:
         target_aid = payload[2 : 2 + aid_length].hex().upper()
         if len(target_aid) == 0:
             return b"", 0x6A, 0x82
+        # §11.2.2.3 and §9.5.5: the Security Domain hierarchy and self-removal
+        # forms name a Security Domain, which the simulator keeps outside the
+        # application registry.
+        if delete_hierarchy or self_removal:
+            known_domains = {
+                str(self.state.isdr_aid or "").upper(),
+                str(self.state.ecasd_aid or "").upper(),
+                str(self.state.mno_sd_aid or "").upper(),
+            }
+            if target_aid not in known_domains:
+                return b"", 0x6A, 0x82
+            # The simulator's domains are provisioned, not removable.
+            return b"", 0x69, 0x85
         target_app = self._find_app(target_aid)
         if target_app is None:
             return b"", 0x6A, 0x82
-        # GP Card Spec §11.2.2.4: an SD or an ELF that still has
-        # dependants cannot be deleted unless P2 bit 0x80 is set.
+        # §11.2.3.2: an Executable Load File that still has related
+        # Applications cannot be deleted unless P2.b8 asks for them too.
         if delete_related is False:
             for app in self.state.gp_apps:
                 if app is target_app:
@@ -280,10 +369,10 @@ class GpLogic:
                 continue
             retained.append(app)
         self.state.gp_apps = retained
-        return b"", 0x90, 0x00
+        return self.DELETE_NO_CONFIRMATION, 0x90, 0x00
 
     def handle_put_key(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.8 PUT KEY — stubs key-import (returns 9000 to satisfy INSTALL/PUT KEY sequences)."""
+        """GP Card Spec v2.3 §11.8 PUT KEY -- stubs key-import (returns 9000 to satisfy INSTALL/PUT KEY sequences)."""
         del data
         kvn = int(p1) & 0xFF
         key_id = int(p2) & 0xFF
@@ -296,7 +385,7 @@ class GpLogic:
         return bytes([kvn]), 0x90, 0x00
 
     def handle_set_status(self, p1: int, p2: int, data: bytes) -> tuple[bytes, int, int]:
-        """GP Card Spec v2.3 §11.9 SET STATUS — transitions ISD or application life-cycle state."""
+        """GP Card Spec v2.3 §11.9 SET STATUS -- transitions ISD or application life-cycle state."""
         scope = int(p1) & 0xFF
         new_state = int(p2) & 0xFF
         payload = bytes(data or b"")
@@ -323,10 +412,22 @@ class GpLogic:
     # ------------------------------------------------------------------
 
     def _install_for_load(self, data: bytes) -> tuple[bytes, int, int]:
+        # Table 11-42: L/Load File AID, L/Security Domain AID,
+        # L/Load File Data Block Hash, BER-LV Load Parameters,
+        # BER-LV Load Token.
         offset, elf_aid = self._take_lv(data, 0)
-        if offset is None:
+        if offset is None or len(elf_aid) == 0:
             return b"", 0x6A, 0x80
         offset, sd_aid = self._take_lv(data, offset)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        offset, _load_file_hash = self._take_lv(data, offset)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        offset, _load_parameters = self._take_ber_lv(data, offset)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        offset, _load_token = self._take_ber_lv(data, offset)
         if offset is None:
             return b"", 0x6A, 0x80
 
@@ -339,6 +440,9 @@ class GpLogic:
         return b"", 0x90, 0x00
 
     def _install_for_install(self, data: bytes, *, make_selectable: bool) -> tuple[bytes, int, int]:
+        # Table 11-43: L/Executable Load File AID, L/Executable Module
+        # AID, L/Application AID, L/Privileges, BER-LV Install
+        # Parameters, BER-LV Install Token.
         offset, elf_aid = self._take_lv(data, 0)
         if offset is None:
             return b"", 0x6A, 0x80
@@ -351,6 +455,11 @@ class GpLogic:
         offset, privileges = self._take_lv(data, offset)
         if offset is None:
             privileges = b""
+        elif offset < len(data):
+            # Install Parameters and Install Token carry BER lengths;
+            # a truncated one is "incorrect values in command data".
+            if self._take_ber_lv_pair(data, offset) is False:
+                return b"", 0x6A, 0x80
 
         elf_aid_hex = elf_aid.hex().upper()
         module_aid_hex = module_aid.hex().upper()
@@ -381,9 +490,29 @@ class GpLogic:
         return b"", 0x90, 0x00
 
     def _install_for_make_selectable(self, data: bytes) -> tuple[bytes, int, int]:
-        offset, app_aid = self._take_lv(data, 0)
+        # Table 11-44: two '00' length fields, then L/Application AID,
+        # L/Privileges, BER-LV Make Selectable Parameters, BER-LV Make
+        # Selectable Token. The two leading empty fields keep the
+        # command data field aligned with INSTALL [for install].
+        offset, first_empty = self._take_lv(data, 0)
+        if offset is None or len(first_empty) != 0:
+            return b"", 0x6A, 0x80
+        offset, second_empty = self._take_lv(data, offset)
+        if offset is None or len(second_empty) != 0:
+            return b"", 0x6A, 0x80
+        offset, app_aid = self._take_lv(data, offset)
         if offset is None or len(app_aid) == 0:
             return b"", 0x6A, 0x80
+        # §11.5.2.3.3: of the Privileges field only the Card Reset
+        # privilege changes the registry; every other privilege is
+        # ignored, so the stored privileges are left as INSTALL [for
+        # install] recorded them.
+        offset, privileges = self._take_lv(data, offset)
+        if offset is None or len(privileges) not in (1, 3):
+            return b"", 0x6A, 0x80
+        if offset < len(data) and self._take_ber_lv_pair(data, offset) is False:
+            return b"", 0x6A, 0x80
+
         target = self._find_app(app_aid.hex().upper())
         if target is None or target.kind != "application":
             return b"", 0x6A, 0x82
@@ -391,20 +520,86 @@ class GpLogic:
         return b"", 0x90, 0x00
 
     def _install_for_extradition(self, data: bytes) -> tuple[bytes, int, int]:
-        # GP Card Spec §11.5.2.7. The simulator does not multiplex SDs,
-        # so we acknowledge the request without rebinding the target.
-        del data
+        # Table 11-45: L/Security Domain AID, '00', L/Application or
+        # Executable Load File AID, '00', BER-LV Extradition
+        # Parameters, BER-LV Extradition Token.
+        offset, sd_aid = self._take_lv(data, 0)
+        if offset is None or len(sd_aid) == 0:
+            return b"", 0x6A, 0x80
+        offset, first_empty = self._take_lv(data, offset)
+        if offset is None or len(first_empty) != 0:
+            return b"", 0x6A, 0x80
+        offset, target_aid = self._take_lv(data, offset)
+        if offset is None or len(target_aid) == 0:
+            return b"", 0x6A, 0x80
+        offset, second_empty = self._take_lv(data, offset)
+        if offset is None or len(second_empty) != 0:
+            return b"", 0x6A, 0x80
+        if offset < len(data) and self._take_ber_lv_pair(data, offset) is False:
+            return b"", 0x6A, 0x80
+
+        if self._is_known_security_domain(sd_aid.hex().upper()) is False:
+            return b"", 0x6A, 0x88
+        target = self._find_app(target_aid.hex().upper())
+        if target is None or target.kind not in ("application", "elf"):
+            return b"", 0x6A, 0x82
+        # The simulator runs a single Security Domain hierarchy, so the
+        # extradition is accepted once both AIDs resolve; there is no
+        # second SD to rebind the registry entry to.
         return b"", 0x90, 0x00
 
     def _install_for_personalization(self, data: bytes) -> tuple[bytes, int, int]:
-        # §11.5.2.8: hands the next STORE DATA chain to the named app.
-        # The SgpLogic STORE DATA dispatcher does not currently key off
-        # the personalization target, so we accept and move on.
-        del data
+        # Table 11-47: two '00' length fields, L/Application AID, then
+        # three more '00' length fields. §11.5.2.3.6 hands the next
+        # STORE DATA chain to the named Application; the SgpLogic
+        # STORE DATA dispatcher does not key off the personalization
+        # target, so the request is only validated here.
+        offset = 0
+        for _leading in range(2):
+            offset, empty = self._take_lv(data, offset)
+            if offset is None or len(empty) != 0:
+                return b"", 0x6A, 0x80
+        offset, app_aid = self._take_lv(data, offset)
+        if offset is None or len(app_aid) == 0:
+            return b"", 0x6A, 0x80
+        if self._find_app(app_aid.hex().upper()) is None:
+            return b"", 0x6A, 0x82
         return b"", 0x90, 0x00
 
     def _install_for_registry_update(self, data: bytes) -> tuple[bytes, int, int]:
-        del data
+        # Table 11-46: L/Security Domain AID (optional), '00',
+        # L/Application AID (optional), L/Privileges ('00', '01' or
+        # '03'), BER-LV Registry Update Parameters, BER-LV Registry
+        # Update Token.
+        offset, sd_aid = self._take_lv(data, 0)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        offset, first_empty = self._take_lv(data, offset)
+        if offset is None or len(first_empty) != 0:
+            return b"", 0x6A, 0x80
+        offset, app_aid = self._take_lv(data, offset)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        offset, privileges = self._take_lv(data, offset)
+        if offset is None:
+            return b"", 0x6A, 0x80
+        if len(privileges) not in (0, 1, 3):
+            return b"", 0x6A, 0x80
+        if offset < len(data) and self._take_ber_lv_pair(data, offset) is False:
+            return b"", 0x6A, 0x80
+
+        if len(sd_aid) > 0 and self._is_known_security_domain(sd_aid.hex().upper()) is False:
+            return b"", 0x6A, 0x88
+        if len(app_aid) == 0:
+            # §11.5.2.3.5: the Application AID is absent only when the
+            # request modifies the functionality of the OPEN, which the
+            # simulator does not model.
+            return b"", 0x90, 0x00
+        target = self._find_app(app_aid.hex().upper())
+        if target is None:
+            return b"", 0x6A, 0x82
+        if len(privileges) > 0:
+            target.privileges = bytes(privileges)
         return b"", 0x90, 0x00
 
     # ------------------------------------------------------------------
@@ -422,6 +617,56 @@ class GpLogic:
         if end > len(data):
             return None, b""
         return end, data[start:end]
+
+    @staticmethod
+    def _take_ber_lv(data: bytes, offset: int) -> tuple[int | None, bytes]:
+        """BER-coded LV reader for the parameter and token fields.
+
+        Tables 11-42 to 11-46 accept ``'00'-'80'``, ``'81 80'-'81 FF'``
+        and ``'82 01 00'-'82 FF FF'``: a bare '80' is the literal
+        length 128, not the indefinite-length indicator.
+        """
+        if offset >= len(data):
+            return None, b""
+        first = data[offset]
+        start = offset + 1
+        length = first
+        if first == 0x81:
+            if start + 1 > len(data):
+                return None, b""
+            length = data[start]
+            start += 1
+        elif first == 0x82:
+            if start + 2 > len(data):
+                return None, b""
+            length = int.from_bytes(data[start : start + 2], "big")
+            start += 2
+        elif first > 0x82:
+            return None, b""
+        end = start + length
+        if end > len(data):
+            return None, b""
+        return end, data[start:end]
+
+    @classmethod
+    def _take_ber_lv_pair(cls, data: bytes, offset: int) -> bool:
+        """True when a parameters field and a token field parse cleanly from *offset*."""
+        offset, _parameters = cls._take_ber_lv(data, offset)
+        if offset is None:
+            return False
+        if offset >= len(data):
+            return True
+        offset, _token = cls._take_ber_lv(data, offset)
+        return offset is not None
+
+    def _is_known_security_domain(self, aid_hex: str) -> bool:
+        """True when *aid_hex* names one of the card's Security Domains."""
+        target = str(aid_hex or "").strip().upper()
+        for sd_aid in (self.state.isdr_aid, self.state.ecasd_aid, self.state.mno_sd_aid):
+            if str(sd_aid or "").strip().upper() == target:
+                return True
+        entry = self._find_app(target)
+        return entry is not None and entry.kind == "sd"
 
     def _find_app(self, aid_hex: str) -> SimGpAppEntry | None:
         target = str(aid_hex or "").strip().upper()
@@ -448,15 +693,20 @@ class GpLogic:
 
     @staticmethod
     def _filtered_status_response(
-        entries: list[bytes],
+        entries: list[tuple[str, bytes]],
         search_aid: bytes,
     ) -> tuple[bytes, int, int]:
+        """Apply the §11.4.2.3 AID search criterion to built registry entries.
+
+        The AID (tag '4F') is a prefix match so a search on a RID
+        returns every occurrence sharing it; '4F' '00' matches all.
+        """
         if len(search_aid) == 0:
-            return b"".join(entries), 0x90, 0x00
+            return b"".join(entry for _aid, entry in entries), 0x90, 0x00
         target_hex = search_aid.hex().upper()
         kept: list[bytes] = []
-        for entry in entries:
-            if target_hex in entry.hex().upper():
+        for aid_hex, entry in entries:
+            if aid_hex.startswith(target_hex):
                 kept.append(entry)
         if len(kept) == 0:
             return b"", 0x6A, 0x88
@@ -566,7 +816,43 @@ class GpLogic:
 
     @staticmethod
     def _status_entry(aid_hex: str, life_cycle_state: int, privileges: bytes) -> bytes:
+        """Table 11-36 'E3' entry: AID, Life Cycle State and 3-byte Privileges.
+
+        With no tag list in the command data field §11.4.3.1 requires
+        exactly '4F', '9F70' and 'C5' for the Issuer Security Domain
+        and for Applications, so 'C5' is emitted even when the registry
+        holds no privileges. §11.5.2.3.2 has the OPEN extend one-byte
+        privileges to three bytes.
+        """
         body = tlv("4F", bytes.fromhex(aid_hex)) + tlv("9F70", bytes([life_cycle_state & 0xFF]))
-        if len(privileges) > 0:
-            body += tlv("C5", bytes(privileges))
+        body += tlv("C5", bytes(privileges).ljust(3, b"\x00")[:3])
         return tlv("E3", body)
+
+    @classmethod
+    def _registry_entry(
+        cls,
+        aid_hex: str,
+        life_cycle_state: int,
+        privileges: bytes,
+    ) -> tuple[str, bytes]:
+        normalized = str(aid_hex or "").strip().upper()
+        return normalized, cls._status_entry(normalized, life_cycle_state, privileges)
+
+    @staticmethod
+    def _load_file_entry(app: SimGpAppEntry, *, with_modules: bool) -> tuple[str, bytes]:
+        """Table 11-37 'E3' entry for an Executable Load File.
+
+        §11.4.3.1 pins the no-tag-list content to '4F', '9F70' and, per
+        Note 2, the Executable Module AIDs under tag '84'. Privileges
+        (tag 'C5') are an Application data object and are not part of
+        an Executable Load File entry.
+        """
+        aid_hex = str(app.aid or "").strip().upper()
+        body = tlv("4F", bytes.fromhex(aid_hex)) + tlv("9F70", bytes([app.lifecycle_state & 0xFF]))
+        if with_modules:
+            for module_aid in app.modules:
+                normalized = str(module_aid or "").strip().upper()
+                if len(normalized) == 0:
+                    continue
+                body += tlv("84", bytes.fromhex(normalized))
+        return aid_hex, tlv("E3", body)

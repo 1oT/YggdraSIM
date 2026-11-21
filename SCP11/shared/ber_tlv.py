@@ -50,6 +50,9 @@ def read_ber_tlv(
         length_octet_count = first_length_octet & 0x7F
         if length_octet_count == 0:
             raise ValueError("Indefinite TLV lengths are not supported.")
+        if length_octet_count == 0x7F:
+            # X.690 clause 8.1.3.5 c) reserves the initial octet 0xFF.
+            raise ValueError("Reserved TLV length octet 0xFF.")
         if offset + length_octet_count > len(raw):
             raise ValueError("Truncated TLV length.")
         length_octets = raw[offset : offset + length_octet_count]
@@ -111,3 +114,75 @@ def validate_ber_tlv_tree(
                     raise ValueError("BER tree exceeds the nesting-depth limit.")
                 stack.append((value, 0, depth + 1))
             offset = next_offset
+
+
+def decode_object_identifier(value: bytes) -> str:
+    """Decode OBJECT IDENTIFIER contents octets into dotted notation.
+
+    ITU-T X.690 (02/2021) clause 8.19.2 lists the subidentifiers in base 128
+    with bit 8 as the continuation flag and forbids a leading ``0x80`` octet;
+    clause 8.19.4 folds the first two components into one subidentifier as
+    ``X * 40 + Y``, which for the arc 2 may exceed a single octet.
+    """
+
+    raw = bytes(value or b"")
+    if len(raw) == 0:
+        raise ValueError("OBJECT IDENTIFIER contents must not be empty.")
+    subidentifiers: list[int] = []
+    current = 0
+    in_progress = False
+    for octet in raw:
+        if in_progress is False and octet == 0x80:
+            raise ValueError("Non-minimal OBJECT IDENTIFIER subidentifier.")
+        in_progress = True
+        current = (current << 7) | (octet & 0x7F)
+        if octet & 0x80 == 0:
+            subidentifiers.append(current)
+            current = 0
+            in_progress = False
+    if in_progress:
+        raise ValueError("Truncated OBJECT IDENTIFIER subidentifier.")
+    first = subidentifiers[0]
+    if first < 40:
+        components = [0, first]
+    elif first < 80:
+        components = [1, first - 40]
+    else:
+        components = [2, first - 80]
+    components.extend(subidentifiers[1:])
+    return ".".join(str(component) for component in components)
+
+
+def encode_ber_length(length: int) -> bytes:
+    """Encode a definite length in the minimal short or long form."""
+
+    if length < 0:
+        raise ValueError("BER length must not be negative.")
+    if length < 0x80:
+        return bytes([length])
+    octets = length.to_bytes((length.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(octets)]) + octets
+
+
+def retag_sequence(tag: bytes, der: bytes) -> bytes:
+    """Carry a DER SEQUENCE under an IMPLICIT context tag.
+
+    The implicit tag replaces the SEQUENCE's own tag octet; the length and
+    contents octets are kept. This is how the official SGP.32 v1.3 module
+    encodes ``eimPublicKeyData [5] CHOICE { eimPublicKey SubjectPublicKeyInfo,
+    eimCertificate Certificate }``: ``A5 { A0 <SubjectPublicKeyInfo contents> }``
+    or ``A5 { A1 <Certificate contents> }``, never the SEQUENCE header itself.
+    """
+
+    raw = bytes(der or b"")
+    inner_tag, contents, _raw_tlv, end = read_ber_tlv(raw, 0)
+    if inner_tag != b"\x30" or end != len(raw):
+        raise ValueError("Expected exactly one DER SEQUENCE.")
+    return bytes(tag) + encode_ber_length(len(contents)) + contents
+
+
+def restore_sequence(contents: bytes) -> bytes:
+    """Rebuild the DER SEQUENCE whose contents travelled under an implicit tag."""
+
+    raw = bytes(contents or b"")
+    return b"\x30" + encode_ber_length(len(raw)) + raw

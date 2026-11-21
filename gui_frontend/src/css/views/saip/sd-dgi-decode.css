@@ -59,3 +59,34 @@
   word-break: break-all;
   max-width: 320px;
 }
+
+.saip-dgi-row-dgi .saip-dgi-col-name {
+  font-weight: 600;
+}
+
+.saip-dgi-row-depth-1 .saip-dgi-col-tag {
+  padding-left: 20px;
+}
+
+.saip-dgi-row-depth-2 .saip-dgi-col-tag {
+  padding-left: 34px;
+}
+
+.saip-dgi-row-depth-3 .saip-dgi-col-tag {
+  padding-left: 48px;
+}
+
+/* ---- Add a DGI record (sdPersoData append) ------------------------ */
+
+.saip-sd-perso-add {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.saip-sd-perso-add-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

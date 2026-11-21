@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from SIMCARD.utils import read_tlv, tlv
 from Tools.HilBridge.live_decode_state import (
@@ -274,6 +275,43 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         self.assertIsNone(annotations[4].channel_number)
         self.assertIsNone(annotations[4].channel_poll_index)
         self.assertEqual(annotations[4].summary_suffix, "")
+
+    def test_modem_side_copies_on_antenna_one_leave_the_state_machine_alone(self) -> None:
+        open_channel_payload = _proactive_command(
+            1,
+            OPEN_CHANNEL_COMMAND,
+            0x00,
+            tlv("39", bytes.fromhex("0400"))
+            + tlv("3C", bytes.fromhex("0201BB"))
+            + tlv("3E", bytes((0x21, 1, 2, 3, 4))),
+        )
+        receive_data_payload = _proactive_command(2, RECEIVE_DATA_COMMAND, 0x00, tlv("B7", b"\x05"))
+        sim_side = [
+            _fetch_row(1, open_channel_payload),
+            _terminal_response_row(3, open_channel_payload),
+            _fetch_row(5, receive_data_payload),
+            _terminal_response_row(
+                7,
+                receive_data_payload,
+                extra_tlvs=tlv("36", b"hello") + tlv("37", b"\x00"),
+            ),
+        ]
+
+        def modem_copy(row: PacketSummary) -> PacketSummary:
+            packet = bytearray(bytes.fromhex(row.udp_payload_hex))
+            packet[13] = 1
+            return replace(row, number=row.number + 1, udp_payload_hex=bytes(packet).hex().upper())
+
+        annotations = build_stateful_packet_annotations(sim_side + [modem_copy(row) for row in sim_side])
+
+        self.assertIn("CH1 OPEN", annotations[1].summary_suffix)
+        self.assertIn("CH1 OPEN OK", annotations[3].summary_suffix)
+        self.assertIn("CH1 RECEIVE 5B", annotations[5].summary_suffix)
+        self.assertIn("CH1 RX 5B rem=0", annotations[7].summary_suffix)
+        for copy_number in (2, 4, 6, 8):
+            self.assertEqual(annotations[copy_number].summary_suffix, "")
+            self.assertIsNone(annotations[copy_number].channel_session_id)
+            self.assertFalse(annotations[copy_number].state_event)
 
     def test_open_channel_summary_includes_network_access_name_when_present(self) -> None:
         apn_labels = b"\x03ims\x06apn123\x03com"
@@ -680,6 +718,55 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         self.assertEqual(annotations[4].card_session_iccid, "98881111111111111121")
         self.assertEqual(annotations[1].card_session_index, 1)
 
+    def test_decode_imsi_bytes_reads_ef_imsi_and_refuses_anything_else(self) -> None:
+        """3GPP TS 31.102 v19.5 clause 4.2.2.
+
+        Byte 1 is the length of what follows and the low nibble of the
+        first IMSI byte carries the parity/format bits rather than a
+        digit, so the record is not simply swapped-nibble BCD.
+        """
+        from Tools.HilBridge.live_decode_state import _decode_imsi_bytes
+
+        self.assertEqual(
+            _decode_imsi_bytes(bytes.fromhex("080910100000000010")),
+            "001010000000001",
+        )
+        # TS 23.003 clause 2.2 caps an IMSI at 15 digits; a record that
+        # decodes to something else is not one, and renders as raw hex.
+        self.assertEqual(_decode_imsi_bytes(b""), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("08")), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("FFFFFFFFFFFFFFFFFF")), "")
+        self.assertEqual(_decode_imsi_bytes(bytes.fromhex("000000000000000000")), "")
+
+    def test_ef_imsi_read_binary_populates_card_session_imsi(self) -> None:
+        """The read happens once, thousands of frames before anyone looks."""
+        rows = [
+            _apdu_exchange_row(1, bytes.fromhex("00A40004023F00")),
+            _apdu_exchange_row(2, bytes.fromhex("00A40004027FFF")),
+            _apdu_exchange_row(3, bytes.fromhex("00A40004026F07")),
+            _apdu_exchange_row(
+                4,
+                bytes.fromhex("00B0000009"),
+                bytes.fromhex("0809101000000000109000"),
+            ),
+            _apdu_exchange_row(5, bytes.fromhex("00A40004023F00")),
+        ]
+
+        annotations = build_stateful_packet_annotations(rows)
+
+        # Backfilled onto every frame of the session, the earlier ones
+        # included, so the identity does not depend on where the operator
+        # happens to be looking.
+        self.assertEqual(annotations[1].card_session_imsi, "001010000000001")
+        self.assertEqual(annotations[4].card_session_imsi, "001010000000001")
+        self.assertEqual(annotations[5].card_session_imsi, "001010000000001")
+        # And the decoded value is named in the frame's own lines, not
+        # only carried on the annotation.
+        self.assertIn(
+            "IMSI decoded: 001010000000001",
+            "\n".join(annotations[4].context_lines),
+        )
+
     def test_card_session_iccid_resets_on_card_reset(self) -> None:
         first_open_fetch, first_open_response = self._open_channel_rows()
         read_ef_iccid_rows = [
@@ -829,7 +916,7 @@ class HilBridgeLiveDecodeStateTests(unittest.TestCase):
         first_open_response = _terminal_response_row(
             2, first_open_payload, time_override_seconds=1.100
         )
-        # Frame 3 arrives ~45 s later — well beyond the 30 s idle threshold —
+        # Frame 3 arrives ~45 s later -- well beyond the 30 s idle threshold --
         # so the tracker must treat it as the opening of Card Session 2.
         post_reboot_select = _apdu_exchange_row(
             3,

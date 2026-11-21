@@ -92,7 +92,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   font-size: 13px;
   line-height: 1;
   color: var(--fg-muted);
@@ -118,7 +118,7 @@
 
 .cc-wb-frame--canvas:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-glow-accent);
+  box-shadow: var(--surface-glow);
 }
 
 .terminal-controls {

@@ -58,6 +58,13 @@ VENDORED = {
     "yggdrasim_common/card_backend.py": "_vendor/card_backend.py",
     "yggdrasim_common/card_bridge_auth.py": "_vendor/card_bridge_auth.py",
     "yggdrasim_common/remote_lab/security.py": "_vendor/remote_lab_security.py",
+    # The remote-reader binding table card_backend imports as a sibling
+    # (``from .remote_readers import``) and the server reads for a remote
+    # binding. Standard library only.
+    "yggdrasim_common/remote_readers.py": "_vendor/remote_readers.py",
+    # The lock the card tools take so a terminal console, the GUI and the HIL bridge
+    # on the same reader are not reset under. Standard library only.
+    "yggdrasim_common/reader_locks.py": "_vendor/reader_locks.py",
 }
 DATA_FILES = {"SCP03/seeds/aid.txt": "data/aid.txt"}
 
@@ -85,12 +92,25 @@ SERVER_REWRITES = (
         f"    from {PACKAGE}._vendor import card_backend\n",
     ),
     (
+        "    from yggdrasim_common import reader_locks\n",
+        f"    from {PACKAGE}._vendor import reader_locks\n",
+    ),
+    (
         "            from yggdrasim_common.remote_lab.security import read_token_file",
         f"            from {PACKAGE}._vendor.remote_lab_security import read_token_file",
     ),
     (
         "        from yggdrasim_common.card_backend import _request_card_relay_json",
         f"        from {PACKAGE}._vendor.card_backend import _request_card_relay_json",
+    ),
+    (
+        "            from yggdrasim_common.card_backend import create_card_connection",
+        f"            from {PACKAGE}._vendor.card_backend import create_card_connection",
+    ),
+    # Three sites, two indentations; the unindented form reaches them all.
+    (
+        "from yggdrasim_common.remote_readers import",
+        f"from {PACKAGE}._vendor.remote_readers import",
     ),
     # ``REPO_ROOT`` anchors two things in the full install: the packaged AID
     # registry, and the root the file tools resolve against. Split

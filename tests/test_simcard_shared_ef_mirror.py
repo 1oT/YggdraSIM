@@ -19,7 +19,10 @@ These tests pin the contract against:
 * a synthetic minimal profile used for the primary regression.
 
 Reference:
-    3GPP TS 31.102 v17 Annex H, TCA Profile Interoperability §3.5.5
+    The "Annex H mirror" is this tree's convention, described in
+    ``SIMCARD/etsi_fs.py``; no library document states it (TS 31.102 v19.5
+    Annex H is the list of SFI values, and TCA SAIP v3.4.1 links files only
+    through ``Fcp.linkPath``, §8.3.2).
 """
 
 from __future__ import annotations

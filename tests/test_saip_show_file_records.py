@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for `_decode_for_show_file` records-branch parity with the TUI.
 
 The GUI's `saip.show_file` dispatcher used to require both `recordLength`
@@ -13,7 +12,7 @@ decoder was fed the whole image and either returned the first record
 only or a parse error. The TUI's
 `_decode_arr_records_from_descriptor_and_chunks` enters the record
 branch on `recordLength > 0` alone and derives the count from the
-buffer when missing — these tests lock the GUI dispatcher to the same
+buffer when missing -- these tests lock the GUI dispatcher to the same
 contract.
 """
 
@@ -149,8 +148,8 @@ class TestDecodeForShowFileRecords(unittest.TestCase):
         # into the same byte range. This test pins the corrected
         # semantic by writing two distinct rules into separate records.
         descriptor_bytes = bytes.fromhex("4221001403")  # rec_len=20 nb_rec=3
-        rule_a = bytes.fromhex("80010190008001029700")  # 10 bytes — 2 rules
-        rule_b = bytes.fromhex("8001049000")  # 5 bytes — 1 rule (UPDATE Always)
+        rule_a = bytes.fromhex("80010190008001029700")  # 10 bytes -- 2 rules
+        rule_b = bytes.fromhex("8001049000")  # 5 bytes -- 1 rule (UPDATE Always)
         # After writing rule_a (10 bytes) at cursor 0, cursor is at 10.
         # Record 2 starts at byte 20, so we need a delta of 10 to reach
         # it. Treating the value as absolute would mis-place rule_b at
@@ -259,7 +258,7 @@ class TestLinearFixedNonArrDispatch(unittest.TestCase):
     """
 
     def test_ef_adn_record_decodes_msisdn_digits(self) -> None:
-        # TS 31.102 §4.4.2.3 / TS 51.011 §10.5.1 — record layout is
+        # TS 31.102 §4.4.2.3 / TS 51.011 §10.5.1 -- record layout is
         # ``alpha (X) || numLen (1) || TON/NPI (1) || digits (10 BCD)
         # || CCP (1) || EXT (1)``. We use X=16 so rec_len=30 (0x1E),
         # nb_rec=2.
@@ -300,7 +299,7 @@ class TestLinearFixedNonArrDispatch(unittest.TestCase):
         self.assertTrue(records[1].get("empty"))
 
     def test_ef_dir_record_tolerates_trailing_ff_padding(self) -> None:
-        # ETSI TS 102 221 §13.1 — EF.DIR record carries an Application
+        # ETSI TS 102 221 §13.1 -- EF.DIR record carries an Application
         # Template (tag 61) wrapping AID + label; the slot is FF-padded
         # to record_size. The BER-TLV stream decoder used to bail with
         # ``parseErrorOffset`` on the FF tail because 0xFF is the
@@ -336,7 +335,7 @@ class TestLinearFixedNonArrDispatch(unittest.TestCase):
         self.assertEqual(items[0].get("tag"), "61")
 
     def test_ef_sms_record_decodes_record_status(self) -> None:
-        # TS 31.102 §4.2.25 / TS 51.011 §10.5.3 — 176 B records carrying
+        # TS 31.102 §4.2.25 / TS 51.011 §10.5.3 -- 176 B records carrying
         # one byte ``record status`` followed by the 175 B TPDU. We use
         # rec_len=176 (0xB0), nb_rec=1.
         descriptor_bytes = bytes.fromhex("422100B001")
@@ -408,7 +407,7 @@ class TestRoundtripEfDispatcherGapsFromTcaSaip(unittest.TestCase):
         self.assertEqual(result.get("activeCount"), 1)
 
     def test_ef_oplmnwlan_skips_ff_padded_slots(self) -> None:
-        # Two 5-byte records — one valid (test PLMN 001/01 = 00F110),
+        # Two 5-byte records -- one valid (test PLMN 001/01 = 00F110),
         # one FF-padded (should be skipped).
         result = self._decode(
             ef_key="ef-oplmnwlan",
@@ -446,7 +445,7 @@ class TestRoundtripEfDispatcherGapsFromTcaSaip(unittest.TestCase):
         self.assertIsNotNone(result.get("plmn"))
 
     def test_ef_wlrplmn_returns_none_plmn_when_unset(self) -> None:
-        # All-FF body — Last Registered PLMN never written.
+        # All-FF body -- Last Registered PLMN never written.
         result = self._decode(
             ef_key="ef-wlrplmn",
             fid=None,

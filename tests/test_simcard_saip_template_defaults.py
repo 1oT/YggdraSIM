@@ -5,8 +5,9 @@
 
 BPP issuers may ship skeleton FCPs for template-defined EFs
 without any ``fillFileContent`` directive, expecting the card to
-materialise the SAIP / TS 31.102 §9 template default at runtime
-(``EF.AD = 00000002``, ``EF.HPPLMN = 0A``, ``EF.PSLOCI = FFFFFFFFFF...0000FF01``,
+materialise the template default of TCA SAIP v3.4.1 §9 (Annex A) at
+runtime (Mandatory USIM EFs, §9.5.1:
+``EF.AD = 00000002``, ``EF.HPPLMN = 0A``, ``EF.PSLOCI = FFFFFFFFFF...0000FF01``,
 ``EF.Keys = 07FF...FF`` and so on). Without this fill-in the modem
 sees ``9000`` with an empty body when reading via SFI -- the same
 failure shape covered by the synthetic regression below.
@@ -23,7 +24,8 @@ These tests pin:
   through ``EtsiFileSystem``.
 
 Reference:
-    SAIP / TCA Profile Interoperability v2.3.1 §9, 3GPP TS 31.102 §4.4
+    TCA SAIP v3.4.1 §9 (Annex A, File Structure Templates Definition);
+    3GPP TS 31.102 v19.5 §4.2 / §4.4 (contents of files and DFs at the USIM ADF level)
 """
 
 from __future__ import annotations

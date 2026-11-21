@@ -1,0 +1,83 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+
+/* ---- Flag lists ------------------------------------------------------
+   The bit and service lists of the SAIP editors (an application's privileges
+   and the other bit fields, service tables, access conditions, the profile
+   header's mandatory services) hold one flag per row, top to bottom; a
+   security domain's privileges are chips instead (structure-editor.css).
+   A list reads down a column instead of wrapping like running text. Each
+   row is the label of its check box: a click anywhere on the line toggles
+   it. The lists keep their own frame, height and font; this file owns the
+   row layout. */
+
+.saip-structure-flags,
+.saip-wizard-ust-grid,
+.saip-wizard-bitgrid,
+.saip-arr-wizard-am,
+.saip-profile-services-grid,
+.saip-decoded-services-list,
+.saip-form-bitmask-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+.saip-structure-flags > .saip-structure-bit,
+.saip-wizard-ust-cell,
+.saip-wizard-bit-cell,
+.saip-profile-service-option,
+.saip-decoded-services-row,
+.saip-form-bitmask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.saip-structure-flags > .saip-structure-bit + .saip-structure-bit,
+.saip-wizard-ust-cell + .saip-wizard-ust-cell,
+.saip-wizard-bit-cell + .saip-wizard-bit-cell,
+.saip-profile-service-option + .saip-profile-service-option,
+.saip-decoded-services-row + .saip-decoded-services-row,
+.saip-form-bitmask-row + .saip-form-bitmask-row {
+  border-top: 1px solid var(--border);
+}
+
+.saip-structure-flags > .saip-structure-bit:hover,
+.saip-wizard-ust-cell:hover,
+.saip-wizard-bit-cell:hover,
+.saip-profile-service-option:hover,
+.saip-decoded-services-row:hover,
+.saip-form-bitmask-row:hover {
+  background: var(--surface-hover);
+}
+
+.saip-structure-flags input[type="checkbox"],
+.saip-wizard-ust-cell input[type="checkbox"],
+.saip-wizard-bit-cell input[type="checkbox"],
+.saip-profile-service-option input[type="checkbox"],
+.saip-decoded-services-row input[type="checkbox"],
+.saip-form-bitmask-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* A field of several bits keeps its list or number at the end of its row. */
+.saip-structure-flags > .saip-structure-bit > .saip-form-select,
+.saip-structure-flags > .saip-structure-bit > .saip-structure-number {
+  margin-left: auto;
+}
+
+/* The removal note closes the list, below its last row. */
+.saip-structure-flags > .saip-structure-meta {
+  padding: 4px 8px 0;
+}

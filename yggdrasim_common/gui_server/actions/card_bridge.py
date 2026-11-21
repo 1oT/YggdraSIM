@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``card_bridge.*`` actions — Command Center surface for the Card Bridge (CB-4).
+"""``card_bridge.*`` actions -- Command Center surface for the Card Bridge (CB-4).
 
 Two read-only actions that let the GUI front-end inspect and probe a
 remote card bridge without re-implementing the relay HTTP client:
 
-* ``card_bridge.status`` — report the *currently configured* relay
+* ``card_bridge.status`` -- report the *currently configured* relay
   URL and token posture as resolved by ``card_backend``. Pure
   introspection: zero network traffic, safe to poll on a tight cadence.
-* ``card_bridge.probe`` — open a short-lived ``GET /ping`` and
+* ``card_bridge.probe`` -- open a short-lived ``GET /ping`` and
   ``GET /status`` against either the configured URL or an operator-
   supplied URL+token, return reachability, auth posture, ATR (when the
   bridge surfaces one), and round-trip latency.
@@ -66,8 +65,29 @@ _PROBE_TIMEOUT_SECONDS = 2.0
 _PROBE_MAX_RESPONSE_BYTES = 64 * 1024
 _REMOTE_RIG_STATE_FILENAME = "card_bridge_remote_rig.json"
 _DEFAULT_REMOTE_SERVICE_NAME = "yggdrasim-hil-supervisor.service"
+# Long enough to outlast one of the supervisor's own restart cycles. It
+# waits 15 s between bridge restarts whenever a remote card is
+# configured, so a shorter wait than that can never see a rig that is
+# simply mid-retry and reports a failure for a rig that comes up moments
+# later. That false failure is worse than the wait.
+_REMOTE_HIL_READY_TIMEOUT_SECONDS = 45.0
+
 _DEFAULT_REMOTE_CARD_URL = "http://127.0.0.1:8642/apdu"
-_DEFAULT_REMOTE_TOKEN_FILE = "~/.config/yggdrasim/card_bridge/8642.token"
+# Where the operator's card token is staged ON THE RIG. Deliberately not
+# under card_bridge/: that directory is where a Card Bridge keeps the
+# token for a bridge *it* serves, named by port, and a rig commonly runs
+# one. Writing the operator's token there overwrites the rig's own
+# credential, after which its agent authenticates to its own bridge with
+# somebody else's token, fails, and is locked out for repeated failures.
+_REMOTE_CARD_TOKEN_DIR = "~/.config/yggdrasim/hil"
+
+
+def _remote_card_token_path(port: Any) -> str:
+    """Path on the rig for the operator's card token, by port."""
+    return f"{_REMOTE_CARD_TOKEN_DIR}/remote-card-{_coerce_port(port, _DEFAULT_CARD_PORT)}.token"
+
+
+_DEFAULT_REMOTE_TOKEN_FILE = f"{_REMOTE_CARD_TOKEN_DIR}/remote-card-8642.token"
 _DEFAULT_REMOTE_WORKDIR = "~/YggdraSIM"
 _DEFAULT_REMOTE_PYTHON = "~/YggdraSIM/.venv/bin/python"
 _DEFAULT_REMSIM_BINARY = "osmo-remsim-client-st2"
@@ -109,7 +129,7 @@ def _fingerprint(token: str) -> str:
         from yggdrasim_common.card_bridge_auth import fingerprint as _fp
 
         return _fp(token)
-    except Exception:  # noqa: BLE001 — diagnostics-only path
+    except Exception:  # noqa: BLE001 -- diagnostics-only path
         return ""
 
 
@@ -187,6 +207,32 @@ def _coerce_port(value: Any, default: int) -> int:
     return port
 
 
+def _claimed_card_port(state: dict[str, Any]) -> int:
+    """The port this GUI currently claims, or 0 when it claims none.
+
+    A stop writes 0 there deliberately. Reading that back as the default
+    port is how a cleared claim became a claim on 8642, which the
+    terminate and adopt paths then act on -- against whatever bridge
+    happens to be listening there. Callers that may kill or adopt a
+    process use this and do nothing on 0; only a display or probe site
+    may substitute a default.
+    """
+    try:
+        port = int(state.get("local_card_bridge_port") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return port if 1 <= port <= 65535 else 0
+
+
+def _recorded_card_port(state: dict[str, Any]) -> int:
+    """The claimed port for display, falling back to the default.
+
+    Only for showing or probing: 0 is not a port, and coercing it raises
+    rather than falling back.
+    """
+    return _coerce_port(_claimed_card_port(state) or _DEFAULT_CARD_PORT, _DEFAULT_CARD_PORT)
+
+
 def _coerce_positive_int(value: Any, default: int) -> int:
     try:
         normalized = int(value) if value is not None else int(default)
@@ -215,6 +261,14 @@ def _pid_is_running(pid: Any) -> bool:
     return True
 
 
+def _forget_gui_subprocess(pid: int) -> None:
+    try:
+        from yggdrasim_common.gui_server.lifecycle import unregister_gui_subprocess
+    except Exception:  # noqa: BLE001 - lifecycle registry is optional here
+        return
+    unregister_gui_subprocess(pid)
+
+
 def _terminate_process_group(pid: Any) -> dict[str, Any]:
     try:
         pid_i = int(pid or 0)
@@ -222,6 +276,7 @@ def _terminate_process_group(pid: Any) -> dict[str, Any]:
         pid_i = 0
     if pid_i <= 0:
         return {"ok": False, "pid": pid_i, "status": "missing-pid"}
+    _forget_gui_subprocess(pid_i)
     if _pid_is_running(pid_i) is False:
         return {"ok": True, "pid": pid_i, "status": "already-exited"}
     try:
@@ -356,7 +411,25 @@ def _terminate_local_card_bridge_for_state(state: dict[str, Any]) -> dict[str, A
     status = str(result.get("status") or "")
     if status not in {"missing-pid", "already-exited"}:
         return result
-    port = _coerce_port(state.get("local_card_bridge_port", _DEFAULT_CARD_PORT), _DEFAULT_CARD_PORT)
+    if bool(state.get("local_card_bridge_external")):
+        # The GUI adopted this bridge rather than starting it, so the pid
+        # it recorded is the only thing it may stop. Falling back to "kill
+        # whatever holds the port" would end a bridge somebody else runs,
+        # and the rig streaming through it loses the card.
+        return {
+            **result,
+            "port": _recorded_card_port(state),
+            "note": (
+                "Left the Card Bridge running: this GUI adopted it rather "
+                "than starting it."
+            ),
+        }
+    port = _claimed_card_port(state)
+    if port <= 0:
+        return {
+            **result,
+            "note": "No Card Bridge is claimed by this GUI.",
+        }
     listener_pid = _find_local_card_bridge_listener_pid(port)
     if listener_pid <= 0:
         return {
@@ -640,6 +713,7 @@ def _render_remote_hil_unit(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    modem_at_device: Any = None,
     simtrace_reset: Any = None,
     uhubctl_binary: Any = None,
     uhubctl_location: Any = None,
@@ -651,7 +725,11 @@ def _render_remote_hil_unit(
         raise ValueError("remote_workdir is required")
     python_executable = _systemd_path(str(remote_python or "python3").strip() or "python3")
     card_url = str(remote_card_url or _DEFAULT_REMOTE_CARD_URL).strip()
-    token_file = _systemd_path(str(remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE).strip())
+    token_file = _systemd_path(
+        _normalize_remote_card_token_path(
+            remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE
+        )
+    )
     remsim_binary_s = _systemd_path(str(remsim_binary or _DEFAULT_REMSIM_BINARY).strip())
     vidpid = str(usb_vidpid or _DEFAULT_USB_VIDPID).strip()
     port_i = _coerce_port(hil_port, _DEFAULT_HIL_PORT)
@@ -699,6 +777,12 @@ def _render_remote_hil_unit(
                 _systemd_path(capture_path),
             ]
         )
+    # The supervisor reconnects on its own after a network interruption,
+    # and a modem that stayed powered will not re-read the card unless it
+    # is told to. Without this the rig recovers and still reports no SIM.
+    at_device = str(modem_at_device or "").strip()
+    if len(at_device) > 0:
+        exec_parts.extend(["--modem-at-device", at_device])
     # Pre-session SIMtrace2 reset. Unset knobs are omitted so the
     # remote supervisor keeps its own default (usb-reset) and the
     # rendered unit stays stable across reinstalls.
@@ -725,7 +809,11 @@ def _render_remote_hil_unit(
     return (
         "[Unit]\n"
         "Description=YggdraSIM remote-card HIL bridge supervisor\n"
-        "After=default.target\n"
+        # No After=default.target here. The unit is WantedBy=default.target,
+        # so naming default.target as a predecessor closes an ordering cycle
+        # that systemd breaks by dropping a start job -- silently, and only
+        # on the next boot. The rig's Card Bridge unit carries the same note
+        # after the cycle once left the lab agent dead after a reboot.
         "\n"
         "[Service]\n"
         "Type=simple\n"
@@ -795,7 +883,7 @@ def _resolve_configured() -> dict[str, Any]:
     Mirrors the resolution chain used by ``RelayCardConnection`` so the
     GUI sees exactly what a card-consuming CLI would see at the same
     instant. Returned dict contains plain JSON-serialisable values
-    only — no raw tokens.
+    only -- no raw tokens.
     """
     snapshot: dict[str, Any] = {
         "configured": False,
@@ -942,6 +1030,29 @@ def _http_post_json(
         return 0, None, elapsed_ms, f"{error.__class__.__name__}: {error}"
 
 
+def _local_token_file_for_port(port: int, token_file: Any) -> str:
+    """Drop a recorded token path that is another port's default.
+
+    The bridge names its own token after the port it serves, so
+    ``card_bridge/8642.token`` recorded against a bridge on 8908 is a
+    stale marker, not a deliberate override: reading it yields a token
+    the running bridge never had and every request 401s. An operator's
+    own path carries no port and is kept as given.
+    """
+    recorded = str(token_file or "").strip()
+    if len(recorded) == 0:
+        return ""
+    match = _CARD_BRIDGE_OWN_TOKEN.search(str(PurePosixPath(recorded)))
+    if match is not None and int(match.group(1)) != int(port):
+        _LOGGER.warning(
+            "gui.card_bridge.local_token_file_port_mismatch port=%d recorded=%s",
+            int(port),
+            recorded,
+        )
+        return ""
+    return recorded
+
+
 def _read_local_card_token(
     *,
     port: Any = None,
@@ -950,7 +1061,7 @@ def _read_local_card_token(
     from yggdrasim_common.card_bridge_auth import default_token_file_for_port
 
     port_i = _coerce_port(port, _DEFAULT_CARD_PORT)
-    token_path_s = str(token_file or "").strip()
+    token_path_s = _local_token_file_for_port(port_i, token_file)
     token_path = (
         Path(os.path.expanduser(token_path_s))
         if len(token_path_s) > 0
@@ -1093,6 +1204,34 @@ def _wait_for_local_card_bridge(
     }
 
 
+def _tolerate_foreign_card_lease(reset_result: dict[str, Any]) -> dict[str, Any]:
+    """Turn a lease refusal on the pre-session reset into a skipped step.
+
+    The reset only refreshes the PC/SC handle. A card held by another
+    consumer is not a reason to abandon the start: the rig's supervisor
+    claims the lease itself a few steps later and names the holder when
+    it cannot, which is both the authoritative gate and the clearer
+    message. Aborting here replaced that with a vaguer one.
+    """
+    if bool(reset_result.get("ok")):
+        return reset_result
+    try:
+        status_code = int(reset_result.get("status_code", 0) or 0)
+    except (TypeError, ValueError):
+        status_code = 0
+    if status_code != 409:
+        return reset_result
+    return {
+        **reset_result,
+        "ok": True,
+        "status": "skipped",
+        "note": (
+            "PC Card Bridge reset skipped: the card is leased by another "
+            "consumer. The rig names the holder when it claims the card."
+        ),
+    }
+
+
 def _reset_local_card_bridge(
     *,
     port: Any = None,
@@ -1181,6 +1320,112 @@ def _remember_reused_local_card_bridge(
     }
 
 
+# Tried in order when the preferred port is taken on the rig. Kept near
+# the default so an operator reading `ss` on the rig recognises them.
+_REMOTE_CARD_PORT_FALLBACKS = (8908, 8909, 8910, 8911, 8912)
+
+
+def _choose_free_remote_card_port(
+    *,
+    ssh_target: Any,
+    identity_file: Any = None,
+    ssh_path: Any = None,
+    preferred_port: Any = None,
+) -> dict[str, Any]:
+    """Pick a port on the rig the reverse tunnel can actually own.
+
+    A rig that shares a reader runs a Card Bridge of its own on the
+    default port. sshd binds whichever address family is still free, the
+    rig's own bridge answers the other, and the operator's token is then
+    refused by a bridge that was never theirs -- several steps later, as
+    an authentication failure.
+    """
+    preferred = _coerce_port(preferred_port, _DEFAULT_CARD_PORT)
+    candidates = [preferred] + [
+        port for port in _REMOTE_CARD_PORT_FALLBACKS if port != preferred
+    ]
+    taken = _remote_listening_ports(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        ssh_path=ssh_path,
+        ports=candidates,
+    )
+    if taken.get("ok") is False:
+        # Could not ask. Carry on with what was requested rather than
+        # refuse a start over a probe.
+        return {
+            "ok": True,
+            "port": preferred,
+            "note": (
+                "Could not check which ports the rig has free; using "
+                f"{preferred} as configured."
+            ),
+        }
+    busy = set(taken.get("busy") or ())
+    for port in candidates:
+        if port in busy:
+            continue
+        if port == preferred:
+            return {
+                "ok": True,
+                "port": port,
+                "note": f"Port {port} is free on the rig for the reverse tunnel.",
+            }
+        return {
+            "ok": True,
+            "port": port,
+            "moved_from": preferred,
+            "note": (
+                f"The rig already serves something on {preferred} -- most "
+                "likely its own Card Bridge, which uses that port by "
+                f"default -- so the tunnel takes {port} instead."
+            ),
+        }
+    return {
+        "ok": False,
+        "port": preferred,
+        "error": f"no free port on the rig among {candidates}",
+        "note": (
+            "Every port this action would use is already taken on the rig: "
+            + ", ".join(str(port) for port in candidates)
+            + ". Free one, or set a different RPi Card Bridge port."
+        ),
+    }
+
+
+def _remote_listening_ports(
+    *,
+    ssh_target: Any,
+    identity_file: Any = None,
+    ssh_path: Any = None,
+    ports: Any = None,
+) -> dict[str, Any]:
+    """Which of these ports already have a listener on the rig."""
+    wanted = [int(port) for port in (ports or [])]
+    if len(wanted) == 0:
+        return {"ok": True, "busy": []}
+    # One round trip for all of them; ss prints the local address column.
+    remote_command = "ss -ltnH 2>/dev/null | tr -s ' ' | cut -d' ' -f4"
+    result = _run_ssh_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        ssh_path=ssh_path,
+        remote_command=remote_command,
+        timeout_seconds=10,
+    )
+    if bool(result.get("ok")) is False:
+        return {"ok": False, "busy": [], "error": str(result.get("stderr") or "")}
+    busy: list[int] = []
+    listening = str(result.get("stdout") or "")
+    for port in wanted:
+        needle = f":{port}"
+        for line in listening.splitlines():
+            if line.strip().endswith(needle):
+                busy.append(port)
+                break
+    return {"ok": True, "busy": busy}
+
+
 def _remote_card_ping(
     *,
     ssh_target: Any,
@@ -1208,6 +1453,112 @@ def _remote_card_ping(
     }
 
 
+_DEFAULT_MODEM_AT_DEVICE = "/dev/ttyUSB2"
+
+
+def _remote_modem_sim_refresh(
+    *,
+    ssh_target: Any,
+    identity_file: Any = None,
+    ssh_path: Any = None,
+    at_device: Any = None,
+) -> dict[str, Any]:
+    """Make the modem re-read the SIM interface once the card is streaming.
+
+    A modem that was already powered when the rig came up has nothing to
+    re-read on its own, so it reports no SIM until something tells it to
+    look again. ``AT+CFUN=0;+CFUN=1`` cycles the radio and re-initialises
+    the SIM interface in place; ``AT+CFUN=1,1`` would also work but
+    reboots the modem, which drops its USB device for about twenty
+    seconds and takes the AT port with it.
+
+    Sent with ``socat`` so it does not depend on a serial library being
+    installed on the rig, and reported rather than enforced: the card is
+    streaming either way, and a rig whose AT port is held or absent
+    should not fail the whole bring-up.
+    """
+    device = str(at_device or "").strip() or _DEFAULT_MODEM_AT_DEVICE
+    quoted = shlex.quote(device)
+    # socat rather than stty: a USB serial modem rejects part of the raw
+    # mode stty asks for, and the whole command fails with it.
+    remote_command = (
+        f"test -c {quoted} && "
+        f"printf 'AT+CFUN=0;+CFUN=1\r' | "
+        f"timeout 8 socat -T6 - {quoted},b115200,raw,echo=0"
+    )
+    result = _run_ssh_command(
+        ssh_target=ssh_target,
+        identity_file=identity_file,
+        ssh_path=ssh_path,
+        remote_command=remote_command,
+        timeout_seconds=20,
+    )
+    reply = str(result.get("stdout") or "").strip()
+    # Whether an OK lands inside the window is not a reliable signal: the
+    # modem echoes first and socat closes as soon as the write is
+    # consumed, so a refresh that worked often reports nothing. What the
+    # remote command can say is whether it ran, and a modem needs a few
+    # seconds either way, so the confirmation an operator wants is
+    # AT+CPIN? afterwards rather than anything read here.
+    sent = bool(result.get("ok"))
+    return {
+        **result,
+        "ok": True,
+        "device": device,
+        "sent": sent,
+        "reply": reply[:120],
+        "note": (
+            f"Sent the SIM refresh to {device}; the card reads a few "
+            "seconds later. Confirm with AT+CPIN? in the modem terminal."
+            if sent
+            else (
+                f"Could not reach {device} to refresh the SIM interface. "
+                "Check socat is installed and the AT port exists."
+            )
+        ),
+    }
+
+
+# A Card Bridge keeps the token for a bridge it serves in this directory,
+# named for the port. A rig commonly runs one, so writing the operator's
+# token to such a path replaces the rig's own credential: its agent then
+# authenticates to its own bridge with somebody else's token, fails, and
+# is locked out for repeated failures. The rig looks healthy throughout.
+_CARD_BRIDGE_OWN_TOKEN = re.compile(r"(?:^|/)card_bridge/(\d+)\.token$")
+
+
+def _normalize_remote_card_token_path(remote_path: Any) -> str:
+    """Move a destination out of a Card Bridge's own token namespace.
+
+    Releases before this one defaulted the operator's token to
+    ``card_bridge/<port>.token`` on the rig, and that value was written
+    into the rig marker, so it comes back from saved state long after the
+    default changed. Rewriting it is safe -- the operator never chose the
+    path -- and refusing instead would strand every host started by the
+    older default.
+    """
+    cleaned = str(remote_path or "").strip()
+    if len(cleaned) == 0:
+        return cleaned
+    # Collapse ``card_bridge//8642.token`` and ``./card_bridge/8642.token``
+    # so neither slips past the pattern on its punctuation alone.
+    collapsed = str(PurePosixPath(cleaned))
+    match = _CARD_BRIDGE_OWN_TOKEN.search(collapsed)
+    if match is None:
+        return cleaned
+    rewritten = str(
+        PurePosixPath(collapsed).parent.parent
+        / "hil"
+        / f"remote-card-{match.group(1)}.token"
+    )
+    _LOGGER.warning(
+        "gui.card_bridge.remote_token_path_moved from=%s to=%s",
+        collapsed,
+        rewritten,
+    )
+    return rewritten
+
+
 def _remote_card_status(
     *,
     ssh_target: Any,
@@ -1217,7 +1568,9 @@ def _remote_card_status(
     remote_token_file: Any = None,
 ) -> dict[str, Any]:
     port_i = _coerce_port(remote_card_port, _DEFAULT_CARD_PORT)
-    token_path = str(remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE).strip()
+    token_path = _normalize_remote_card_token_path(
+        remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE
+    )
     remote_file = _remote_shell_path_expr(token_path)
     url = f"http://127.0.0.1:{port_i}/status"
     remote_command = (
@@ -1284,7 +1637,7 @@ STATUS_SPEC = ActionSpec(
     description=(
         "Report the currently configured remote card-bridge URL plus "
         "token posture as the running process would resolve them. "
-        "Pure introspection — no network traffic. Use this to verify "
+        "Pure introspection -- no network traffic. Use this to verify "
         "that --remote-card-url / YGGDRASIM_CARD_RELAY_URL took "
         "effect before opening a card session."
     ),
@@ -1336,7 +1689,7 @@ def _dispatch_probe(
         used_configured_url = True
     if len(target_token) == 0 and bool(use_configured):
         # Fall back to whatever ``card_backend`` would resolve. We
-        # don't echo the resolved token back to the client — the
+        # don't echo the resolved token back to the client -- the
         # fingerprint already conveys "we have one".
         try:
             from yggdrasim_common.card_backend import _resolve_card_relay_token
@@ -1352,7 +1705,7 @@ def _dispatch_probe(
     if len(target_url) == 0:
         return {
             "ok": False,
-            "reason": "no URL — set --remote-card-url, YGGDRASIM_CARD_RELAY_URL, or pass `url` to this action.",
+            "reason": "no URL -- set --remote-card-url, YGGDRASIM_CARD_RELAY_URL, or pass `url` to this action.",
             "configured": snapshot,
         }
 
@@ -1405,7 +1758,7 @@ def _dispatch_probe(
         reader = str(status_payload.get("reader") or "")
         atr_hex = str(status_payload.get("atrHex") or status_payload.get("atr") or "").upper()
 
-    # 401 is canonical "auth required, request not satisfied" — treat
+    # 401 is canonical "auth required, request not satisfied" -- treat
     # it as authoritative regardless of whether the body bothered to
     # echo ``authRequired``. Some older relays returned 401 without a
     # JSON body at all.
@@ -1461,7 +1814,7 @@ PROBE_SPEC = ActionSpec(
     description=(
         "GET /ping and GET /status against the configured (or supplied) "
         "Card Bridge URL. Reports reachability, auth posture, latency, "
-        "and ATR. Bearer tokens are never echoed back — only their "
+        "and ATR. Bearer tokens are never echoed back -- only their "
         "6-char SHA-256 fingerprint is returned so operators can "
         "confirm the right token is wired up."
     ),
@@ -1614,7 +1967,7 @@ CONFIG_SPEC = ActionSpec(
     title="Configuration",
     description=(
         "Show the effective Card Bridge configuration: relay URL, token "
-        "posture, and default token file path. Pure introspection — no "
+        "posture, and default token file path. Pure introspection -- no "
         "network traffic."
     ),
     inputs=(),
@@ -1631,6 +1984,35 @@ CONFIG_SPEC = ActionSpec(
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_card_port_release(port: int, timeout_seconds: float = 5.0) -> bool:
+    """Wait for a terminated bridge to let go of its listening socket.
+
+    SIGTERM returns before the kernel has closed the listener, so
+    spawning the replacement immediately loses the bind with
+    "Address already in use" and the whole start fails on a race.
+    """
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        if _find_local_card_bridge_listener_pid(port) <= 0:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
+def _reader_selection_matches(requested: str, running: str) -> bool:
+    """Does a bridge already on this port serve the reader that was asked for?
+
+    The Card Bridge picks its reader by substring, so a running bridge
+    reports the full PC/SC name while the request carries the fragment the
+    operator chose. An empty request names no reader and so matches any.
+    """
+    wanted = str(requested or "").strip().casefold()
+    if len(wanted) == 0:
+        return True
+    return wanted in str(running or "").casefold()
+
+
 def _dispatch_local_start(
     ctx: ActionContext,
     *,
@@ -1645,7 +2027,7 @@ def _dispatch_local_start(
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — starting Card Bridge opens a local PC/SC relay.")
+        raise ValueError("confirm must be true -- starting Card Bridge opens a local PC/SC relay.")
 
     port_i = _coerce_port(port, _DEFAULT_CARD_PORT)
     timeout_i = _coerce_positive_int(apdu_timeout_ms, _DEFAULT_APDU_TIMEOUT_MS)
@@ -1658,6 +2040,11 @@ def _dispatch_local_start(
 
     state = _load_remote_rig_state()
     existing_pid = int(state.get("local_card_bridge_pid", 0) or 0)
+    # The marker records one bridge. Starting a second rig on another port
+    # must not treat that pid as this port's: terminating it would stop a
+    # bridge still streaming a card on the port it was started for.
+    if _claimed_card_port(state) != port_i:
+        existing_pid = 0
     if bool(reuse_existing):
         existing_check = _wait_for_local_card_bridge(
             port=port_i,
@@ -1665,10 +2052,52 @@ def _dispatch_local_start(
             timeout_seconds=0.75,
         )
         if bool(existing_check.get("ok")):
-            return _remember_reused_local_card_bridge(
-                port=port_i,
-                check=existing_check,
-            )
+            # Answering on the port is not the same as serving the card
+            # that was asked for. Adopting a bridge bound to another
+            # reader hands the rig, the SIMtrace2 and the modem the wrong
+            # card while every step of the start still reports success.
+            running_reader = str(existing_check.get("reader") or "")
+            reader_matches = _reader_selection_matches(reader_name_s, running_reader)
+            # "Restart owned processes" has to beat "reuse anything that
+            # answers", or the flag does nothing whenever a bridge from the
+            # last session is still up. It only ever restarts a bridge this
+            # GUI started; one it merely adopted is left alone.
+            owns_running_bridge = _pid_is_running(existing_pid) and bool(
+                state.get("local_card_bridge_external")
+            ) is False
+            if reader_matches and not (bool(restart) and owns_running_bridge):
+                return _remember_reused_local_card_bridge(
+                    port=port_i,
+                    check=existing_check,
+                )
+            if owns_running_bridge:
+                _terminate_process_group(existing_pid)
+                _wait_for_card_port_release(port_i)
+                # SIGTERM returns before the child is gone, and the guard
+                # below reads this pid: left set, it reports "already
+                # running" for the bridge just killed and starts nothing.
+                existing_pid = 0
+            elif not reader_matches:
+                # Reported, not raised: the rig-start collects a step list
+                # and the action route drops it when a dispatcher raises,
+                # so the operator would lose every step that had passed.
+                return {
+                    "ok": False,
+                    "port": port_i,
+                    "pid": existing_pid,
+                    "reader": running_reader,
+                    "requested_reader": reader_name_s,
+                    "error": (
+                        f"A Card Bridge on port {port_i} is serving "
+                        f"{running_reader!r}, not the requested "
+                        f"{reader_name_s!r}."
+                    ),
+                    "note": (
+                        "PC Card Bridge serves a different reader. Stop it "
+                        "or select that reader, so the modem is not handed "
+                        "the wrong card."
+                    ),
+                }
 
     if _pid_is_running(existing_pid):
         if bool(restart) is False:
@@ -1679,6 +2108,7 @@ def _dispatch_local_start(
                 "note": "Card Bridge is already running from this GUI state.",
             }
         _terminate_process_group(existing_pid)
+        _wait_for_card_port_release(port_i)
 
     command = build_module_command(
         "Tools.CardBridge",
@@ -1727,6 +2157,7 @@ def _dispatch_local_start(
             "local_card_bridge_log": str(log_path),
             "local_card_bridge_command": command,
             "local_card_bridge_external": False,
+            "local_card_bridge_token_file": token_file_s,
         })
         return {
             "ok": False,
@@ -1751,6 +2182,10 @@ def _dispatch_local_start(
         "local_card_bridge_log": str(log_path),
         "local_card_bridge_command": command,
         "local_card_bridge_external": False,
+        # Blank when the bridge was spawned without an explicit path: the
+        # readers then derive it from the port rather than inheriting the
+        # token file some earlier session recorded against another port.
+        "local_card_bridge_token_file": token_file_s,
     })
     return {
         "ok": True,
@@ -1768,14 +2203,21 @@ def _dispatch_local_stop(
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — stopping Card Bridge disrupts the remote card path.")
+        raise ValueError("confirm must be true -- stopping Card Bridge disrupts the remote card path.")
     state = _load_remote_rig_state()
     result = _terminate_local_card_bridge_for_state(state)
     _clear_local_card_relay_marker()
     _clear_remote_hil_attachment_state()
+    # The marker merges, so a key left behind keeps claiming this GUI owns
+    # a bridge on that port. Shutdown reads that claim and stops "its"
+    # bridge -- which by then may be one somebody else started.
     _write_remote_rig_state({
         "local_card_bridge_pid": 0,
         "local_card_bridge_external": False,
+        "local_card_bridge_port": 0,
+        "local_card_bridge_log": "",
+        "local_card_bridge_command": [],
+        "local_card_bridge_token_file": "",
     })
     return {
         **result,
@@ -1799,7 +2241,7 @@ def _dispatch_tunnel_start(
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — starting the tunnel opens SSH port forwards.")
+        raise ValueError("confirm must be true -- starting the tunnel opens SSH port forwards.")
     state = _load_remote_rig_state()
     ssh_path_s = str(ssh_path or state.get("ssh_path") or "").strip()
     existing_pid = int(state.get("ssh_tunnel_pid", 0) or 0)
@@ -1904,7 +2346,7 @@ def _dispatch_tunnel_stop(
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — stopping the tunnel breaks remote HIL card access.")
+        raise ValueError("confirm must be true -- stopping the tunnel breaks remote HIL card access.")
     state = _load_remote_rig_state()
     result = _terminate_process_group(state.get("ssh_tunnel_pid", 0))
     _clear_local_card_relay_marker()
@@ -1922,18 +2364,21 @@ def _dispatch_sync_token(
     ssh_target: Any = None,
     identity_file: Any = None,
     ssh_path: Any = None,
+    local_card_port: Any = None,
+    remote_card_port: Any = None,
     local_token_file: Any = None,
     remote_token_file: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — this writes the remote bearer token file.")
+        raise ValueError("confirm must be true -- this writes the remote bearer token file.")
     from yggdrasim_common.card_bridge_auth import default_token_file_for_port
 
-    local_path_s = str(local_token_file or "").strip()
+    local_port_i = _coerce_port(local_card_port, _DEFAULT_CARD_PORT)
+    local_path_s = _local_token_file_for_port(local_port_i, local_token_file)
     if len(local_path_s) == 0:
-        local_path = default_token_file_for_port(_DEFAULT_CARD_PORT)
+        local_path = default_token_file_for_port(local_port_i)
     else:
         local_path = Path(os.path.expanduser(local_path_s))
     if local_path.is_file() is False:
@@ -1941,7 +2386,12 @@ def _dispatch_sync_token(
     token = local_path.read_text(encoding="utf-8").strip()
     if len(token) == 0:
         raise ValueError(f"local token file is empty: {local_path}")
-    remote_path = str(remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE).strip()
+    # The rig reads the token at the path named for the port it dials, so
+    # the destination follows that port rather than a fixed default.
+    remote_path = _normalize_remote_card_token_path(
+        remote_token_file
+        or _remote_card_token_path(_coerce_port(remote_card_port, local_port_i))
+    )
     # The destination is on a Linux HIL host even when the GUI itself runs
     # on Windows. PurePosixPath prevents ``~/.config`` becoming ``~\\.config``
     # before it is sent to the remote shell.
@@ -2034,6 +2484,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -2200,6 +2651,31 @@ elif not requirements["curl"]:
     payload["note"] = "curl is required for tunneled Card Bridge health checks."
 else:
     payload["note"] = f"Remote HIL runtime ready ({payload['runtime_kind']})."
+# Which optional flags this supervisor understands. The GUI is upgraded
+# independently of the rigs it drives, so emitting a flag an older
+# supervisor does not know makes systemd crash-loop it on
+# "unrecognized arguments" and the rig never comes up at all.
+payload["supervisor_flags"] = []
+if payload["supervisor_command"]:
+    try:
+        helped = subprocess.run(
+            list(payload["supervisor_command"]) + ["--help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=15,
+            cwd=payload["resolved_workdir"],
+            check=False,
+        )
+        if helped.returncode == 0:
+            seen = set()
+            for token in re.findall(r"--[A-Za-z0-9][A-Za-z0-9-]*", helped.stdout or ""):
+                if token not in seen:
+                    seen.add(token)
+                    payload["supervisor_flags"].append(token)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
 print(json.dumps(payload, sort_keys=True))
 """.strip()
     shell_fallback = (
@@ -2336,6 +2812,7 @@ def _dispatch_install_remote_service(
     service_name: Any = None,
     remote_workdir: Any = None,
     remote_python: Any = None,
+    remote_card_port: Any = None,
     remote_card_url: Any = None,
     remote_token_file: Any = None,
     remsim_binary: Any = None,
@@ -2343,6 +2820,7 @@ def _dispatch_install_remote_service(
     hil_port: Any = None,
     apdu_timeout_ms: Any = None,
     gsmtap_capture_path: Any = None,
+    modem_at_device: Any = None,
     simtrace_reset: Any = None,
     uhubctl_binary: Any = None,
     uhubctl_location: Any = None,
@@ -2354,8 +2832,20 @@ def _dispatch_install_remote_service(
 ) -> dict[str, Any]:
     del ctx
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — this writes a remote systemd user service.")
+        raise ValueError("confirm must be true -- this writes a remote systemd user service.")
     service = _validate_service_name(service_name)
+    # The unit dials one port and reads the token named for it; a fixed
+    # default for either pairs one port's URL with another port's token,
+    # and the rig then fails authentication until the relay locks it out.
+    card_port = _coerce_port(remote_card_port, _DEFAULT_CARD_PORT)
+    remote_card_url = (
+        str(remote_card_url or "").strip()
+        or f"http://127.0.0.1:{card_port}/apdu"
+    )
+    remote_token_file = (
+        str(remote_token_file or "").strip()
+        or _remote_card_token_path(card_port)
+    )
     dependency_check = _dependency_status or _remote_hil_dependency_preflight(
         ssh_target=ssh_target,
         identity_file=identity_file,
@@ -2409,6 +2899,16 @@ def _dispatch_install_remote_service(
         hil_port=hil_port,
         apdu_timeout_ms=apdu_timeout_ms,
         gsmtap_capture_path=capture_path,
+        # Deliberately not passed. The supervisor can re-send the SIM
+        # refresh after it reconnects on its own, which is the only thing
+        # that recovers a modem left holding no SIM by a network blip --
+        # but AT+CFUN=0;+CFUN=1 re-enumerates this modem's AT port, so
+        # every refresh drops the port under an operator with a terminal
+        # open on it, and judging whether the modem took the card means
+        # reading that port back exactly when it is least readable.
+        # The flag stays available on the supervisor for a rig that wants
+        # it; the GUI keeps to the one refresh it sends after a start.
+        modem_at_device="",
         simtrace_reset=simtrace_reset,
         uhubctl_binary=uhubctl_binary,
         uhubctl_location=uhubctl_location,
@@ -2869,9 +3369,135 @@ def _remote_rig_finish(
     }
 
 
+def _host_card_defaults(device_id: Any) -> dict[str, Any]:
+    """Read a stored host card, or ``{}`` when none was named.
+
+    Every field on a card describes the box rather than the run, which is
+    why naming one collapses this action's inputs to a single choice.
+    """
+    identifier = str(device_id or "").strip()
+    if len(identifier) == 0:
+        return {}
+    from yggdrasim_common.remote_lab.registry import get_device
+
+    device = get_device(identifier)
+    return {
+        "ssh_target": device.ssh_target,
+        "identity_file": device.ssh_identity_file,
+        "remote_workdir": device.remote_workdir,
+        "remote_python": device.remote_python,
+        "service_name": device.hil_service_name,
+        "card_reachability": device.card_reachability,
+        "card_url": device.card_url,
+        "device": device,
+    }
+
+
+def _check_host_bench_free(device: Any) -> dict[str, Any]:
+    """Refuse to prepare a host that someone already holds.
+
+    Two operators preparing one rig used to race: the second restarted
+    the first's supervisor with different settings and nothing noticed.
+    Where a host publishes a Remote Lab agent, that agent already knows
+    who holds the bench, so this asks it rather than becoming a second
+    authority over the same box.
+
+    This is a check, not a reservation. An action that returns as soon as
+    the rig is up cannot heartbeat, and a session nobody heartbeats is
+    reaped in a minute, which would hand the bench away mid-setup. The
+    lasting exclusion is the card lease the supervisor holds while it
+    runs; this closes the setup window in front of it.
+
+    A host with no agent, or an agent that cannot be reached, is not an
+    error: that is the single-operator case this action was written for.
+    """
+    if device is None or device.has_agent is False:
+        return {"ok": True, "checked": False, "note": "host publishes no agent"}
+    from yggdrasim_common.remote_lab.client import (
+        RemoteLabAgentClient,
+        RemoteLabClientError,
+    )
+    from yggdrasim_common.remote_lab.security import read_token_file
+
+    if len(str(device.token_file or "").strip()) == 0:
+        return {"ok": True, "checked": False, "note": "no agent token stored"}
+    try:
+        token = read_token_file(device.token_file)
+    except (OSError, UnicodeError) as token_error:
+        return {
+            "ok": True,
+            "checked": False,
+            "note": f"agent token unreadable ({type(token_error).__name__})",
+        }
+    if len(str(token or "").strip()) == 0:
+        return {"ok": True, "checked": False, "note": "agent token file is empty"}
+
+    client = RemoteLabAgentClient(device.control_base_url, token, timeout_seconds=8.0)
+    try:
+        status = client.status(device.remote_rig_id)
+    except RemoteLabClientError as agent_error:
+        return {
+            "ok": True,
+            "checked": False,
+            "note": f"agent declined the status query (HTTP {agent_error.status})",
+        }
+    except Exception as reach_error:  # noqa: BLE001
+        return {
+            "ok": True,
+            "checked": False,
+            "note": f"agent unreachable ({type(reach_error).__name__})",
+        }
+
+    state = str(status.get("status") or "").strip()
+    if state in ("reserved", "busy"):
+        return {
+            "ok": False,
+            "checked": True,
+            "state": state,
+            "locked_by": str(status.get("locked_by") or ""),
+            "note": f"the host is {state} through its Remote Lab agent",
+        }
+
+    # A HIL rig already running here is reported, not refused. Starting
+    # one is what this action does, so a host that has one is the normal
+    # state to arrive in rather than a collision, and refusing left the
+    # tool unable to restart the rig it had started itself. A reservation
+    # is different and still refuses above: that is a person claiming the
+    # bench through the agent, not a process this action owns.
+    host = status.get("host") if isinstance(status.get("host"), dict) else {}
+    if str(host.get("hil_rig") or "none") == "running":
+        source = str(host.get("hil_card_url") or host.get("hil_card_source") or "")
+        return {
+            "ok": True,
+            "checked": True,
+            "state": "hil-running",
+            "host": host,
+            "note": (
+                "a HIL rig is already running here"
+                + (f" against {source}" if len(source) > 0 else "")
+                + "; starting the rig replaces it"
+            ),
+        }
+
+    return {
+        "ok": True,
+        "checked": True,
+        "state": state or "available",
+        "host": host,
+        "note": "host is free according to its agent",
+    }
+
+
+def _coalesce(explicit: Any, from_card: Any) -> Any:
+    """Explicit input wins; a card fills what was left blank."""
+    text = str(explicit or "").strip()
+    return explicit if len(text) > 0 else from_card
+
+
 def _dispatch_remote_rig_start(
     ctx: ActionContext,
     *,
+    device_id: Any = None,
     ssh_target: Any = None,
     identity_file: Any = None,
     ssh_path: Any = None,
@@ -2894,10 +3520,42 @@ def _dispatch_remote_rig_start(
     forward_gui: Any = False,
     restart_processes: Any = True,
     install_service: Any = True,
+    refresh_modem_sim: Any = True,
+    modem_at_device: Any = None,
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — starting the remote rig opens local and SSH services.")
+        raise ValueError("confirm must be true -- starting the remote rig opens local and SSH services.")
+
+    steps: list[dict[str, Any]] = []
+    card = _host_card_defaults(device_id)
+    host_card = card.get("device")
+    ssh_target = _coalesce(ssh_target, card.get("ssh_target"))
+    identity_file = _coalesce(identity_file, card.get("identity_file"))
+    remote_workdir = _coalesce(remote_workdir, card.get("remote_workdir"))
+    remote_python = _coalesce(remote_python, card.get("remote_python"))
+    service_name = _coalesce(service_name, card.get("service_name"))
+    reachability = str(card.get("card_reachability") or "tunnel").strip() or "tunnel"
+    # A host that routes to this machine reads the card directly instead of
+    # through a reverse forward, which is what makes the VPN carry it.
+    direct_card_url = str(card.get("card_url") or "").strip()
+    if reachability == "direct" and len(direct_card_url) > 0:
+        remote_card_url = _coalesce(remote_card_url, direct_card_url)
+
+    bench = _check_host_bench_free(host_card)
+    steps.append(_compact_remote_rig_step("host_bench_check", bench))
+    if bool(bench.get("ok")) is False:
+        holder = str(bench.get("locked_by") or "another operator")
+        return {
+            "ok": False,
+            "steps": steps,
+            "lines": [],
+            "state": {},
+            "note": (
+                "Remote rig start stopped: this host is held through its "
+                f"Remote Lab agent by {holder}."
+            ),
+        }
 
     local_card = _coerce_port(local_card_port, _DEFAULT_CARD_PORT)
     remote_card = _coerce_port(remote_card_port, local_card)
@@ -2908,14 +3566,19 @@ def _dispatch_remote_rig_start(
     service = _validate_service_name(service_name)
     workdir = str(remote_workdir or _DEFAULT_REMOTE_WORKDIR).strip()
     python_executable = str(remote_python or _DEFAULT_REMOTE_PYTHON).strip()
-    token_file = str(remote_token_file or _DEFAULT_REMOTE_TOKEN_FILE).strip()
+    # The token file follows the port, the way the Card Bridge names its
+    # own. A fixed default silently pairs one port's URL with another
+    # port's token, and the rig then fails authentication in a loop until
+    # the relay locks the peer out for repeated failures.
+    token_file = _normalize_remote_card_token_path(
+        remote_token_file or _remote_card_token_path(remote_card)
+    )
     remsim_binary_s = str(remsim_binary or _DEFAULT_REMSIM_BINARY).strip()
     card_url = str(remote_card_url or f"http://127.0.0.1:{remote_card}/apdu").strip()
     timeout_i = _coerce_positive_int(apdu_timeout_ms, _DEFAULT_APDU_TIMEOUT_MS)
     capture_path = str(
         gsmtap_capture_path or _remote_gsmtap_capture_path(workdir)
     ).strip()
-    steps: list[dict[str, Any]] = []
 
     dependency_check = _remote_hil_dependency_preflight(
         ssh_target=target,
@@ -2969,6 +3632,39 @@ def _dispatch_remote_rig_start(
         remsim_check.get("resolved_remsim_binary") or remsim_binary_s
     )
 
+    # A rig that also shares a reader runs a Card Bridge of its own, and
+    # the default port is the same one. sshd then binds only the address
+    # family still free, the rig's own bridge answers the other, and the
+    # start dies much later on a token mismatch. Settle the port here,
+    # before the URL, the token path and the unit are derived from it.
+    port_choice = _choose_free_remote_card_port(
+        ssh_target=target,
+        identity_file=identity_file,
+        ssh_path=ssh_path_s,
+        preferred_port=remote_card,
+    )
+    steps.append(_compact_remote_rig_step("rpi_port_free", port_choice))
+    if bool(port_choice.get("ok")) is False:
+        return _remote_rig_finish(
+            ok=False,
+            steps=steps,
+            note=str(port_choice.get("note") or ""),
+            ssh_target=target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            service_name=service,
+            local_gui_port=local_gui,
+            remote_workdir=workdir,
+            remote_python=python_executable,
+        )
+    chosen_port = _coerce_port(port_choice.get("port"), remote_card)
+    if chosen_port != remote_card:
+        remote_card = chosen_port
+        card_url = f"http://127.0.0.1:{remote_card}/apdu"
+        token_file = _normalize_remote_card_token_path(
+            _remote_card_token_path(remote_card)
+        )
+
     start_local = _dispatch_local_start(
         ctx,
         port=local_card,
@@ -2980,6 +3676,24 @@ def _dispatch_remote_rig_start(
         confirm=True,
     )
     steps.append(_compact_remote_rig_step("pc_bridge_start", start_local))
+    if bool(start_local.get("ok")) is False:
+        # Otherwise the next step reports "did not answer on localhost",
+        # which describes the symptom and hides the reason.
+        return _remote_rig_finish(
+            ok=False,
+            steps=steps,
+            note=str(
+                start_local.get("note")
+                or "Remote rig start stopped: PC Card Bridge did not start."
+            ),
+            ssh_target=target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            service_name=service,
+            local_gui_port=local_gui,
+            remote_workdir=workdir,
+            remote_python=python_executable,
+        )
 
     local_check = _wait_for_local_card_bridge(port=local_card, timeout_seconds=6.0)
     steps.append(_compact_remote_rig_step("pc_bridge_verify", local_check))
@@ -3001,6 +3715,7 @@ def _dispatch_remote_rig_start(
         token_file=local_check.get("token_file"),
         timeout_seconds=6.0,
     )
+    local_reset = _tolerate_foreign_card_lease(local_reset)
     steps.append(_compact_remote_rig_step("pc_bridge_reset", local_reset))
     if bool(local_reset.get("ok")) is False:
         return _remote_rig_finish(
@@ -3073,6 +3788,8 @@ def _dispatch_remote_rig_start(
         ssh_target=target,
         identity_file=identity_file,
         ssh_path=ssh_path_s,
+        local_card_port=local_card,
+        remote_card_port=remote_card,
         local_token_file=local_check.get("token_file"),
         remote_token_file=token_file,
         confirm=True,
@@ -3130,6 +3847,7 @@ def _dispatch_remote_rig_start(
             hil_port=hil_port,
             apdu_timeout_ms=timeout_i,
             gsmtap_capture_path=capture_path,
+            modem_at_device=modem_at_device,
             start_now=True,
             confirm=True,
             _dependency_status=dependency_check,
@@ -3165,6 +3883,11 @@ def _dispatch_remote_rig_start(
         "ssh_path": ssh_path_s,
         "remote_workdir": workdir,
         "remote_python": python_executable,
+        # The modem shell builds its command from this marker. Without the
+        # device here it falls back to the default port, so the SIM
+        # refresh and the terminal can address two ports of one modem and
+        # the shell opens a real character device that answers nothing.
+        "modem_at_device": str(modem_at_device or "").strip(),
         "remote_gsmtap_capture_path": str(
             service_result.get("remote_gsmtap_capture_path") or capture_path
         ),
@@ -3176,7 +3899,7 @@ def _dispatch_remote_rig_start(
         ssh_path=ssh_path_s,
         remote_workdir=workdir,
         remote_python=python_executable,
-        timeout_seconds=14.0,
+        timeout_seconds=_REMOTE_HIL_READY_TIMEOUT_SECONDS,
     )
     steps.append(_compact_remote_rig_step("rpi_hil_ready", hil_ready))
     if bool(hil_ready.get("ok")) is False:
@@ -3193,10 +3916,29 @@ def _dispatch_remote_rig_start(
             remote_python=python_executable,
         )
 
+    # The card is streaming by this point, but a modem that was already
+    # powered has nothing to re-read, so it reports no SIM until asked.
+    # Last, because it is only meaningful once the path below it works.
+    refresh_note = ""
+    if bool(refresh_modem_sim) is not False:
+        refresh = _remote_modem_sim_refresh(
+            ssh_target=target,
+            identity_file=identity_file,
+            ssh_path=ssh_path_s,
+            at_device=modem_at_device,
+        )
+        steps.append(_compact_remote_rig_step("modem_sim_refresh", refresh))
+        if bool(refresh.get("sent")) is False:
+            refresh_note = (
+                " The modem's SIM interface could not be refreshed; it may "
+                "still report no SIM until it is reset."
+            )
+
     return _remote_rig_finish(
         ok=True,
         steps=steps,
-        note="Remote HIL rig is ready: PC card bridge, tunnel, token, and RPi HIL service are active.",
+        note="Remote HIL rig is ready: PC card bridge, tunnel, token, and RPi HIL service are active."
+        + refresh_note,
         ssh_target=target,
         identity_file=identity_file,
         ssh_path=ssh_path_s,
@@ -3231,7 +3973,7 @@ def _dispatch_remote_rig_stop(
     confirm: Any = None,
 ) -> dict[str, Any]:
     if bool(confirm) is False:
-        raise ValueError("confirm must be true — stopping the remote rig tears down local and SSH services.")
+        raise ValueError("confirm must be true -- stopping the remote rig tears down local and SSH services.")
 
     state = _load_remote_rig_state()
     target = str(ssh_target or state.get("ssh_target") or "").strip()
@@ -3306,6 +4048,7 @@ def _dispatch_remote_rig_stop(
 def _dispatch_remote_rig_status(
     ctx: ActionContext,
     *,
+    device_id: Any = None,
     ssh_target: Any = None,
     identity_file: Any = None,
     ssh_path: Any = None,
@@ -3315,17 +4058,28 @@ def _dispatch_remote_rig_status(
     remote_python: Any = None,
 ) -> dict[str, Any]:
     del ctx
+    card = _host_card_defaults(device_id)
+    host_card = card.get("device")
+    ssh_target = _coalesce(ssh_target, card.get("ssh_target"))
+    identity_file = _coalesce(identity_file, card.get("identity_file"))
+    remote_workdir = _coalesce(remote_workdir, card.get("remote_workdir"))
+    remote_python = _coalesce(remote_python, card.get("remote_python"))
+    service_name = _coalesce(service_name, card.get("service_name"))
     state = _load_remote_rig_state()
     ssh_path_s = str(ssh_path or state.get("ssh_path") or "").strip()
     local_pid = int(state.get("local_card_bridge_pid", 0) or 0)
     tunnel_pid = int(state.get("ssh_tunnel_pid", 0) or 0)
-    local_card = _coerce_port(state.get("local_card_bridge_port", _DEFAULT_CARD_PORT), _DEFAULT_CARD_PORT)
+    claimed_card_port = _claimed_card_port(state)
+    local_card = _recorded_card_port(state)
     local_gui = _coerce_port(local_gui_port, int(state.get("local_gui_port", _DEFAULT_GUI_PORT) or _DEFAULT_GUI_PORT))
     service = _validate_service_name(service_name)
     local_pid_running = _pid_is_running(local_pid)
     local_bridge_external = bool(state.get("local_card_bridge_external"))
     local_bridge_reachable = False
-    if local_pid_running is False:
+    if local_pid_running is False and claimed_card_port > 0:
+        # Only where this GUI still claims a port. Probing the default
+        # after a stop finds a bridge somebody else runs, adopts it, and
+        # records its pid -- which shutdown then terminates.
         if local_pid > 0:
             local_pid = 0
             _write_remote_rig_state({"local_card_bridge_pid": 0})
@@ -3391,11 +4145,22 @@ def _dispatch_remote_rig_status(
         lines.append({"key": "RPi modem link", "value": "connected" if remote_hil.get("modem_path_ready") else "waiting"})
     if len(remote_error) > 0:
         lines.append({"key": "Remote error", "value": remote_error})
+    # One host, one answer. Without this the two paths report separately
+    # and an operator cannot tell that the box they are about to prepare
+    # is already held by a colleague through the other door.
+    bench = _check_host_bench_free(host_card)
+    if bool(bench.get("checked")) is True:
+        holder = str(bench.get("locked_by") or "").strip()
+        bench_value = str(bench.get("state") or "unknown")
+        if len(holder) > 0:
+            bench_value = f"{bench_value} ({holder})"
+        lines.append({"key": "Remote Lab bench", "value": bench_value})
     return {
         "ok": True,
         "lines": lines,
         "state": {
             **state,
+            "host_bench": bench,
             "local_card_bridge_pid": local_pid,
             "local_card_bridge_external": local_bridge_external,
             "local_card_bridge_running": local_bridge_running,
@@ -3452,12 +4217,21 @@ REMOTE_RIG_START_SPEC = ActionSpec(
     subsystem="Card Bridge",
     title="Start remote HIL rig",
     description=(
-        "Start or verify the PC Card Bridge, open the SSH reverse tunnel, "
-        "sync the bearer token, verify the RPi can authenticate to the PC "
-        "card, and install/restart the RPi HIL supervisor service."
+        "Start or verify the PC Card Bridge, reach the host, and install or "
+        "restart its HIL supervisor so it reads this machine's card. Name a "
+        "stored host and every field below is filled from it; the rest are "
+        "overrides. Where the host publishes a Remote Lab agent, its bench "
+        "is reserved first so two operators cannot configure it at once."
     ),
     inputs=(
-        ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
+        ActionField(
+            name="device_id",
+            label="Host",
+            kind="string",
+            required=False,
+            placeholder="a stored Remote Lab host id",
+        ),
+        ActionField(name="ssh_target", label="SSH target", kind="string", required=False, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
         ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
         ActionField(name="reader_index", label="Reader index", kind="int", required=False, default=0, min_value=0),
@@ -3469,8 +4243,25 @@ REMOTE_RIG_START_SPEC = ActionSpec(
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=False, default=_DEFAULT_REMOTE_WORKDIR),
         ActionField(name="remote_python", label="Remote Python", kind="string", required=False, default=_DEFAULT_REMOTE_PYTHON),
-        ActionField(name="remote_card_url", label="Remote card URL", kind="string", required=False, default=_DEFAULT_REMOTE_CARD_URL),
-        ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False, default=_DEFAULT_REMOTE_TOKEN_FILE),
+        # No defaults: both are derived from the card port unless the
+        # operator overrides them. A default pinned to one port silently
+        # wins over the port actually chosen, so the rig is handed one
+        # port's URL with another port's token and fails authentication
+        # in a loop until the relay locks it out.
+        ActionField(
+            name="remote_card_url",
+            label="Remote card URL",
+            kind="string",
+            required=False,
+            placeholder="derived from the card port",
+        ),
+        ActionField(
+            name="remote_token_file",
+            label="Remote token file",
+            kind="string",
+            required=False,
+            placeholder="derived from the card port",
+        ),
         ActionField(name="remsim_binary", label="RPi REMSIM binary", kind="string", required=False, default=_DEFAULT_REMSIM_BINARY),
         ActionField(name="usb_vidpid", label="SIMtrace2 VID:PID", kind="string", required=False, default=_DEFAULT_USB_VIDPID),
         ActionField(name="hil_port", label="HIL port", kind="int", required=False, default=_DEFAULT_HIL_PORT, min_value=1),
@@ -3479,6 +4270,20 @@ REMOTE_RIG_START_SPEC = ActionSpec(
         ActionField(name="forward_gui", label="Also forward RPi GUI", kind="bool", required=False, default=False),
         ActionField(name="restart_processes", label="Restart owned processes", kind="bool", required=False, default=True),
         ActionField(name="install_service", label="Install service", kind="bool", required=False, default=True),
+        ActionField(
+            name="refresh_modem_sim",
+            label="Refresh the modem's SIM interface",
+            kind="bool",
+            required=False,
+            default=True,
+        ),
+        ActionField(
+            name="modem_at_device",
+            label="Modem AT device",
+            kind="string",
+            required=False,
+            default=_DEFAULT_MODEM_AT_DEVICE,
+        ),
         ActionField(name="confirm", label="Start remote rig", kind="bool", required=True, default=False),
     ),
     output_kind="json",
@@ -3564,8 +4369,10 @@ SYNC_TOKEN_SPEC = ActionSpec(
         ActionField(name="ssh_target", label="SSH target", kind="string", required=True, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
         ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),
+        ActionField(name="local_card_port", label="Local Card Bridge port", kind="int", required=False, default=_DEFAULT_CARD_PORT, min_value=1),
+        ActionField(name="remote_card_port", label="RPi Card Bridge port", kind="int", required=False, min_value=1),
         ActionField(name="local_token_file", label="Local token file", kind="path", required=False),
-        ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False, default=_DEFAULT_REMOTE_TOKEN_FILE),
+        ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False),
         ActionField(name="confirm", label="Write remote token file", kind="bool", required=True, default=False),
     ),
     output_kind="json",
@@ -3588,13 +4395,15 @@ INSTALL_REMOTE_SERVICE_SPEC = ActionSpec(
         ActionField(name="service_name", label="Service", kind="string", required=False, default=_DEFAULT_REMOTE_SERVICE_NAME),
         ActionField(name="remote_workdir", label="Remote repo directory", kind="string", required=True, default=_DEFAULT_REMOTE_WORKDIR, placeholder="~/YggdraSIM"),
         ActionField(name="remote_python", label="Remote Python", kind="string", required=False, default=_DEFAULT_REMOTE_PYTHON),
-        ActionField(name="remote_card_url", label="Remote card URL", kind="string", required=False, default=_DEFAULT_REMOTE_CARD_URL),
-        ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False, default=_DEFAULT_REMOTE_TOKEN_FILE),
+        ActionField(name="remote_card_port", label="RPi Card Bridge port", kind="int", required=False, default=_DEFAULT_CARD_PORT, min_value=1),
+        ActionField(name="remote_card_url", label="Remote card URL", kind="string", required=False),
+        ActionField(name="remote_token_file", label="Remote token file", kind="string", required=False),
         ActionField(name="remsim_binary", label="RPi REMSIM binary", kind="string", required=False, default=_DEFAULT_REMSIM_BINARY),
         ActionField(name="usb_vidpid", label="SIMtrace2 VID:PID", kind="string", required=False, default=_DEFAULT_USB_VIDPID),
         ActionField(name="hil_port", label="HIL port", kind="int", required=False, default=_DEFAULT_HIL_PORT, min_value=1),
         ActionField(name="apdu_timeout_ms", label="APDU timeout (ms)", kind="int", required=False, default=_DEFAULT_APDU_TIMEOUT_MS, min_value=1),
         ActionField(name="gsmtap_capture_path", label="RPi GSMTAP capture path", kind="string", required=False),
+        ActionField(name="modem_at_device", label="Modem AT device", kind="string", required=False, placeholder="/dev/ttyUSB2"),
         ActionField(
             name="simtrace_reset",
             label="Pre-session SIMtrace2 reset",
@@ -3641,8 +4450,19 @@ REMOTE_RIG_STATUS_SPEC = ActionSpec(
     id="card_bridge.remote_rig_status",
     subsystem="Card Bridge",
     title="Remote rig status",
-    description="Show local CardBridge/tunnel state and, when an SSH target is supplied, the RPi service state.",
+    description=(
+        "Show local CardBridge and tunnel state, the host's service state, "
+        "and whether that host is held through its Remote Lab agent. Name a "
+        "stored host to fill the fields below from it."
+    ),
     inputs=(
+        ActionField(
+            name="device_id",
+            label="Host",
+            kind="string",
+            required=False,
+            placeholder="a stored Remote Lab host id",
+        ),
         ActionField(name="ssh_target", label="SSH target", kind="string", required=False, placeholder="pi@rpi-host"),
         ActionField(name="identity_file", label="Identity file", kind="path", required=False),
         ActionField(name="ssh_path", label="SSH executable", kind="path", required=False),

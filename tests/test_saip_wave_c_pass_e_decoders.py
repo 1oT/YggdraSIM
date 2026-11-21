@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave C Pass E — semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK /
+Wave C Pass E -- semantic decoder coverage for DF.TELECOM / DF.PHONEBOOK /
 ICE / DF.V2X / EAP / MCS / multimedia EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we
@@ -18,7 +18,7 @@ verify three invariants:
 Spec references:
   ef-aas              TS 31.102 §4.4.2.13 (Additional Alpha String)
   ef-pbc              TS 31.102 §4.4.2.5  (Phonebook Control)
-  ef-puri             TS 31.102 §4.4.2.17 (Phonebook URI)
+  ef-puri             TS 31.102 v19.5 §4.4.2.15 (Phonebook URI)
   ef-uid              TS 31.102 §4.4.2.14 (Phonebook Unique Identifier)
   ef-ice-dn           TS 31.102 §4.4.3.3  (ICE Dialling Numbers)
   ef-ice-ff           TS 31.102 §4.4.3.4  (ICE Free Format)
@@ -33,9 +33,9 @@ Spec references:
   ef-v2xp-Uu          TS 31.102 §4.6.5.4  (V2X Uu Parameters)
   ef-v2xp-pc5         TS 31.102 §4.6.5.5  (V2X PC5 Parameters)
   ef-vst              TS 31.102 §4.6.5.2  (V2X Service Table)
-  ef-curid            TS 102 310 §5.2.2   (EAP Current ID)
-  ef-ps               TS 102 310 §5.2.2   (EAP Pseudonym)
-  ef-realm            TS 102 310 §5.2.2   (EAP Realm)
+  ef-curid            TS 102 310 v9.1 §7.5 (EAP Current ID)
+  ef-ps               TS 102 310 v9.1 §7.4 (EAP Pseudonym)
+  ef-realm            TS 102 310 v9.1 §7.7 (EAP Realm)
 """
 
 from __future__ import annotations

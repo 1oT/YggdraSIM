@@ -19,7 +19,6 @@ include SCP03/seeds/aid.txt
 include SCP03/seeds/binds.json
 include SCP03/seeds/fids.txt
 include SCP03/seeds/keys.ini
-include SCP80/ota_config.ini
 exclude SCP11/es9_ca_lookup.json
 exclude SCP11/live/es9_ca_lookup.json
 include SCP11/eim_local/eim_identity.json
@@ -68,6 +67,15 @@ include yggdrasim_common/gui_server/static/app.css
 include yggdrasim_common/gui_server/static/app.js
 include yggdrasim_common/gui_server/static/index.html
 include yggdrasim_common/gui_server/static/theme-init.js
+include yggdrasim_common/gui_server/static/vendor/plex-mono/IBMPlexMono-Regular-Latin1.woff2
+include yggdrasim_common/gui_server/static/vendor/plex-mono/IBMPlexMono-SemiBold-Latin1.woff2
+include yggdrasim_common/gui_server/static/vendor/plex-mono/NOTICE.md
+include yggdrasim_common/gui_server/static/vendor/plex-mono/license.txt
+include yggdrasim_common/gui_server/static/vendor/plex-sans-condensed/IBMPlexSansCondensed-Medium-Latin1.woff2
+include yggdrasim_common/gui_server/static/vendor/plex-sans-condensed/IBMPlexSansCondensed-Regular-Latin1.woff2
+include yggdrasim_common/gui_server/static/vendor/plex-sans-condensed/IBMPlexSansCondensed-SemiBold-Latin1.woff2
+include yggdrasim_common/gui_server/static/vendor/plex-sans-condensed/NOTICE.md
+include yggdrasim_common/gui_server/static/vendor/plex-sans-condensed/license.txt
 include yggdrasim_common/gui_server/static/vendor/xterm/NOTICE.md
 include yggdrasim_common/gui_server/static/vendor/xterm/addon-fit.js
 include yggdrasim_common/gui_server/static/vendor/xterm/xterm.css

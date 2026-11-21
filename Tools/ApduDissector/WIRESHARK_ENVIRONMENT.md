@@ -20,7 +20,7 @@ tshark -X lua_script:Tools/ApduDissector/lua/probe_wireshark_env.lua -r any.pcap
 | Is `gsmtap.type` a Lua-reachable `DissectorTable`? | **Yes** -- `FT_UINT8`, `BASE_HEX`, registered by `packet-gsmtap.c`. `DissectorTable.get("gsmtap.type"):add(0x04, proto)` succeeds. |
 | What tvb does the subdissector receive? | **Exactly the GSMTAP payload** -- the header is already stripped. `payload:offset()` reports 58 for our captures (Ethernet 14 + IPv4 20 + UDP 8 + GSMTAP 16). |
 | Does it work under `-d udp.port==4729,gsmtap`? | **Yes**, identically to the no-`-d` case. GSMTAP is the default dissector for UDP 4729 anyway, so both paths converge. |
-| Is a post-dissector needed as a fallback? | **No.** The `gsmtap.type` binding covers every invocation the repo makes. Dropping the post-dissector removes the "runs on every frame in the capture" cost that `Tools/EumDiag/dissector.lua` pays. |
+| Is a post-dissector needed as a fallback? | **No.** The `gsmtap.type` binding covers every invocation the repo makes. Dropping the post-dissector removes the "runs on every frame in the capture" cost that the retired `Tools/EumDiag/dissector.lua` paid. |
 | Can the stock `gsm_sim` still run? | **Yes** -- `Dissector.get("gsm_sim"):call(payload, pinfo, tree)` works from inside our dissector and preserves all 242 `gsm_sim.*` fields plus its info-column text. Registering on `gsmtap.type` otherwise displaces it entirely. |
 
 ## Limitations that shape the design

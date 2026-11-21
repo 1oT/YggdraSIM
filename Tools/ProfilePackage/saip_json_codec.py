@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 JSON serialization helpers for SAIP decoded profile documents (pySim / asn1tools).
 
@@ -252,6 +251,8 @@ _JSON_VALUE_LABELS: dict[str, str] = {
     "opt-usim": "Optional USIM tree",
     "isim": "ISIM application tree",
     "opt-isim": "Optional ISIM tree",
+    "iot": "IoT Minimal Profile tree (MF + ADF.USIM)",
+    "opt-iot": "Optional IoT tree",
     "telecom": "DF.TELECOM tree",
     "phonebook": "DF.PHONEBOOK tree",
     "df-5gs": "DF.5GS tree",
@@ -702,7 +703,7 @@ class TokenExpansionContext:
         the lint harness can surface it.
 
         When ``transform`` is set (``[#Func(NAME)]``), the length is
-        computed over the transformed bytes — this lets length-companion
+        computed over the transformed bytes -- this lets length-companion
         tokens stay in sync with EncodeEfImsi outputs whose byte length
         differs from the raw IMSI digit string.
         """
@@ -848,8 +849,8 @@ def ensure_workspace_pysim_on_path(
     1. A developer checkout at ``<workspace>/pysim`` or the PyInstaller
        bundle root. This lets a maintainer work against an unreleased
        upstream branch without reinstalling after every change.
-    2. A pip-installed ``pySim`` package (e.g. from the ``[saip]`` extra
-       or ``pip install 'pySim @ git+https://github.com/osmocom/pysim.git'``).
+    2. An installed ``pySim`` package (the base dependency YggdraSIM pins
+       or ``pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'``).
        When the package is already importable we accept it as-is and
        return the directory that ``pySim.__file__`` resolves to, so
        callers that log the "pysim root" still get a meaningful path.
@@ -890,11 +891,11 @@ def ensure_workspace_pysim_on_path(
                 sys.path.insert(0, root_text)
             from Tools.ProfilePackage.saip_pysim_compat import (
                 install_base_df_path_compatibility,
-                install_lossless_security_domain_encoding,
+                require_pinned_pysim_fixes,
             )
 
+            require_pinned_pysim_fixes()
             install_base_df_path_compatibility()
-            install_lossless_security_domain_encoding()
             return candidate
 
     try:
@@ -902,10 +903,10 @@ def ensure_workspace_pysim_on_path(
     except ImportError as import_error:
         tried = ", ".join(str(path) for path in seen)
         raise RuntimeError(
-            "pySim is not available. Install the upstream package via "
-            "`pip install 'yggdrasim[saip]'` (recommended) or "
-            "`pip install 'pySim @ git+https://github.com/osmocom/pysim.git'`, "
-            "or clone the upstream tree into one of: "
+            "pySim is not available. Install the pinned pySim fork: `pip install -e .` "
+            "in a YggdraSIM checkout (pySim is a base dependency), or "
+            "`pip install 'pySim @ git+https://github.com/hampushellsberg-dev/pysim.git'`, "
+            "or clone that tree into one of: "
             f"{tried}. Underlying import error: "
             f"{type(import_error).__name__}: {import_error}."
         ) from import_error
@@ -914,11 +915,11 @@ def ensure_workspace_pysim_on_path(
     if isinstance(package_path, str) and len(package_path) > 0:
         from Tools.ProfilePackage.saip_pysim_compat import (
             install_base_df_path_compatibility,
-            install_lossless_security_domain_encoding,
+            require_pinned_pysim_fixes,
         )
 
+        require_pinned_pysim_fixes()
         install_base_df_path_compatibility()
-        install_lossless_security_domain_encoding()
         installed_root = Path(package_path).resolve().parent
         return installed_root
 
@@ -1455,12 +1456,12 @@ def parse_editor_json_template_aware(
 
     Returns a three-tuple ``(document, placeholder_paths, undefined_tokens)``:
 
-    * ``document`` — the restored decoded document with undefined placeholders
+    * ``document`` -- the restored decoded document with undefined placeholders
       expanded to zero bytes. The document is still usable for structural
       validation (lint) but should not be re-encoded to DER.
-    * ``placeholder_paths`` — dotted paths (e.g. ``sections.header.iccid``) of
+    * ``placeholder_paths`` -- dotted paths (e.g. ``sections.header.iccid``) of
       every hex field that embedded at least one ``{NAME}`` / ``[NAME]`` token.
-    * ``undefined_tokens`` — names that had no entry in
+    * ``undefined_tokens`` -- names that had no entry in
       ``__ygg_token_defs__``.
     """
 

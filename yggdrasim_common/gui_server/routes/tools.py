@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/tools/*`` — pure-function engine panels (Milestone B-1).
+"""``/api/tools/*`` -- pure-function engine panels (Milestone B-1).
 
 Every endpoint in this router wraps a stateless helper that already
 exists in the codebase (resolved through :mod:`yggdrasim_common.registry`
@@ -16,7 +15,7 @@ Shape contract per endpoint:
 * Inputs are validated via ``pydantic`` models; malformed bodies yield
   HTTP 422 from FastAPI's built-in handler.
 * Runtime parse failures (bad hex, truncated TLV, invalid JSON) return
-  HTTP 400 with ``{"detail": "..."}`` — the frontend renders this
+  HTTP 400 with ``{"detail": "..."}`` -- the frontend renders this
   verbatim in the per-panel error strip.
 * Unexpected exceptions bubble up as HTTP 500 so operator logs catch
   programming bugs rather than masking them behind a generic success.
@@ -91,7 +90,7 @@ def _tlv_dict_to_nodes(parsed: dict) -> list[TlvNode]:
             if len(tag_hex) % 2 == 1:
                 tag_hex = "0" + tag_hex
             if isinstance(value, dict):
-                # Nested constructed TLV — recurse.
+                # Nested constructed TLV -- recurse.
                 children = _tlv_dict_to_nodes(value)
                 child_byte_count = _estimate_nested_length(value)
                 nodes.append(
@@ -116,7 +115,7 @@ def _tlv_dict_to_nodes(parsed: dict) -> list[TlvNode]:
 def _estimate_nested_length(parsed: dict) -> int:
     """Approximate byte length of a constructed value by summing children.
 
-    This is informational — we do not attempt to reconstruct the exact
+    This is informational -- we do not attempt to reconstruct the exact
     original TLV encoding; the goal is to give the operator a sensible
     length column for the tree view.
     """
@@ -226,9 +225,11 @@ def decode_euicc_info2(body: EuiccInfo2Request) -> EuiccInfo2Response:
     except Exception as error:
         raise HTTPException(status_code=400, detail=f"EUICCInfo2 validation failed: {error}")
 
-    detail = [EuiccInfo2Line(indent=int(i), label=str(l), value=str(v)) for i, l, v in detail_tuples]
+    detail = [EuiccInfo2Line(indent=int(i), label=str(label), value=str(v))
+            for i, label, v in detail_tuples]
     validation = [
-        EuiccInfo2Line(indent=int(i), label=str(l), value=str(v)) for i, l, v in validation_tuples
+        EuiccInfo2Line(indent=int(i), label=str(label), value=str(v))
+            for i, label, v in validation_tuples
     ]
     return EuiccInfo2Response(detail_lines=detail, validation_lines=validation)
 
@@ -344,7 +345,7 @@ class GsmaTablesResponse(BaseModel):
 
 @router.get("/gsma/codes", response_model=GsmaTablesResponse)
 def list_gsma_codes() -> GsmaTablesResponse:
-    # Direct import — the table lives in SCP11.shared.gsma_error_codes which
+    # Direct import -- the table lives in SCP11.shared.gsma_error_codes which
     # is pure-python and always importable.
     """HTTP handler: return the full GSMA reason-code table as JSON."""
     from SCP11.shared import gsma_error_codes as gsma

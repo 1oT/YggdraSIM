@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge runtime helpers: process lifecycle, signal handling, and supervisor IPC for the hardware-in-loop bridge."""
 from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -41,7 +41,17 @@ SIMTRACE_RESET_ENV = "YGGDRASIM_HIL_SIMTRACE_RESET"
 UHUBCTL_LOCATION_ENV = "YGGDRASIM_HIL_UHUBCTL_LOCATION"
 UHUBCTL_PORT_ENV = "YGGDRASIM_HIL_UHUBCTL_PORT"
 UHUBCTL_BINARY_ENV = "YGGDRASIM_HIL_UHUBCTL_BINARY"
+APDU_TIMEOUT_ENV = "YGGDRASIM_HIL_APDU_TIMEOUT_MS"
+MODEM_DIAG_ENV = "YGGDRASIM_HIL_MODEM_DIAG"
+WIRESHARK_PROFILE_ENV = "YGGDRASIM_HIL_WIRESHARK_PROFILE"
+DEFAULT_WIRESHARK_PROFILE = "YggdraSIM-HIL"
+WIRESHARK_TIME_FORMAT_ENV = "YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT"
+DEFAULT_WIRESHARK_TIME_FORMAT = "u"
+# Wireshark 4.4 -t grammar, (a|ad|adoy|d|dd|e|r|u|ud|udoy)[.[N]]|.[N];
+# Wireshark exits on anything else before it opens a window.
+_WIRESHARK_TIME_FORMAT_RE = re.compile(r"(?:a|ad|adoy|d|dd|e|r|u|ud|udoy)(?:\.[0-9]?)?|\.[0-9]?")
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on", "debug"}
+_OFF_ENV_VALUES = {"", "0", "false", "no", "off", "none"}
 _REMSIM_VALUE_FLAGS = {"-i", "-p", "-c", "-n", "-V", "-P", "-C", "-I", "-S", "-A", "-H"}
 
 
@@ -66,6 +76,8 @@ class HilBridgeUserServiceOptions:
     uhubctl_binary: str = ""
     uhubctl_location: str = ""
     uhubctl_port: str = ""
+    modem_diag_device: str = ""
+    apdu_timeout_ms: int = 0
     service_name: str = DEFAULT_SERVICE_NAME
     documentation_path: str = ""
     environment_overrides: tuple[tuple[str, str], ...] = ()
@@ -167,8 +179,8 @@ def normalize_simtrace_reset_mode(value: Any) -> str:
     An empty result means "leave the supervisor on its own default"
     (``usb-reset``) so the rendered unit stays free of redundant flags.
     Validation is delegated to the HIL bridge module that owns the mode
-    vocabulary; when that module is unavailable — clean-flavor bundles
-    exclude it — nothing is emitted rather than a possibly bogus flag.
+    vocabulary; when that module is unavailable -- clean-flavor bundles
+    exclude it -- nothing is emitted rather than a possibly bogus flag.
     """
     text = str(value or "").strip().lower()
     if len(text) == 0:
@@ -198,6 +210,51 @@ def resolve_simtrace_reset_service_settings(
         str(source.get(UHUBCTL_LOCATION_ENV, "") or "").strip(),
         str(source.get(UHUBCTL_PORT_ENV, "") or "").strip(),
     )
+
+
+def resolve_apdu_timeout_service_setting(environ: Any = None) -> int:
+    """The operator's APDU timeout for the service unit, or 0 to leave the bridge default."""
+    source = environ if environ is not None else os.environ
+    text = str(source.get(APDU_TIMEOUT_ENV, "") or "").strip()
+    try:
+        value = int(text)
+    except ValueError:
+        return 0
+    return max(100, value) if value > 0 else 0
+
+
+def resolve_modem_diag_device(environ: Any = None) -> str:
+    """DIAG tty (or ``auto``) for the session's modem-side mirror; "" when it is off."""
+    source = environ if environ is not None else os.environ
+    value = str(source.get(MODEM_DIAG_ENV, "") or "").strip()
+    if value.lower() in _OFF_ENV_VALUES:
+        return ""
+    return value
+
+
+def resolve_wireshark_profile(environ: Any = None) -> str:
+    """Wireshark profile the HIL launch opens with; "" when the operator switched it off."""
+    source = environ if environ is not None else os.environ
+    value = str(source.get(WIRESHARK_PROFILE_ENV, DEFAULT_WIRESHARK_PROFILE) or "").strip()
+    if value.lower() in _OFF_ENV_VALUES:
+        return ""
+    return value
+
+
+def resolve_wireshark_time_format(environ: Any = None) -> str:
+    """Wireshark ``-t`` value for the HIL launch; "" leaves the format to the profile.
+
+    The default shows each frame's UTC time of day. A value outside
+    Wireshark's grammar counts as off, so a typo cannot stop Wireshark from
+    starting.
+    """
+    source = environ if environ is not None else os.environ
+    value = str(source.get(WIRESHARK_TIME_FORMAT_ENV, DEFAULT_WIRESHARK_TIME_FORMAT) or "").strip().lower()
+    if value in _OFF_ENV_VALUES:
+        return ""
+    if _WIRESHARK_TIME_FORMAT_RE.fullmatch(value) is None:
+        return ""
+    return value
 
 
 def resolve_card_trace_enabled(value: Any = None) -> bool:
@@ -290,6 +347,13 @@ def render_user_service_unit(options: HilBridgeUserServiceOptions) -> str:
     uhubctl_port = str(options.uhubctl_port or "").strip()
     if len(uhubctl_port) > 0:
         command.extend(["--uhubctl-port", uhubctl_port])
+    # Optional modem-side DIAG mirror; absent unless configured, so the unit
+    # of a session without it is byte-identical to before.
+    modem_diag_device = str(options.modem_diag_device or "").strip()
+    if len(modem_diag_device) > 0:
+        command.extend(["--modem-diag-device", modem_diag_device])
+    if int(options.apdu_timeout_ms or 0) > 0:
+        command.extend(["--apdu-timeout-ms", str(int(options.apdu_timeout_ms))])
 
     exec_start = " ".join(_systemd_quote(part) for part in command if len(str(part or "").strip()) > 0)
     working_directory_text = str(options.working_directory or "").strip()
@@ -356,7 +420,7 @@ def write_user_service_if_changed(
     When they already match, the file is left untouched (preserving
     mtime so ``systemctl --user daemon-reload`` keeps the existing
     fragment) and the second tuple element is ``False``. When they
-    differ — or when the file does not yet exist — the new content is
+    differ -- or when the file does not yet exist -- the new content is
     written and the second tuple element is ``True``. The flag lets
     the wizard decide between "no-op" and "restart so the new
     Environment= block takes effect".
@@ -396,7 +460,7 @@ def clear_supervisor_state() -> None:
     fields here as the reconcile loop progresses. When a previous
     invocation crashed mid-warm-up the file is left on disk with a
     transient ``restart-pending`` reason like
-    ``Waiting 1.0s before bridge restart…``. Without this clear, the
+    ``Waiting 1.0s before bridge restart...``. Without this clear, the
     next start of the wizard would surface that stale reason as if it
     were a fresh failure. Missing files are tolerated quietly.
     """
@@ -604,7 +668,7 @@ def wait_for_bridge_ready(
     last_reason_text = ""
     crash_observed = False
     relay_url_observed = False
-    # Readiness is an indeterminate poll loop — supervisor boot time
+    # Readiness is an indeterminate poll loop -- supervisor boot time
     # depends on USB detection, systemd warm-up, and the remsim
     # client init. The sticky footer gives operators a visible
     # heartbeat so a stalled bridge startup is obvious. Inactive on
@@ -654,7 +718,7 @@ def _compose_bridge_ready_failure(
     """Compose an actionable error message for ``wait_for_bridge_ready``.
 
     The supervisor publishes a ``status`` field (``running``,
-    ``restart-pending``, ``start-failed``, ``usb-detect-error`` …) and
+    ``restart-pending``, ``start-failed``, ``usb-detect-error`` ...) and
     a free-form ``reason``. Surfacing the raw ``reason`` on timeout --
     as the previous implementation did -- was misleading because a
     transient ``restart-pending`` reason like

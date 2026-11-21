@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Session recording: captures raw C-APDU / R-APDU pairs to a JSONL file for post-mortem replay and analysis."""
 from __future__ import annotations
 
@@ -273,7 +272,7 @@ class ShellSessionRecorder:
     def _successful_replay_commands(self) -> list[str]:
         # Callers hold ``_state_lock`` already (``status_payload`` /
         # ``_build_payload``) so we walk the list directly without taking it
-        # again — re-entering a ``threading.Lock`` would deadlock.
+        # again -- re-entering a ``threading.Lock`` would deadlock.
         commands: list[str] = []
         for command_record in self._commands:
             if command_record.get("success") is not True:

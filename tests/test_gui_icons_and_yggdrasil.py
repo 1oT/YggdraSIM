@@ -15,12 +15,15 @@ Background:
   handful of long-standing iconography (✓ ✗ ★ ⓘ).
 
 * For the Nord theme specifically (and *only* Nord), we weave in a
-  handful of Yggdrasil-inspired tokens — frost, amber, runic violet,
-  leaf, bark, ember, mist — so the file-system tree icons and the
-  background tint hint at the world-tree imagery without breaking
-  Nord's calm/cool aesthetic. Other themes are unaffected; the
-  ``--tree-*-*`` tokens fall back to the legacy hard-coded values
-  when ``--ygg-*`` are not defined.
+  handful of Yggdrasil-inspired tokens -- frost, amber, runic violet,
+  leaf, bark, ember, mist -- so the background tint hints at the
+  world-tree imagery without breaking Nord's calm/cool aesthetic.
+  Other themes are unaffected.
+
+* The file-kind chips are separate from that weave. Their twelve
+  ``--tree-*-*`` tokens are declared once at ``:root`` and derive from
+  ``--accent`` / ``--surface`` / ``--border``, so all sixteen themes
+  inherit the same four-step ramp and none carries a palette copy.
 
 These tests pin the contract so a future edit doesn't silently
 re-introduce the noisy glyphs or smuggle Yggdrasil colours into
@@ -38,9 +41,15 @@ _REPO = Path(__file__).resolve().parents[1]
 _APP_JS = _REPO / "yggdrasim_common" / "gui_server" / "static" / "app.js"
 _APP_CSS = _REPO / "yggdrasim_common" / "gui_server" / "static" / "app.css"
 
+_TREE_TOKENS = tuple(
+    "--tree-" + kind + "-" + slot
+    for kind in ("mf", "adf", "df", "ef")
+    for slot in ("bg", "fg", "edge")
+)
+
 
 # ---------------------------------------------------------------------- #
-# JS contract — centralised icon palette
+# JS contract -- centralised icon palette
 # ---------------------------------------------------------------------- #
 
 
@@ -106,7 +115,7 @@ class IconVocabularyMinimalismContract(unittest.TestCase):
 
     # Each entry is (codepoint, human-readable name for the failure
     # message). All of these were removed in favour of cleaner forms
-    # — they should no longer appear *as ribbon-button icons*. They
+    # -- they should no longer appear *as ribbon-button icons*. They
     # MAY still appear elsewhere in the bundle (e.g. the ``× close``
     # button on a popout reuses ``\u00D7``), so we constrain the
     # search to the ``icon: "..."`` literal form.
@@ -143,7 +152,7 @@ class IconVocabularyMinimalismContract(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------- #
-# CSS contract — Yggdrasil weave (Nord-only)
+# CSS contract -- Yggdrasil weave (Nord-only)
 # ---------------------------------------------------------------------- #
 
 
@@ -155,7 +164,7 @@ class YggdrasilNordPaletteContract(unittest.TestCase):
     def _block_for(self, theme_selector: str) -> str:
         """Return the CSS block for a given theme selector.
 
-        Naive — the test stylesheet is hand-written, so a balanced
+        Naive -- the test stylesheet is hand-written, so a balanced
         ``{...}`` slice anchored at the selector is enough.
         """
         idx = self.css.find(theme_selector)
@@ -208,7 +217,7 @@ class YggdrasilNordPaletteContract(unittest.TestCase):
     def test_other_themes_do_not_redefine_ygg_tokens(self) -> None:
         # The user explicitly asked for "color handling only for
         # nord theme". The other themes therefore must not declare
-        # --ygg-* tokens of their own — they should fall through to
+        # --ygg-* tokens of their own -- they should fall through to
         # the ``var(--ygg-*, fallback)`` defaults that the consumers
         # provide.
         for selector in (
@@ -232,32 +241,52 @@ class YggdrasilNordPaletteContract(unittest.TestCase):
                     )
 
     # Tree-icon palette ----------------------------------------------
-    def test_nord_dark_overrides_tree_palette(self) -> None:
-        block = self._block_for('html[data-theme="nord-dark"]')
-        for token in (
-            "--tree-mf-fg",
-            "--tree-mf-bg",
-            "--tree-mf-edge",
-            "--tree-adf-fg",
-            "--tree-adf-bg",
-            "--tree-adf-edge",
-            "--tree-df-fg",
-            "--tree-df-bg",
-            "--tree-df-edge",
-            "--tree-ef-fg",
-            "--tree-ef-bg",
-            "--tree-ef-edge",
-        ):
+    def _theme_blocks(self) -> dict[str, str]:
+        """The palette block (the first one in the bundle) of every theme selector."""
+        selectors = dict.fromkeys(re.findall(r'html\[data-theme="[^"]+"\]', self.css))
+        return {selector: self._block_for(selector) for selector in selectors}
+
+    def test_tree_palette_is_declared_once_outside_the_themes(self) -> None:
+        # The twelve file-kind tokens derive from --accent / --warn / --ok /
+        # --surface / --border in base.css, so one declaration serves every
+        # theme as the default. A theme may restyle a kind (below); a second
+        # default anywhere else would mean a copy had crept back in.
+        outside = self.css
+        for block in self._theme_blocks().values():
+            outside = outside.replace(block, "")
+        for token in _TREE_TOKENS:
             with self.subTest(token=token):
-                self.assertIn(token + ":", block)
+                self.assertEqual(
+                    outside.count(token + ":"),
+                    1,
+                    token + " must be declared exactly once outside the theme blocks",
+                )
+
+    def test_theme_tree_overrides_cover_a_whole_kind(self) -> None:
+        # A theme whose accent already occupies one of the four hues
+        # restyles a kind (matrix: DF and EF; oneot: EF). An override is
+        # the bg / fg / edge triplet or nothing: a lone slot would mix the
+        # theme's chip with the default's.
+        for selector, block in self._theme_blocks().items():
+            for kind in ("mf", "adf", "df", "ef"):
+                declared = sorted(
+                    slot
+                    for slot in ("bg", "fg", "edge")
+                    if "--tree-" + kind + "-" + slot + ":" in block
+                )
+                with self.subTest(selector=selector, kind=kind):
+                    self.assertIn(
+                        len(declared),
+                        (0, 3),
+                        selector + " overrides --tree-" + kind + "-* partially: " + ", ".join(declared),
+                    )
 
     def test_tree_icon_rules_consume_tree_tokens(self) -> None:
         # Each kind rule must reference the matching ``--tree-*-*``
-        # token *with a fallback* so non-Nord themes keep their
-        # legacy palette.
+        # token.
         for kind in ("mf", "adf", "df", "ef"):
             with self.subTest(kind=kind):
-                # Match the rule body — the selector header alone is
+                # Match the rule body -- the selector header alone is
                 # not enough since we want to verify the property.
                 rule_re = re.compile(
                     r"\.cc-tree-icon--" + kind + r"\s*\{[^}]*?\}",
@@ -273,32 +302,23 @@ class YggdrasilNordPaletteContract(unittest.TestCase):
                 self.assertIn("var(--tree-" + kind + "-fg", body)
                 self.assertIn("var(--tree-" + kind + "-edge", body)
 
-    def test_tree_icon_rules_keep_legacy_fallbacks(self) -> None:
-        # The fallback chain protects non-Nord themes -- make sure each
-        # kind still resolves to something when --tree-* is absent.
-        #
-        # MF is the exception: it chains through --accent, which all 16
-        # themes define, so it takes the theme's accent rather than one
-        # fixed blue. Its inner "#6aa9ff" was unreachable and is gone.
-        # The other three fall back to their legacy hue directly.
-        for kind, marker in (
-            ("mf", "var(--accent)"),
-            ("adf", "#ffb85c"),
-            ("df", "#b19cd9"),
-            ("ef", "#78dcb4"),
-        ):
+    def test_tree_icon_rules_carry_no_fallback(self) -> None:
+        # :root declares all twelve, so a ``var(--tree-*, legacy)``
+        # second argument could never be reached. Pinning its absence
+        # keeps a stale hue from being reintroduced as dead code.
+        for kind in ("mf", "adf", "df", "ef"):
             with self.subTest(kind=kind):
                 rule_re = re.compile(
                     r"\.cc-tree-icon--" + kind + r"\s*\{[^}]*?\}",
                     re.DOTALL,
                 )
                 body = rule_re.search(self.css).group(0)
-                self.assertIn(marker, body)
+                self.assertNotRegex(body, r"var\(--tree-" + kind + r"-\w+\s*,")
 
     # Theme tint ------------------------------------------------------
     def test_nord_theme_tint_includes_yggdrasil_radial(self) -> None:
         # The tint should weave in an amber radial in addition to
-        # the existing frost/runic ones — that's the most visible
+        # the existing frost/runic ones -- that's the most visible
         # cue of the Yggdrasil colour story without altering the
         # bg/fg/accent triplet that the rest of the UI builds on.
         for selector in (

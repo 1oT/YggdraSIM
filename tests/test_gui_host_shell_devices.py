@@ -24,9 +24,9 @@ def _make_dev_layout(root: Path) -> None:
     (root / "ttyS0").write_bytes(b"")
     by_id = root / "serial" / "by-id"
     by_id.mkdir(parents=True, exist_ok=True)
-    # symlink targeting the flat ttyUSB0 — the enumerator should
+    # symlink targeting the flat ttyUSB0 -- the enumerator should
     # de-duplicate so the same canonical path doesn't appear twice.
-    (by_id / "usb-Quectel_EG25-G-if02-port0").symlink_to(root / "ttyUSB0")
+    (by_id / "usb-Example_LTE_Modem-if02-port0").symlink_to(root / "ttyUSB0")
 
 
 def test_enumerate_serial_devices_basic(tmp_path):
@@ -39,7 +39,7 @@ def test_enumerate_serial_devices_basic(tmp_path):
     # Expect: by-id symlink + ttyUSB1, ttyACM0, ttyS0. ttyUSB0 was
     # de-duplicated by the by-id entry pointing at the same canonical
     # target.
-    assert any(p.endswith("/serial/by-id/usb-Quectel_EG25-G-if02-port0") for p in paths)
+    assert any(p.endswith("/serial/by-id/usb-Example_LTE_Modem-if02-port0") for p in paths)
     assert any(p.endswith("/ttyUSB1") for p in paths)
     assert any(p.endswith("/ttyACM0") for p in paths)
     assert any(p.endswith("/ttyS0") for p in paths)
@@ -71,7 +71,7 @@ def test_enumerate_serial_devices_resolves_link_target(tmp_path):
     _make_dev_layout(tmp_path)
     rows = host_shell.enumerate_serial_devices(root=tmp_path)
     for row in rows:
-        if row["path"].endswith("/usb-Quectel_EG25-G-if02-port0"):
+        if row["path"].endswith("/usb-Example_LTE_Modem-if02-port0"):
             assert row["link_target"] is not None
             assert row["link_target"].endswith("/ttyUSB0")
             return

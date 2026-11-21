@@ -16,8 +16,8 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 32px;
-  padding: 4px 10px 4px 8px;
+  min-height: var(--chrome-pill-h);
+  padding: 3px 10px 3px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -48,14 +48,14 @@
   background: var(--bg-selected);
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset,
-              0 2px 8px -3px var(--accent-glow);
+              0 2px 8px -3px var(--glow);
 }
 
 .topbar-reader-pill-dot {
   flex: 0 0 auto;
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   background: var(--fg-dim);
   box-shadow: 0 0 0 1px var(--border) inset;
 }
@@ -67,21 +67,21 @@
   background: var(--ok);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--ok) 35%, transparent),
-    0 0 6px 1px color-mix(in oklab, var(--ok) 55%, transparent);
+    0 0 calc(var(--glow-size) * 0.6) 1px color-mix(in oklab, var(--ok) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--yellow {
   background: var(--warn);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--warn) 35%, transparent),
-    0 0 6px 1px color-mix(in oklab, var(--warn) 55%, transparent);
+    0 0 calc(var(--glow-size) * 0.6) 1px color-mix(in oklab, var(--warn) 55%, transparent);
 }
 
 .topbar-reader-pill-dot--red {
   background: var(--fail);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--fail) 35%, transparent),
-    0 0 5px 1px color-mix(in oklab, var(--fail) 45%, transparent);
+    0 0 calc(var(--glow-size) * 0.5) 1px color-mix(in oklab, var(--fail) 45%, transparent);
 }
 
 .topbar-reader-pill-dot--gray {
@@ -103,7 +103,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: var(--radius-dot);
   border: none;
   background: transparent;
   color: var(--fg-muted);
@@ -135,6 +135,6 @@
   padding-right: 38px;
 }
 
-/* Short status tooltip strip below the pill — rendered on :hover via
+/* Short status tooltip strip below the pill -- rendered on :hover via
    the ``title`` attribute instead of a floating tooltip to keep focus
    mgmt simple. Reserved class for future native tooltip styling. */

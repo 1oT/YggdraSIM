@@ -286,7 +286,7 @@ class LauncherTemplateTests(unittest.TestCase):
         iccid_position = argv.index("--iccid")
         self.assertEqual(argv[iccid_position + 1], "8988004000000000000004")
         # The profile path (with whitespace) must survive as a single argv
-        # entry — that is exactly what shlex.split guarantees for quoted
+        # entry -- that is exactly what shlex.split guarantees for quoted
         # substrings after format_map expansion.
         self.assertTrue(
             any(" " in chunk for chunk in argv),
@@ -320,6 +320,52 @@ class LauncherTemplateTests(unittest.TestCase):
         self.assertIn("INFO", batch)
         self.assertIn("TREE", batch)
         self.assertIn("EXIT", batch)
+
+
+class DefaultProfileStoreRootTests(unittest.TestCase):
+    """The default root follows the simulator's own store resolution."""
+
+    def _resolve(self, workspace: Path, *, profile_store: str, euicc_root: str) -> Path:
+        from yggdrasim_common import card_backend
+
+        with patch.object(card_backend, "get_sim_profile_store_path", return_value=profile_store):
+            with patch.object(card_backend, "get_sim_euicc_store_root", return_value=euicc_root):
+                return simcard_watch.default_profile_store_root(workspace)
+
+    @staticmethod
+    def _make_euicc_store(root: Path, name: str) -> Path:
+        store = root / name
+        store.mkdir(parents=True)
+        (store / "euicc.json").write_text("{}", encoding="utf-8")
+        return store
+
+    def test_a_configured_profile_store_is_the_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            configured = Path(tmp) / "configured_store"
+            resolved = self._resolve(Path(tmp), profile_store=str(configured), euicc_root=str(Path(tmp) / "euicc"))
+            self.assertEqual(resolved, configured.resolve())
+
+    def test_a_single_euicc_store_gives_its_profiles_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            euicc_root = Path(tmp) / "euicc_store"
+            store = self._make_euicc_store(euicc_root, "EID_89049032000000000000000000000001")
+            resolved = self._resolve(Path(tmp), profile_store="", euicc_root=str(euicc_root))
+            self.assertEqual(resolved, (store / "profiles").resolve())
+
+    def test_several_euicc_stores_fall_back_to_the_workspace_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            euicc_root = Path(tmp) / "euicc_store"
+            self._make_euicc_store(euicc_root, "EID_89049032000000000000000000000001")
+            self._make_euicc_store(euicc_root, "EID_89049032000000000000000000000002")
+            resolved = self._resolve(Path(tmp), profile_store="", euicc_root=str(euicc_root))
+            self.assertEqual(resolved, Path(tmp) / "Workspace" / "SIMCARD" / "profile_store")
+
+    def test_an_euicc_root_without_a_store_falls_back_to_the_workspace_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            euicc_root = Path(tmp) / "euicc_store"
+            (euicc_root / "EID_89049032000000000000000000000001").mkdir(parents=True)
+            resolved = self._resolve(Path(tmp), profile_store="", euicc_root=str(euicc_root))
+            self.assertEqual(resolved, Path(tmp) / "Workspace" / "SIMCARD" / "profile_store")
 
 
 class WatcherResilienceTests(unittest.TestCase):

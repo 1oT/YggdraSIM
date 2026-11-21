@@ -19,15 +19,18 @@ body {
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-sans);
+  /* The root keeps 14px so rem-sized rules read the same under every skin;
+     the skin's base size applies from body down. */
   font-size: 14px;
-  line-height: 1.5;
+  line-height: var(--line-height-base);
   height: 100%;
   transition: background-color var(--transition-mid), color var(--transition-mid);
 }
 
 body {
   overflow: hidden;
-  background-image: var(--theme-tint);
+  font-size: var(--font-size-base);
+  background-image: var(--page-tint);
   background-attachment: fixed;
 }
 
@@ -41,18 +44,17 @@ html[data-theme="gruv-dark"],
 html[data-theme="solarized-dark"],
 html[data-theme="tokyo-night"],
 html[data-theme="catppuccin-mocha"],
+html[data-theme="catppuccin-macchiato"],
+html[data-theme="catppuccin-frappe"],
 html[data-theme="dracula"],
 html[data-theme="github-dark"],
-html[data-theme="matrix"] {
+html[data-theme="matrix"],
+html[data-theme="bench-dark"] {
   color-scheme: dark;
 }
 
-html[data-theme="nord-light"],
-html[data-theme="oneot-light"],
-html[data-theme="ink-light"],
-html[data-theme="solarized-light"],
-html[data-theme="catppuccin-latte"],
-html[data-theme="github-light"] {
+html[data-theme$="-light"],
+html[data-theme="catppuccin-latte"] {
   color-scheme: light;
 }
 
@@ -83,7 +85,7 @@ pre {
 code {
   background: var(--code-bg);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--border);
 }
 
@@ -226,5 +228,5 @@ select option:hover {
 }
 
 /* ``<datalist>`` popups inherit option styling where the engine allows
-   it (Chromium). Firefox renders them natively — operators will still
+   it (Chromium). Firefox renders them natively -- operators will still
    see readable colours from the list above. */

@@ -1,0 +1,46 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/*
+ * Bench · light -- the light half of the Bench palette: a grey field, white
+ * wells and panels, and an achromatic accent (near-black keys with white
+ * legends), so the only chroma on screen is ok / warn / fail and the
+ * decoded data itself. A theme like any other: it pairs with both skins.
+ */
+
+html[data-theme="bench-light"] {
+  --bg: #e7e9eb;
+  --bg-elev: #f5f6f7;
+  --bg-elev-2: #dde1e4;
+  --surface: #ffffff;
+  --surface-alt: rgba(20, 23, 26, 0.04);
+  --bg-hover: rgba(20, 23, 26, 0.06);
+  --border: #c5cbd1;
+  --border-strong: #8f98a2;
+  --fg: #14171a;
+  --fg-dim: #4c555e;
+  --fg-muted: var(--fg-dim);
+  --accent: #14171a;
+  --accent-strong: #000000;
+  --accent-soft: rgba(20, 23, 26, 0.08);
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(20, 23, 26, 0.18);
+  --gradient-accent: linear-gradient(135deg, #14171a 0%, #2b3035 100%);
+  --gradient-brand: linear-gradient(135deg, #14171a 0%, #4c555e 100%);
+  --ok: #17733f;
+  --ok-soft: rgba(23, 115, 63, 0.12);
+  --warn: #7d5900;
+  --warn-soft: rgba(125, 89, 0, 0.12);
+  --fail: #b8322a;
+  --fail-soft: rgba(184, 50, 42, 0.12);
+  --code-bg: #ffffff;
+  --kbd-bg: rgba(255, 255, 255, 0.96);
+  --shadow-card: 0 1px 2px rgba(20, 23, 26, 0.06), 0 6px 16px -6px rgba(20, 23, 26, 0.12);
+  --shadow-card-hover: 0 2px 4px rgba(20, 23, 26, 0.08), 0 12px 28px -8px rgba(20, 23, 26, 0.18);
+  --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 10px 26px -12px var(--accent-glow);
+  --topbar-bg: rgba(245, 246, 247, 0.94);
+  --theme-tint:
+    radial-gradient(circle at 50% -10%, rgba(20, 23, 26, 0.03), transparent 55%);
+}

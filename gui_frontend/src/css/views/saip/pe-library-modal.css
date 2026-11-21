@@ -1,0 +1,87 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* ---- PE library modal: saved profile elements ---------------------- */
+
+.saip-pe-library-list {
+  margin-top: 8px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.saip-pe-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.saip-pe-library-table thead th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.saip-pe-library-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.saip-pe-library-name,
+.saip-pe-library-saved {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.saip-pe-library-placeholders {
+  font-family: var(--mono);
+  word-break: break-word;
+}
+
+.saip-pe-library-error {
+  color: var(--warn);
+}
+
+.saip-pe-library-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+/* ---- Insert PE dialog: PE types and saved PEs as palette rows ------ */
+
+.saip-add-pe-modal .saip-action-palette-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.saip-add-pe-modal .saip-add-pe-row .saip-pe-icon {
+  grid-row: 1 / 4;
+  align-self: start;
+}
+
+.saip-add-pe-modal .saip-action-palette-row-description,
+.saip-add-pe-modal .saip-action-palette-row-meta {
+  grid-column: 2 / -1;
+}
+
+.saip-add-pe-section {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.saip-add-pe-insert-row {
+  margin: 6px 0 0;
+}

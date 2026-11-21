@@ -9,7 +9,7 @@ Background
 files and, on the first non-``9000`` status word, appends a synthetic
 record carrying ``ok=False`` + ``length=0`` + the terminating SW so
 CLI / JSON consumers can audit *why* the walker stopped. The
-``stop_reason`` field ("record_not_found" / "sw_6A86" / …) surfaces
+``stop_reason`` field ("record_not_found" / "sw_6A86" / ...) surfaces
 the same information at the header level.
 
 Operator report: the end-of-record-scan row should not be presented
@@ -23,7 +23,7 @@ rendering, while the action JSON still returns the full list
 ``records:`` count reflects the *displayed* count so the summary
 no longer off-by-ones.
 
-All tests are static-bundle contracts against ``app.js`` — the
+All tests are static-bundle contracts against ``app.js`` -- the
 filter is pure frontend JavaScript and doesn't touch the backend.
 """
 
@@ -52,7 +52,7 @@ def test_terminator_helper_accepts_zero_length_not_ok_records() -> None:
     terminator regardless of other fields."""
     js = _read("app.js")
     block = js.split("function scp03IsRecordTerminator(rec)", 1)[1].split("function renderRecordsPayload")[0]
-    # ``ok === true`` returns false early — guarantees real records pass through.
+    # ``ok === true`` returns false early -- guarantees real records pass through.
     assert "rec.ok === true" in block
     assert "return false" in block
     # Length gate so a weird real record with ``ok: false`` but non-zero
@@ -92,7 +92,7 @@ def test_records_meta_counts_displayed_rows_not_raw() -> None:
     js = _read("app.js")
     block = js.split("function renderRecordsPayload(payload)", 1)[1].split("function renderSingleRecord")[0]
     assert '"records: " + displayRecords.length' in block
-    # ``non_empty_count`` stays — the backend never increments it for
+    # ``non_empty_count`` stays -- the backend never increments it for
     # terminator sentinels (they aren't ok:true records).
     assert 'non-empty: " + (payload.non_empty_count' in block
 
@@ -112,14 +112,14 @@ def test_empty_display_surfaces_stop_reason() -> None:
 def test_non_empty_count_field_unchanged() -> None:
     """Sanity: the filter is UI-only. The backend ``non_empty_count``
     field is a pure ``ok: true`` counter and must stay authoritative
-    for API consumers — we must not recompute it from the filtered
+    for API consumers -- we must not recompute it from the filtered
     frontend list and risk drift."""
     js = _read("app.js")
     block = js.split("function renderRecordsPayload(payload)", 1)[1].split("function renderSingleRecord")[0]
     # The non-empty chip reads from payload, never from displayRecords.
     assert "displayRecords.length" in block
     assert "non_empty_count" in block
-    # Guard: we must not recompute non-empty from displayRecords — a
+    # Guard: we must not recompute non-empty from displayRecords -- a
     # wrongly-rewired patch would change this line. The test pins the
     # fact that ``non_empty`` is still sourced from ``payload``.
     assert (

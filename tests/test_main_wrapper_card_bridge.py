@@ -204,7 +204,7 @@ class MainWrapperCardBridgeRouteTests(unittest.TestCase):
         self.assertEqual(action_inputs["remote_card_url"], "http://127.0.0.1:8642/apdu")
         self.assertEqual(
             action_inputs["remote_token_file"],
-            "~/.config/yggdrasim/card_bridge/8642.token",
+            "~/.config/yggdrasim/hil/remote-card-8642.token",
         )
         self.assertTrue(action_inputs["install_service"])
         self.assertTrue(action_inputs["restart_processes"])

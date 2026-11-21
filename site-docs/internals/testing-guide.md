@@ -33,7 +33,7 @@ to a subsystem or a cross-cutting concern. Representative file patterns:
 | `tests/test_saip_*.py` | SAIP profile package codecs and tooling |
 | `tests/test_profile_package_*.py` | Profile Package shell / saip tool |
 | `tests/test_hil_bridge_*.py` | HIL bridge, runtime, and protocol |
-| `tests/test_polling_plugin_*.py` | plugin runtime behavior |
+| `tests/test_plugin_*.py` | plugin runtime behavior |
 | `tests/test_apdu_fuzzer*.py` | APDU mutation fuzzer (allow-list, mutators, transports) |
 | `tests/test_eum_diag*.py` | EUM / SM-DP+ session-key diagnostics + Lua dissector |
 | `tests/test_yggdracore_*.py` | YggdraCore AUSF / AAnF stubs, FastAPI loopback, Open5GS bridge |
@@ -97,7 +97,7 @@ Every pytest invocation is expected to complete within 90 seconds of wall
 time. The cap keeps local and CI runs predictable and prevents a single
 slow test from holding the queue. If a test genuinely needs more than 90 s:
 
-1. Narrow the target first — a single test class or node id usually fits.
+1. Narrow the target first -- a single test class or node id usually fits.
 2. If it still does not fit, tag the offender with `@pytest.mark.slow`
    and note the flag in the test docstring.
 3. Only ask to raise the cap explicitly, for a single named run. Do not

@@ -60,7 +60,7 @@ from Tools.ProfilePackage.saip_asn1_encode import (
 
 
 # ---------------------------------------------------------------------------
-# Round 1 — file-structure fields.
+# Round 1 -- file-structure fields.
 
 
 class FilePathEncoderTests(unittest.TestCase):
@@ -108,10 +108,17 @@ class LinkPathEncoderTests(unittest.TestCase):
 
 class FileDescriptorEncoderTests(unittest.TestCase):
     def test_hex_passthrough(self) -> None:
-        raw = bytes.fromhex("4221000A01")
+        raw = bytes.fromhex("4221000A")
         decoded = _decode_file_descriptor(raw)
         encoded = encode_file_descriptor(dict(decoded))
         self.assertEqual(encoded, raw)
+
+    def test_a_record_count_byte_is_refused(self) -> None:
+        # SAIP V3.4.1 §8.3.2: Fcp.fileDescriptor is SIZE(2..4); the fifth
+        # byte of the TS 102 221 SELECT layout is not part of it.
+        decoded = _decode_file_descriptor(bytes.fromhex("42210002FA"))
+        with self.assertRaises(RoundtripEncoderError):
+            encode_file_descriptor(dict(decoded))
 
     def test_structured_recompose_linear_fixed(self) -> None:
         payload = {
@@ -120,14 +127,26 @@ class FileDescriptorEncoderTests(unittest.TestCase):
             "structure": "linear_fixed",
             "descriptorCodingByte": "0x21",
             "recordLength": 0x20,
-            "numberOfRecords": 4,
         }
         encoded = encode_file_descriptor(payload)
+        self.assertEqual(encoded, bytes.fromhex("42210020"))
         redecoded = _decode_file_descriptor(encoded)
         self.assertEqual(redecoded["structure"], "linear_fixed")
         self.assertEqual(redecoded["recordLength"], 0x20)
-        self.assertEqual(redecoded["numberOfRecords"], 4)
+        self.assertNotIn("numberOfRecords", redecoded)
         self.assertTrue(redecoded["shareable"])
+
+    def test_structured_number_of_records_is_refused(self) -> None:
+        payload = {
+            "shareable": True,
+            "fileType": "working_ef",
+            "structure": "linear_fixed",
+            "descriptorCodingByte": "0x21",
+            "recordLength": 0x20,
+            "numberOfRecords": 4,
+        }
+        with self.assertRaises(RoundtripEncoderError):
+            encode_file_descriptor(payload)
 
     def test_ber_tlv_shortcut(self) -> None:
         payload = {
@@ -197,7 +216,7 @@ class FileDetailsEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Round 2 — PKCS#15 EFs.
+# Round 2 -- PKCS#15 EFs.
 
 
 class Pkcs15EncoderTests(unittest.TestCase):
@@ -245,7 +264,7 @@ class Pkcs15EncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Round 3 — PIN/PUK/key-material fields.
+# Round 3 -- PIN/PUK/key-material fields.
 
 
 class PinSecretEncoderTests(unittest.TestCase):
@@ -315,7 +334,7 @@ class PinStatusTemplateDoEncoderTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Round 4 — install and connectivity parameters.
+# Round 4 -- install and connectivity parameters.
 
 
 class ConnectivityParametersEncoderTests(unittest.TestCase):
@@ -357,59 +376,64 @@ class SdInstallParametersEncoderTests(unittest.TestCase):
 
 
 class UiccToolkitParametersEncoderTests(unittest.TestCase):
-    def _build_toolkit_bytes(self) -> bytes:
-        # Access domain: 1 byte (length=1, value=0x00)
-        access_domain = bytes([0x01, 0x00])
-        header = bytes([0x02, 0x01, 0x10, 0x00])
-        # 0 menu entries
-        channels = bytes([0x02])
-        msl = bytes([0x02, 0x00, 0x01])  # length=2, value=0x0001
-        tar = bytes([0x03, 0xB0, 0x00, 0x00])  # length=3, one TAR
-        return access_domain + header + channels + msl + tar
+    """ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.1: no access domain, the menu
+    entries as position then identifier, services after the TAR values."""
+
+    # TCA SAIP v3.4.1 page 134: "TAR: B20100, MSL: 12".
+    SAIP_EXAMPLE = bytes.fromhex("0100000100000002011203B2010000")
+
+    def test_the_saip_example_reads_field_by_field(self) -> None:
+        decoded = _decode_uicc_toolkit_parameters(self.SAIP_EXAMPLE)
+        self.assertNotIn("accessDomain", decoded)
+        self.assertEqual(decoded["priorityLevelOfToolkitAppInstance"], 1)
+        self.assertEqual(decoded["maxNumberOfTimers"], 0)
+        self.assertEqual(decoded["menuEntries"], [{"position": 0, "id": 0}])
+        self.assertEqual(decoded["maxNumberOfChannels"], 0)
+        self.assertEqual(decoded["minimumSecurityLevelRaw"], "0112")
+        self.assertEqual(decoded["tarValues"], ["B20100"])
+        self.assertEqual(decoded["maxNumberOfServices"], 0)
+        self.assertIn("tarValues", [field["name"] for field in decoded["fieldMap"]])
 
     def test_raw_hex_passthrough(self) -> None:
-        raw = self._build_toolkit_bytes()
-        decoded = _decode_uicc_toolkit_parameters(raw)
-        encoded = encode_uicc_toolkit_parameters(dict(decoded))
-        self.assertEqual(encoded, raw)
+        decoded = _decode_uicc_toolkit_parameters(self.SAIP_EXAMPLE)
+        self.assertEqual(encode_uicc_toolkit_parameters(dict(decoded)), self.SAIP_EXAMPLE)
 
-    def test_structured_rebuild(self) -> None:
-        raw = self._build_toolkit_bytes()
-        decoded = _decode_uicc_toolkit_parameters(raw)
-        decoded["rawHex"] = ""
-        encoded = encode_uicc_toolkit_parameters(dict(decoded))
-        redecoded = _decode_uicc_toolkit_parameters(encoded)
-        self.assertEqual(redecoded["accessDomain"], decoded["accessDomain"])
-        self.assertEqual(redecoded["tarValues"], decoded["tarValues"])
+    def test_structured_rebuild_is_byte_exact(self) -> None:
+        for raw in (
+            self.SAIP_EXAMPLE,
+            bytes.fromhex("0100000000000000"),
+            bytes.fromhex("01001000000201120300000000"),
+            bytes.fromhex("0100010102050002011606B201000000000000AA"),
+        ):
+            with self.subTest(raw=raw.hex()):
+                decoded = _decode_uicc_toolkit_parameters(raw)
+                decoded["rawHex"] = ""
+                self.assertEqual(encode_uicc_toolkit_parameters(dict(decoded)), raw)
 
-    def test_compact_no_menu_count_layout_decodes_tar(self) -> None:
-        raw = bytes.fromhex("01001000000201120300000000")
+    def test_menu_position_comes_before_the_identifier(self) -> None:
+        decoded = _decode_uicc_toolkit_parameters(bytes.fromhex("01000001" "0207" "00" "00" "00"))
+        self.assertEqual(decoded["menuEntries"], [{"position": 2, "id": 7}])
+        self.assertNotIn("maxNumberOfServices", decoded)
 
-        decoded = _decode_uicc_toolkit_parameters(raw)
+    def test_the_old_shapes_are_refused(self) -> None:
+        base = {
+            "priorityLevelOfToolkitAppInstance": 1,
+            "maxNumberOfTimers": 0,
+            "maxTextLengthForMenuEntry": 0,
+            "maxNumberOfChannels": 0,
+        }
+        for extra in ({"accessDomain": "00"}, {"trailingPadding": "00"}, {"additionalBytes": "AA"}):
+            with self.subTest(extra=extra), self.assertRaises(RoundtripEncoderError):
+                encode_uicc_toolkit_parameters({**base, **extra})
 
-        self.assertEqual(decoded["layout"], "compact-no-menu-entry-count")
-        self.assertFalse(decoded["menuEntryCountPresent"])
-        self.assertEqual(decoded["accessDomain"], "00")
-        self.assertEqual(decoded["priorityLevelOfToolkitAppInstance"], 0x10)
-        self.assertEqual(decoded["maxNumberOfChannels"], 2)
-        self.assertEqual(decoded["minimumSecurityLevelRaw"], "12")
-        self.assertEqual(decoded["tarValues"], ["000000"])
-        self.assertEqual(decoded["trailingPadding"], "00")
-        self.assertIn("fieldMap", decoded)
-
-        encoded_passthrough = encode_uicc_toolkit_parameters(dict(decoded))
-        self.assertEqual(encoded_passthrough, raw)
-        decoded["rawHex"] = ""
-        encoded_canonical = encode_uicc_toolkit_parameters(dict(decoded))
-        self.assertNotEqual(encoded_canonical, raw)
-        self.assertEqual(
-            _decode_uicc_toolkit_parameters(encoded_canonical)["tarValues"],
-            ["000000"],
-        )
+    def test_bytes_that_do_not_parse_keep_their_hints(self) -> None:
+        decoded = _decode_uicc_toolkit_parameters(bytes.fromhex("0102"))
+        self.assertIn("parseErrors", decoded)
+        self.assertEqual(encode_uicc_toolkit_parameters(dict(decoded)), bytes.fromhex("0102"))
 
 
 # ---------------------------------------------------------------------------
-# Round 5 — common 3GPP EFs previously without decoders.
+# Round 5 -- common 3GPP EFs previously without decoders.
 
 
 class GroupIdentifierEncoderTests(unittest.TestCase):

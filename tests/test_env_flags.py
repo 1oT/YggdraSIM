@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for yggdrasim_common/env_flags.py registry and value helpers.
 
 Covers: iter_flags, flags_by_category, get_flag_value, get_flag_source,
@@ -13,6 +12,7 @@ All env-var accesses clean up via setUp/tearDown.
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 
 from yggdrasim_common.env_flags import (
@@ -299,10 +299,15 @@ class ResetAllPersistedTests(unittest.TestCase):
             f for f in FLAG_REGISTRY if f.persist_scope != PERSIST_SESSION
         )
         saved = os.environ.pop(persistable.name, None)
+        # The first persistable flag is YGGDRASIM_RUNTIME_ROOT, and
+        # reset_all_persisted writes the overrides file underneath it. Point
+        # it at a temporary directory: a bare label would resolve relative to
+        # the working directory and leave one behind in the repository root.
         try:
-            os.environ[persistable.name] = "test_value_reset"
-            reset_all_persisted(clear_session=True)
-            self.assertNotIn(persistable.name, os.environ)
+            with tempfile.TemporaryDirectory() as runtime_root:
+                os.environ[persistable.name] = runtime_root
+                reset_all_persisted(clear_session=True)
+                self.assertNotIn(persistable.name, os.environ)
         finally:
             if saved is not None:
                 os.environ[persistable.name] = saved

@@ -20,13 +20,16 @@ TP_UDL_OFFSET = 15
 
 
 class _StubConfig:
+    def __init__(self, sender: str = "82") -> None:
+        self.values = {"pid": "7F", "dcs": "F6", "sender": sender, "cla": "80"}
+
     def get(self, key: str) -> str:
-        return {"pid": "41", "dcs": "F6"}[key]
+        return self.values[key]
 
 
-def _builder() -> OtaPacketBuilder:
+def _builder(sender: str = "82") -> OtaPacketBuilder:
     builder = object.__new__(OtaPacketBuilder)
-    builder.cfg = _StubConfig()
+    builder.cfg = _StubConfig(sender)
     return builder
 
 
@@ -71,17 +74,30 @@ class SmsUserDataLength(unittest.TestCase):
 
 
 class EnvelopeDeviceIdentities(unittest.TestCase):
-    """TS 31.111 §7.1.1.2: source Network, destination UICC."""
+    """TS 102 223 v18.3 §8.7 device identities; the source is ``sender``."""
 
-    def test_source_is_the_network_and_destination_the_uicc(self) -> None:
-        prefix = OtaPacketBuilder.ENVELOPE_PREFIX
+    def test_the_default_source_is_the_terminal(self) -> None:
+        prefix = _builder()._envelope_prefix()
         self.assertEqual(prefix[0], 0x02, "device identities tag")
         self.assertEqual(prefix[1], 0x02, "device identities length")
-        self.assertEqual(prefix[2], 0x83, "source: network per TS 102 223 §8.7")
+        self.assertEqual(prefix[2], 0x82, "source: terminal")
         self.assertEqual(prefix[3], 0x81, "destination: UICC")
 
+    def test_sender_83_names_the_network_as_a_modem_does(self) -> None:
+        """TS 31.111 v19.4 §7.1.1.2: a modem sets the source to the network."""
+
+        prefix = _builder("83")._envelope_prefix()
+        self.assertEqual(prefix[2], 0x83, "source: network")
+        self.assertEqual(prefix[3], 0x81, "destination: UICC")
+
+    def test_the_envelope_carries_the_configured_source(self) -> None:
+        for sender in ("82", "83"):
+            with self.subTest(sender=sender):
+                apdu = _builder(sender)._wrap_sms_tpdu(bytes(4))
+                self.assertEqual(apdu[14:22], f"0202{sender}81")
+
     def test_address_object_follows(self) -> None:
-        prefix = OtaPacketBuilder.ENVELOPE_PREFIX
+        prefix = _builder()._envelope_prefix()
         self.assertEqual(prefix[4], 0x06, "address tag")
         self.assertEqual(prefix[5], len(prefix) - 6)
 

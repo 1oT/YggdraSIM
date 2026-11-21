@@ -90,6 +90,24 @@ Subsystem pages are the operator-facing guides. Each page covers:
 
     [Open HIL Bridge](hil-bridge.md)
 
+-   :material-transit-connection-variant: __Card Bridge__
+
+    ---
+
+    One PC/SC reader published over HTTP, bearer-token gated, for SSH-tunnelled
+    remote-card work.
+
+    [Open Card Bridge](card-bridge.md)
+
+-   :material-server-security: __Remote Lab__
+
+    ---
+
+    Shared rigs with inventory, exclusive sessions, and card offers to modem
+    rigs, over the Card Bridge data plane.
+
+    [Open Remote Lab](remote-lab.md)
+
 -   :material-key-outline: __SUCI Tool__
 
     ---
@@ -153,6 +171,8 @@ Subsystem pages are the operator-facing guides. Each page covers:
 | Profile Package | [SAIP Profiles](../concepts/saip-profiles.md) |
 | Universal GUI Command Center | [Secure Element Primer](../concepts/secure-element-primer.md), [HIL Model](../concepts/hil-model.md) |
 | HIL Bridge | [HIL Model](../concepts/hil-model.md) |
+| Card Bridge | [HIL Model](../concepts/hil-model.md) |
+| Remote Lab | [HIL Model](../concepts/hil-model.md) |
 | SIMCARD Simulator | [Secure Element Primer](../concepts/secure-element-primer.md) |
 | SUCI Tool | [3GPP NAA](../concepts/3gpp-naa.md) |
 | APDU Mutation Fuzzer | [Secure Element Primer](../concepts/secure-element-primer.md) |

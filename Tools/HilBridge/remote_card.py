@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HIL-Bridge remote-relay card channel.
 
 Adapter that lets the HIL bridge router consume a card published by a
@@ -34,14 +33,16 @@ Topology
 Notes
 -----
 
-* Drop-in for :class:`Tools.HilBridge.pcsc.PcscCardChannel` — exposes
+* Drop-in for :class:`Tools.HilBridge.pcsc.PcscCardChannel` -- exposes
   the same ``connect`` / ``disconnect`` / ``reconnect`` / ``get_atr``
   / ``transmit`` surface :class:`BackendCardChannel` consumes.
-* ``proactive_status_payload`` is not implemented over the relay
-  protocol; the laptop side has no proactive broker to surface. Calls
-  raise :class:`PcscBridgeError` so callers see a clean error rather
-  than a silent no-op.
-* GSMTAP / pcap mirroring keeps working without changes — capture is
+* ``proactive_status_payload`` returns an empty mapping: the proactive
+  broker is rig-local and the relay protocol does not carry it. This
+  costs nothing against a physical card, because
+  :class:`Tools.HilBridge.pcsc.PcscCardChannel` does not implement the
+  method either and ``Router`` resolves it with ``getattr``. Only the
+  simulated backend in :mod:`Tools.HilBridge.sim_modem` supplies one.
+* GSMTAP / pcap mirroring keeps working without changes -- capture is
   driven from the rig-side router as TPDUs transit it.
 """
 from __future__ import annotations
@@ -60,6 +61,8 @@ from yggdrasim_common.card_backend import (
     _request_card_relay_json,
 )
 
+from yggdrasim_common.card_bridge_auth import CARD_LEASE_HEADER
+
 from .pcsc import PcscBridgeError
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,6 +76,8 @@ _LOGGER = logging.getLogger(__name__)
 REMOTE_CARD_URL_ENV = "YGGDRASIM_HIL_REMOTE_CARD_URL"
 REMOTE_CARD_TOKEN_ENV = "YGGDRASIM_HIL_REMOTE_CARD_TOKEN"
 REMOTE_CARD_TOKEN_FILE_ENV = "YGGDRASIM_HIL_REMOTE_CARD_TOKEN_FILE"
+REMOTE_CARD_LEASE_ENV = "YGGDRASIM_HIL_REMOTE_CARD_LEASE"
+REMOTE_CARD_LEASE_FILE_ENV = "YGGDRASIM_HIL_REMOTE_CARD_LEASE_FILE"
 
 
 def resolve_remote_card_url(explicit: str = "") -> str:
@@ -80,7 +85,7 @@ def resolve_remote_card_url(explicit: str = "") -> str:
 
     Resolution order: explicit string → env var. Both go through
     :func:`_normalize_card_relay_url` so a bare ``http://host:port``
-    is accepted alongside the canonical ``…/apdu`` form.
+    is accepted alongside the canonical ``.../apdu`` form.
     """
     candidate = str(explicit or "").strip()
     if len(candidate) == 0:
@@ -130,10 +135,67 @@ def resolve_remote_card_token(
         ) from read_error
 
 
+def resolve_remote_card_lease(
+    *, explicit_token: str = "", explicit_token_file: str = ""
+) -> str:
+    """Return the card lease to present upstream, or ``""`` when there is none.
+
+    Resolution mirrors :func:`resolve_remote_card_token`, with one
+    deliberate difference: a missing or unreadable lease file is not an
+    error. The supervisor writes one only when the upstream granted a
+    lease, and an upstream that grants none -- a relay running without a
+    bearer token, or one predating leases -- is the ordinary case. A
+    bridge must keep working against both.
+    """
+    raw = str(explicit_token or "").strip()
+    if len(raw) > 0:
+        return raw
+
+    candidate_file = str(explicit_token_file or "").strip()
+    if len(candidate_file) == 0:
+        env_token = (os.environ.get(REMOTE_CARD_LEASE_ENV, "") or "").strip()
+        if len(env_token) > 0:
+            return env_token
+        candidate_file = (os.environ.get(REMOTE_CARD_LEASE_FILE_ENV, "") or "").strip()
+
+    if len(candidate_file) == 0:
+        return ""
+
+    try:
+        return (
+            Path(os.path.expanduser(candidate_file))
+            .read_text(encoding="utf-8")
+            .strip()
+        )
+    except OSError as read_error:
+        _LOGGER.debug(
+            "remote_card: no card lease at %s (%s); proceeding unleased.",
+            candidate_file,
+            read_error,
+        )
+        return ""
+
+
 def _build_card_relay_reset_url(apdu_url: str) -> str:
     if apdu_url.endswith("/apdu"):
         return apdu_url[: -len("/apdu")] + "/card/reset"
     return apdu_url.rstrip("/") + "/card/reset"
+
+
+def build_card_relay_lease_url(apdu_url: str) -> str:
+    """Return the lease endpoint beside a relay's ``/apdu`` endpoint."""
+    normalized = _normalize_card_relay_url(apdu_url)
+    if normalized.endswith("/apdu"):
+        return normalized[: -len("/apdu")] + "/lease"
+    return normalized.rstrip("/") + "/lease"
+
+
+def build_card_relay_status_url(apdu_url: str) -> str:
+    """Return the status endpoint beside a relay's ``/apdu`` endpoint."""
+    normalized = _normalize_card_relay_url(apdu_url)
+    if normalized.endswith("/apdu"):
+        return normalized[: -len("/apdu")] + "/status"
+    return normalized.rstrip("/") + "/status"
 
 
 # ----------------------------------------------------------------------
@@ -154,13 +216,22 @@ class RemoteRelayCardChannel:
     url: str
     auth_token: str = ""
     timeout_seconds: int = DEFAULT_CARD_RELAY_TIMEOUT_SECONDS
+    lease_token: str = ""
+    lease_token_file: str = ""
     _connection: Any = field(default=None, init=False, repr=False)
     _reader_label: str = field(default="", init=False, repr=False)
     _atr: bytes = field(default=b"", init=False, repr=False)
+    _lease: str = field(default="", init=False, repr=False)
 
     @property
     def reader_label(self) -> str:
         return self._reader_label
+
+    def _lease_headers(self) -> dict[str, Any]:
+        """Keyword arguments presenting the lease, empty when unleased."""
+        if len(self._lease) == 0:
+            return {}
+        return {"extra_headers": {CARD_LEASE_HEADER: self._lease}}
 
     def connect(self) -> None:
         """Open the remote relay connection and prime the ATR cache.
@@ -177,10 +248,19 @@ class RemoteRelayCardChannel:
             )
         self.url = normalized
 
+        # Re-read on every connect so a lease taken or renewed by the
+        # supervisor after this bridge started is picked up on the next
+        # reconnect rather than needing a restart.
+        self._lease = resolve_remote_card_lease(
+            explicit_token=self.lease_token,
+            explicit_token_file=self.lease_token_file,
+        )
+
         connection = RelayCardConnection(
             normalized,
             timeout_seconds=self.timeout_seconds,
             auth_token=self.auth_token,
+            lease_token=self._lease,
         )
         try:
             connection.connect()
@@ -197,7 +277,7 @@ class RemoteRelayCardChannel:
 
         # Pull the human-readable reader label off the relay status
         # endpoint so logs and the GUI bridge can show "remote: <reader
-        # at host>" rather than a bare URL. Failure is non-fatal — the
+        # at host>" rather than a bare URL. Failure is non-fatal -- the
         # reader label is purely cosmetic.
         try:
             status_url = _build_card_relay_status_url(normalized)
@@ -206,6 +286,7 @@ class RemoteRelayCardChannel:
                 method="GET",
                 timeout_seconds=self.timeout_seconds,
                 auth_token=self.auth_token,
+                **self._lease_headers(),
             )
             reader_text = str(payload.get("reader") or "").strip()
             if len(reader_text) > 0:
@@ -235,6 +316,7 @@ class RemoteRelayCardChannel:
                 request_json={},
                 timeout_seconds=self.timeout_seconds,
                 auth_token=self.auth_token,
+                **self._lease_headers(),
             )
         except Exception as reset_error:
             raise PcscBridgeError(
@@ -264,7 +346,7 @@ class RemoteRelayCardChannel:
         """Return the cached ATR (filled at ``connect`` time).
 
         Falls through to a live ``getATR`` call when the cache is empty
-        — the relay's ``/status`` endpoint may have failed at connect
+        -- the relay's ``/status`` endpoint may have failed at connect
         but the card itself can still be queried.
         """
         if len(self._atr) > 0:
@@ -283,7 +365,7 @@ class RemoteRelayCardChannel:
         return bytes(data), int(sw1), int(sw2)
 
     def proactive_status_payload(self) -> dict[str, Any]:
-        """Empty by design — proactive broker is rig-local."""
+        """Empty by design -- proactive broker is rig-local."""
         return {}
 
     def _require_connection(self) -> Any:

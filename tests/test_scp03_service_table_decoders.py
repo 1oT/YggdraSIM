@@ -33,7 +33,7 @@ import pytest
 
 
 # ----------------------------------------------------------------------
-# Backend — SCP03/core/decoders.py
+# Backend -- SCP03/core/decoders.py
 # ----------------------------------------------------------------------
 
 
@@ -59,7 +59,7 @@ def test_decode_ust_returns_active_and_inactive() -> None:
     assert out["inactive_count"] == 14 * 8 - 1
 
     # The human-readable summary is what the GUI shows in the header
-    # chip — keep its shape stable so the renderer test pins below
+    # chip -- keep its shape stable so the renderer test pins below
     # match.
     assert out["summary"] == "1 of 112 active"
 
@@ -120,7 +120,7 @@ def test_decode_obj_passes_service_table_through_unchanged() -> None:
 
     Pre-refactor the UST decoder returned a list which got wrapped as
     ``{"items": [...]}``. The new dict contract should bypass that
-    branch — the frontend keys off ``service_table=True`` and would
+    branch -- the frontend keys off ``service_table=True`` and would
     silently fall back to the generic object renderer otherwise.
     """
     from SCP03.core.decoders import ContentDecoder
@@ -134,7 +134,7 @@ def test_decode_obj_passes_service_table_through_unchanged() -> None:
 
 
 # ----------------------------------------------------------------------
-# Frontend — yggdrasim_common/gui_server/static/app.js / app.css
+# Frontend -- yggdrasim_common/gui_server/static/app.js / app.css
 # ----------------------------------------------------------------------
 
 
@@ -309,7 +309,7 @@ def test_app_css_styles_service_table() -> None:
         assert selector in css, f"CSS contract missing selector: {selector}"
 
     # Grid must lay out two columns side by side at the default
-    # breakpoint — the entire point of the layout is comparing active
+    # breakpoint -- the entire point of the layout is comparing active
     # vs inactive at a glance.
     assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);" in css
     # And collapse to one column on narrow viewports so popouts at half

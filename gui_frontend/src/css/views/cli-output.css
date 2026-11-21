@@ -1,0 +1,80 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Terminal output of a stream action (js: ccCliOutputAppend): the lines a
+   shell command prints, in the mono face, each span in the colour of its
+   CLI palette role. A role reads the token the terminal palettes are
+   transcribed from (scripts/generate_cli_palettes.py), so the block follows
+   every theme. */
+
+.cc-cli-output {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+.cc-cli-line {
+  white-space: pre;
+}
+
+.cc-cli-role--cyan {
+  color: var(--accent);
+}
+
+.cc-cli-role--header,
+.cc-cli-role--blue,
+.cc-cli-role--deep_blue {
+  color: var(--accent-strong);
+}
+
+.cc-cli-role--green {
+  color: var(--ok);
+}
+
+.cc-cli-role--yellow,
+.cc-cli-role--orange {
+  color: var(--warn);
+}
+
+.cc-cli-role--red {
+  color: var(--fail);
+}
+
+.cc-cli-role--purple {
+  color: var(--tree-df-fg);
+}
+
+.cc-cli-role--text_dim,
+.cc-cli-role--guide {
+  color: var(--fg-dim);
+}
+
+.cc-cli-role--white,
+.cc-cli-role--surface {
+  color: var(--fg);
+}
+
+.cc-cli-bold {
+  font-weight: 700;
+}
+
+.cc-cli-dim {
+  opacity: 0.75;
+}
+
+.cc-cli-italic {
+  font-style: italic;
+}
+
+.cc-cli-underline {
+  text-decoration: underline;
+}

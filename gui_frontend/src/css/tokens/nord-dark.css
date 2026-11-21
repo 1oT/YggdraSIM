@@ -40,14 +40,14 @@ html[data-theme="nord-dark"] {
   /* -- Yggdrasil weave (Nord-only) -------------------------------------
    * Norse-mythology palette tokens, deliberately desaturated so they
    * still read as Nord. Naming maps to the world-tree imagery:
-   *   --ygg-frost   — Niflheim / Polar Night frost  (Nord: nord8)
-   *   --ygg-amber   — Asgard's golden bough         (muted Nord nord13)
-   *   --ygg-runic   — runestone violet / Bifrost    (Nord nord15 dimmed)
-   *   --ygg-leaf    — ash leaves of Yggdrasil       (Nord nord14)
-   *   --ygg-bark    — weathered bark / Midgard soil (custom muted brown)
-   *   --ygg-ember   — Muspelheim ember              (muted Nord nord12)
-   *   --ygg-mist    — pale mist / spiritual halo    (custom muted slate)
-   * Other themes keep their existing look — these tokens are only
+   *   --ygg-frost   -- Niflheim / Polar Night frost  (Nord: nord8)
+   *   --ygg-amber   -- Asgard's golden bough         (muted Nord nord13)
+   *   --ygg-runic   -- runestone violet / Bifrost    (Nord nord15 dimmed)
+   *   --ygg-leaf    -- ash leaves of Yggdrasil       (Nord nord14)
+   *   --ygg-bark    -- weathered bark / Midgard soil (custom muted brown)
+   *   --ygg-ember   -- Muspelheim ember              (muted Nord nord12)
+   *   --ygg-mist    -- pale mist / spiritual halo    (custom muted slate)
+   * Other themes keep their existing look -- these tokens are only
    * referenced through ``var(--ygg-*, fallback)`` so the inheritance
    * is opt-in. */
   --ygg-frost: #88c0d0;
@@ -57,23 +57,6 @@ html[data-theme="nord-dark"] {
   --ygg-bark:  #8b7a63;
   --ygg-ember: #c98a6e;
   --ygg-mist:  #aebed1;
-
-  /* Tree-icon palette (filesystem). Per-kind tokens so themes can
-   * overlay without touching the .cc-tree-icon-* rules. Defaults
-   * preserve the legacy hard-coded values; Nord swaps them for the
-   * Yggdrasil weave. */
-  --tree-mf-fg:    var(--ygg-frost);
-  --tree-mf-bg:    rgba(136, 192, 208, 0.16);
-  --tree-mf-edge:  rgba(136, 192, 208, 0.55);
-  --tree-adf-fg:   var(--ygg-amber);
-  --tree-adf-bg:   rgba(216, 167, 106, 0.16);
-  --tree-adf-edge: rgba(216, 167, 106, 0.50);
-  --tree-df-fg:    var(--ygg-runic);
-  --tree-df-bg:    rgba(156, 142, 182, 0.16);
-  --tree-df-edge:  rgba(156, 142, 182, 0.50);
-  --tree-ef-fg:    var(--ygg-leaf);
-  --tree-ef-bg:    rgba(163, 190, 140, 0.14);
-  --tree-ef-edge:  rgba(163, 190, 140, 0.45);
 
   --theme-tint:
     radial-gradient(circle at top left,     rgba(136, 192, 208, 0.12), transparent 42%),

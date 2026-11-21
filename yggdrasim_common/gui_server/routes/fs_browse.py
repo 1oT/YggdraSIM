@@ -16,14 +16,14 @@
 # Copyright (c) 2026 1oT OU. Authored by Hampus Hellsberg.
 # -----------------------------------------------------------------------------
 
-"""``/api/fs/browse`` — read-only filesystem listing for the in-browser picker.
+"""``/api/fs/browse`` -- read-only filesystem listing for the in-browser picker.
 
 Background
 ----------
 
 When YggdraSIM runs in ``--gui`` (pywebview) mode the SPA delegates path
 selection to the OS-native file dialogs through ``window.pywebview.api``.
-In ``--web-server`` / plain-browser mode that bridge is absent — operators
+In ``--web-server`` / plain-browser mode that bridge is absent -- operators
 saw the placeholder ``window.prompt`` text input ("Path to file (no native
 picker available)") which is unusable for anything beyond a hand-typed
 absolute path.
@@ -45,7 +45,7 @@ The endpoint is intentionally read-only. It does not:
     operator picks the link itself, not its dereferenced target),
   * accept path components such as ``..`` after canonicalisation.
 
-It does *not* enforce a sandbox boundary — the GUI server runs as the
+It does *not* enforce a sandbox boundary -- the GUI server runs as the
 operator, the SPA token is required for every request, and the operator
 already has the same filesystem rights via shell. The point is to mirror
 what they could do with ``ls`` from the same terminal, not to elevate
@@ -275,7 +275,7 @@ def _build_shortcuts() -> list[FsShortcut]:
     for spec in _SHORTCUT_SPECS:
         try:
             resolved = spec.resolver()
-        except Exception:  # noqa: BLE001 — never fail the whole listing
+        except Exception:  # noqa: BLE001 -- never fail the whole listing
             resolved = None
         if resolved is None:
             rows.append(FsShortcut(
@@ -290,7 +290,7 @@ def _build_shortcuts() -> list[FsShortcut]:
         ))
     # NOTE: we deliberately keep duplicate-path entries (e.g. "Working
     # dir" and "Workspace" landing on the same directory in a source
-    # checkout) so the sidebar layout is stable across builds — having
+    # checkout) so the sidebar layout is stable across builds -- having
     # both buttons point to the same path is mildly informative and
     # cheap; collapsing them would make the sidebar shift around in
     # confusing ways depending on where the operator launched the
@@ -371,7 +371,7 @@ def _entry_payload(entry: os.DirEntry) -> FsEntry:
             target = os.readlink(entry.path)
             # If the symlink points to a directory we still want the
             # navigator to treat the *link* as a directory entry so a
-            # double-click drills into the link's target — surface that
+            # double-click drills into the link's target -- surface that
             # via ``kind`` while keeping the symlink_target populated.
             if os.path.isdir(entry.path):
                 kind = "dir"
@@ -464,7 +464,7 @@ def browse(
         )
 
     if target.is_file():
-        # Picker often kicks off with a stale file path — show the
+        # Picker often kicks off with a stale file path -- show the
         # parent directory and surface a hint so the user knows we
         # promoted them up one level.
         parent = target.parent

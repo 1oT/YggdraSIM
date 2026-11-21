@@ -131,7 +131,7 @@ Any of the following means the stack is not fully armed:
 - [HIL Bridge](../subsystems/hil-bridge.md) for the operator surface
 - [Run a HIL Capture](../how-to/run-hil-capture.md) for a recipe-style
   walkthrough
-- [Remote APDU Streaming](../how-to/remote-apdu-streaming.md) for the
+- [Card Bridge over SSH](../how-to/remote-apdu-streaming.md) for the
   Card Bridge over SSH topology
 - [Install RemSIM / APDU Streaming](../how-to/install-remsim-apdu-streaming.md)
   for the Linux / Raspberry Pi rig checklist

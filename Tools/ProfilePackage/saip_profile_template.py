@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SAIP profile template engine: placeholder resolution and batch application.
 
-Supports two placeholder styles — brace (``{NAME}``) and bracket
-(``[NAME]``) — with typed encoders for ICCID (header + EF wire form)
+Supports two placeholder styles -- brace (``{NAME}``) and bracket
+(``[NAME]``) -- with typed encoders for ICCID (header + EF wire form)
 and IMSI (3GPP TS 31.102 §4.2.2).  Batch records can be loaded from
 CSV, JSON, JSONL, or YAML sources.
 """
@@ -148,7 +147,7 @@ def encode_iccid_header_hex(value: str) -> str:
     Accepts 19 or 20 decimal digit strings.  A 19-digit input has an
     ``F`` filler appended; a 19-digit input that already ends in ``F``
     is accepted verbatim.  Returns a 20-nibble uppercase hex string in
-    natural digit order (not BCD-swapped) — suitable for the ``header``
+    natural digit order (not BCD-swapped) -- suitable for the ``header``
     section.  Use ``encode_iccid_ef_hex`` for the EF.ICCID wire form.
     """
     cleaned = _compact_user_value(value)
@@ -181,7 +180,8 @@ def encode_iccid_ef_hex(value: str) -> str:
 def encode_imsi_ef_hex(value: str) -> str:
     """Encode a decimal IMSI string to the EF.IMSI wire bytes (hex string).
 
-    3GPP TS 31.102 §4.2.2 layout: length byte (0x08) + parity nibble
+    3GPP TS 31.102 §4.2.2 layout: a length byte counting the significant
+    bytes that follow + parity nibble
     (0x9 for odd digit count, 0x1 for even) + BCD digits nibble-swapped
     + optional trailing 0xF filler.  Returns a 18-nibble hex string.
     """
@@ -324,6 +324,14 @@ def build_placeholder_template_document(
                 "ef-iccid",
                 ef_placeholder,
             )
+            if ef_count == 0:
+                # An IoT Minimal Profile carries EF.ICCID in PE-IoT.
+                ef_count = _replace_section_fill_file_content(
+                    sections,
+                    "iot",
+                    "ef-iccid",
+                    ef_placeholder,
+                )
             if header_count == 0 and ef_count == 0:
                 raise ValueError(
                     "Could not inject ICCID placeholder: header.iccid and mf.ef-iccid were not found."
@@ -336,7 +344,7 @@ def build_placeholder_template_document(
         if upper_name == "IMSI":
             imsi_placeholder = render_placeholder("IMSI", normalized_style)
             imsi_count = 0
-            for section_name in ("usim", "opt-usim", "isim", "opt-isim"):
+            for section_name in ("usim", "opt-usim", "isim", "opt-isim", "iot"):
                 imsi_count += _replace_section_fill_file_content(
                     sections,
                     section_name,

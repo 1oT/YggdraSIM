@@ -105,13 +105,20 @@ def test_tlv_padded_parser_preserves_legitimate_final_ff_value() -> None:
         TlvParser.parse(encoded)
 
 
-def test_tlv_padded_parser_rejects_non_padding_trailer_and_padding_only() -> None:
+def test_tlv_padded_parser_rejects_a_non_padding_trailer() -> None:
     with pytest.raises(ValueError):
         TlvParser.parse_padded(bytes.fromhex("0401AAFE"))
-    with pytest.raises(ValueError):
-        TlvParser.parse_padded(bytes.fromhex("FFFF"))
     with pytest.raises(TypeError, match="bytes-like"):
         TlvParser.parse_padded(3)  # type: ignore[arg-type]
+
+
+def test_tlv_padded_parser_reads_an_unwritten_record_as_empty() -> None:
+    # TS 102 221 v18.4 §13.4: "Unused bytes in the record are set to 'FF'". A
+    # record a card has never written carries nothing else, which is an empty
+    # record rather than a malformed one; a live UICC returns exactly this for
+    # the unused records of EF_DIR.
+    assert TlvParser.parse_padded(bytes.fromhex("FFFF")) == {}
+    assert TlvParser.parse_padded(b"\xFF" * 36) == {}
 
 
 def test_status_word_zero_lengths_mean_256_and_inputs_are_bytes() -> None:
@@ -283,17 +290,32 @@ def test_puct_exponent_uses_b5_for_sign_and_b6_to_b8_for_magnitude() -> None:
     assert decoded["Exponent"] == -3
 
 
-def test_secret_bearing_decoders_never_echo_key_material() -> None:
-    secret = "00112233445566778899AABBCCDDEEFF"
+def test_key_bearing_decoders_return_the_key_material() -> None:
+    key_material = "00112233445566778899AABBCCDDEEFF"
     decoded_values = [
-        ContentDecoder.decode_sensitive_blob(secret),
-        ContentDecoder.decode_epsnsc(secret),
-        ContentDecoder.decode_5gs_nsc(secret),
-        ContentDecoder.decode_5gs_auth_keys(secret),
+        ContentDecoder.decode_keys(key_material),
+        ContentDecoder.decode_epsnsc(key_material),
+        ContentDecoder.decode_5gs_nsc(key_material),
+        ContentDecoder.decode_5gs_auth_keys(key_material),
     ]
     for decoded in decoded_values:
-        assert secret not in str(decoded).upper()
-        assert "redacted" in str(decoded).lower()
+        assert decoded["Raw"] == key_material
+        assert "redacted" not in str(decoded).lower()
+
+
+def test_keys_decoder_splits_ksi_ck_and_ik() -> None:
+    decoded = ContentDecoder.decode_keys("03" + "11" * 16 + "22" * 16)
+    assert decoded["KSI"] == 3
+    assert decoded["CK"] == "11" * 16
+    assert decoded["IK"] == "22" * 16
+    assert "Warnings" not in decoded
+    short = ContentDecoder.decode_keys("F8")
+    assert short["KSI"] == 0
+    assert short["CK"] == ""
+    assert len(short["Warnings"]) == 2
+    assert ContentDecoder.decode_keys("")["Status"] == "Empty"
+    assert ContentDecoder.decode_keys("FF" * 33)["Status"] == "Empty"
+    assert "Error" in ContentDecoder.decode_keys("ZZ")
 
 
 def test_5gs_loci_requires_and_decodes_the_20_byte_layout() -> None:
@@ -314,9 +336,11 @@ def test_5gs_loci_requires_and_decodes_the_20_byte_layout() -> None:
 
 def test_opl_accepts_spec_defined_wildcard_digits_only_in_opl_records() -> None:
     encoded_plmn = bytes.fromhex("21DD43")
+    # TS 24.008 v19.5 §10.5.1.3: the octet 2 high nibble is MNC digit 3,
+    # the last digit of the MNC.
     assert ContentDecoder.decode_opl(
         (encoded_plmn + bytes.fromhex("0000FFFE01")).hex()
-    )["PLMN"] == "12*-*34"
+    )["PLMN"] == "12*-34*"
     assert ContentDecoder._decode_plmn_bytes(encoded_plmn).startswith("Invalid")
     padded = ContentDecoder.decode_opl(
         (encoded_plmn + bytes.fromhex("0000FFFE01FFFF")).hex()
@@ -389,7 +413,7 @@ def test_5gs_opl_uses_six_octets_for_the_tac_range() -> None:
         "21DD43" + "000000" + "FFFFFE" + "02",
         context_path="ADF.USIM/DF.5GS",
     )
-    assert decoded["PLMN"] == "12*-*34"
+    assert decoded["PLMN"] == "12*-34*"
     assert decoded["TAC Start"] == "000000"
     assert decoded["TAC End"] == "FFFFFE"
     assert decoded["PNN Source"] == "EF.PNN record 2"
@@ -518,11 +542,11 @@ def test_dir_and_pcscf_decoders_handle_padding_and_ip_addresses() -> None:
     }
 
 
-def test_gbanl_redacts_btid_value() -> None:
+def test_gbanl_renders_a_binary_btid_as_hex() -> None:
     decoded = ContentDecoder.decode_gbanl("80036E61668104DEADBEEF")
-    assert decoded["B-TID"] == "<redacted>"
+    assert decoded["B-TID"] == "DEADBEEF"
+    assert decoded["B-TID Encoding"] == "Raw hex"
     assert decoded["B-TID Length"] == 4
-    assert "DEADBEEF" not in str(decoded).upper()
 
 
 def test_fixed_5g_decoders_validate_layout_and_reserved_bits() -> None:

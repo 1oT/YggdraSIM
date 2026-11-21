@@ -28,7 +28,7 @@ a Wireshark/tshark Lua dissector.
   operate
 - reproducing an ES8+ flow inside Wireshark / tshark during
   integration testing
-- offline BPP decode (requires the optional pySim checkout)
+- offline BPP decode (requires pySim, a base dependency)
 
 !!! note "The dissector now lives in Tools/ApduDissector"
     This tool no longer carries a Lua dissector of its own. It hands
@@ -90,9 +90,10 @@ yggdrasim-eum-diag store-keys \
 
 ### `decode-bpp`
 
-Offline decode of a BPP binary through the optional pySim
-checkout. Skips cleanly with a clear message if pySim is not
-available.
+Offline summary of a BPP binary: the BF36 layout (the sections and
+their sizes, with the transaction id) and the number of ES10b
+segments it is sent in. It needs no session keys and leaves the
+protected contents unread; the dissector is the tool for those.
 
 ```bash
 yggdrasim-eum-diag decode-bpp --bpp /path/to/bpp.bin
@@ -121,9 +122,8 @@ The tshark runner sets that variable for you when using `inject-keys`.
 ## Runtime dependencies
 
 - `tshark` on `PATH` for `inject-keys`
-- the shipped `Tools/EumDiag/dissector.lua` (part of the wheel's
+- the shipped `Tools/ApduDissector` Lua dissector (part of the wheel's
   package-data)
-- optional pySim checkout for `decode-bpp`
 
 ## Related references
 

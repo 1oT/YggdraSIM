@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Symbolic decoders / encoders for SecurityDomain install-parameter blobs.
 
 The TCA SAIP profile carries SecurityDomain install parameters as raw
@@ -10,9 +9,9 @@ enum). Here are the lossless bytes ↔ symbolic round-trips the
 GUI / TUI wrap in their named-bit / named-state drop-downs.
 
 Spec references:
-  * Privilege byte layout — GlobalPlatform Card Specification v2.3
+  * Privilege byte layout -- GlobalPlatform Card Specification v2.3
     Table 11-49.
-  * LCS byte values — GP CS §11.1.1 (Application Life Cycle State).
+  * LCS byte values -- GP CS §11.1.1 (Application Life Cycle State).
 """
 
 from __future__ import annotations
@@ -25,7 +24,8 @@ from typing import Any
 # bit of the byte (mask 0x80). The flag tables below pair each privilege
 # / state name with the raw byte mask used to set it.
 
-# Privilege bit catalog (GP CS Table 11-49, all 24 bits over 3 bytes).
+# Privilege bit catalog (GP Card Spec v2.3.1 §11.1.2 Tables 11-7 to 11-9,
+# page 149: all 24 bits over 3 bytes).
 # RFU bits are intentionally exposed by their numeric label so an
 # operator can still flip them when probing card behaviour without
 # having to drop to raw hex.
@@ -41,7 +41,7 @@ _PRIVILEGE_FLAGS: tuple[tuple[int, int, str], ...] = (
     (0, 0x01, "Mandated DAP Verification"),
     (1, 0x80, "Trusted Path"),
     (1, 0x40, "Authorized Management"),
-    (1, 0x20, "Token Verification"),
+    (1, 0x20, "Token Management"),
     (1, 0x10, "Global Delete"),
     (1, 0x08, "Global Lock"),
     (1, 0x04, "Global Registry"),
@@ -51,26 +51,23 @@ _PRIVILEGE_FLAGS: tuple[tuple[int, int, str], ...] = (
     (2, 0x40, "Ciphered Load File Data Block"),
     (2, 0x20, "Contactless Activation"),
     (2, 0x10, "Contactless Self-Activation"),
-    (2, 0x08, "RFU bit 21"),
+    (2, 0x08, "Self-Removal"),
     (2, 0x04, "RFU bit 22"),
     (2, 0x02, "RFU bit 23"),
     (2, 0x01, "RFU bit 24"),
 )
 
 
-# Life-cycle states the GUI dropdown surfaces. Byte values follow
-# GP CS §11.1.1 Application Life Cycle State; SecurityDomain LCS
-# (§11.1.2) shares the same byte encoding. Bytes outside this list
-# (e.g. application-specific 0x83..0xBF blocked variants) round-trip
-# through ``decode_life_cycle`` as ``CUSTOM`` with the raw hex
-# preserved.
+# Life-cycle states of an application or security domain instance, GP Card
+# Spec v2.3.1 §11.1.1 Tables 11-4 and 11-5 (page 147); PERSONALIZED is a
+# security domain's. Other bytes (an application-specific state, LOCKED
+# over another state) round-trip through ``decode_life_cycle`` as
+# ``CUSTOM`` with the raw hex preserved.
 _LIFE_CYCLE_STATES: tuple[tuple[int, str], ...] = (
     (0x03, "INSTALLED"),
     (0x07, "SELECTABLE"),
     (0x0F, "PERSONALIZED"),
     (0x83, "LOCKED"),
-    (0xBF, "LOCKED_CARD_MANAGER"),
-    (0xFF, "TERMINATED"),
 )
 
 
@@ -78,7 +75,7 @@ _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
 
 
 # ----------------------------------------------------------------------
-# Catalog accessors — used by the GUI to populate dropdown choices.
+# Catalog accessors -- used by the GUI to populate dropdown choices.
 # ----------------------------------------------------------------------
 
 

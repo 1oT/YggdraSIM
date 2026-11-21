@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SCP11 local-access configuration: resolves cert, profile, and metadata paths for the local-access session."""
 import os
 from dataclasses import dataclass, field
@@ -62,6 +61,9 @@ class LocalAccessConfig:
     )
 
     READER_INDEX: int = 0
+    # A registered remote reader has no PC/SC ordinal: READER_INDEX carries
+    # REMOTE_READER_INDEX (-1) and this names the binding the channel opens.
+    READER_NAME: str = ""
     SERVER_ADDRESS: str = "local.isdr"
     # If True, use the eUICC default SM-DP+ address from GetEuiccConfiguredData (tag 0x80)
     # as serverAddress in AuthenticateServer so the card accepts the session (avoids
@@ -74,7 +76,7 @@ class LocalAccessConfig:
 
     # If True, use the transaction ID from the BPP file so PrepareDownload and
     # LoadBoundProfilePackage share the same ID (required; else downloadErrorCode=5
-    # invalidTransactionId). If False, use a fresh ID — card returns invalidTransactionId(5).
+    # invalidTransactionId). If False, use a fresh ID -- card returns invalidTransactionId(5).
     USE_BPP_TRANSACTION_ID: bool = True
 
     # If True and the profile file has no transaction ID (segment-only), bind during session:
@@ -104,6 +106,12 @@ class LocalAccessConfig:
     # the local manual A3 chunk builder and overrides the plaintext bytes per protected A3
     # member, capped to pySim's maximum payload size.
     BPP_A3_PLAINTEXT_CHUNK_SIZE: int = 0
+    # SGP.22 v3.1 section 3.1.3 step 8 leaves "enable the profile after
+    # installation?" to the End User. True answers yes: once
+    # LoadBoundProfilePackage reports successResult, LOAD-PROFILE sends
+    # ES10c.EnableProfile for the profile named in the Profile Installation
+    # Result. False leaves the new profile disabled for a later ENABLE-PROFILE.
+    AUTO_ENABLE_AFTER_LOAD: bool = True
 
     CAPABILITIES: dict = field(
         default_factory=lambda: {

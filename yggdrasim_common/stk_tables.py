@@ -1,17 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""ETSI TS 102 223 lookup tables shared by every CAT/STK consumer.
+"""ETSI TS 102 223 v18.3 command-type and event tables for CAT traces.
 
 Both tables map a code the card put on the wire to a name an operator
-reads in a trace, so a wrong entry misreports what the card did. They
-lived in ``tests/test_stk_spec_tables.py`` while the runtime kept a
-twelve-entry subset in ``Tools.HilBridge.live_decode_state``; a trace
-could therefore name a command one way in the terminal view and another
-in the test that was supposed to police it.
+reads in a trace, so a wrong entry misreports what the card did. The
+Wireshark dissector's generated Lua and the context decoder
+(``Tools.Asn1TlvDecode.context``) read them, and
+``tests/test_stk_spec_tables.py`` pins them to the specification.
 
-Keeping one table means the Wireshark dissector's generated Lua, the
-HIL-Bridge decode view, and the conformance test cannot disagree.
+The HIL-Bridge decode view (``Tools.HilBridge.live_decode_state``) still
+keeps its own subset of twelve command types and five events; the
+conformance test checks each of its names against these tables, and a
+code outside the subset renders as hex there.
 """
 
 from __future__ import annotations
@@ -26,7 +27,9 @@ __all__ = [
 ]
 
 
-#: Table 9.4, Type of Command coding.
+#: TS 102 223 v18.3 Table 9.4, Type of Command coding: every defined value.
+#: Not listed: '00', '74' (Void), '75'-'78' (reserved for 3GPP), '81' (Next
+#: Action Indicator only) and 'F0'-'FE' (proprietary).
 PROACTIVE_COMMANDS: dict[int, str] = {
     0x01: "REFRESH",
     0x02: "MORE TIME",
@@ -75,7 +78,9 @@ PROACTIVE_COMMANDS: dict[int, str] = {
     0x79: "LSI COMMAND",
 }
 
-#: Clause 8.25, Event list coding. ``0x1A`` is Void and carries no name.
+#: TS 102 223 v18.3 §8.25 Event list, with the names TS 31.111 v19.4 §8.25
+#: gives the values TS 102 223 reserves for 3GPP. ``0x1A`` is Void and
+#: carries no name; '20'-'22' are reserved for 3GPP future use in both.
 EVENT_LIST: dict[int, str] = {
     0x00: "MT-CALL",
     0x01: "CALL-CONNECTED",
@@ -106,6 +111,8 @@ EVENT_LIST: dict[int, str] = {
     0x1B: "SECURED-PROFILE-CONTAINER",
     0x1C: "POLL-INTERVAL-NEGOTIATION",
     0x1D: "DATA-CONNECTION-STATUS-CHANGE",
+    0x1E: "CAG-CELL-SELECTION",
+    0x1F: "SLICES-STATUS-CHANGE",
 }
 
 #: Clause 8.25 reserves this code with no assigned event.

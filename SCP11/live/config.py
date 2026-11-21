@@ -32,6 +32,7 @@ try:
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_ESIPA_JSON,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
     )
@@ -40,6 +41,7 @@ except ImportError:
         BACKEND_MODE_LOCAL_SGP26,
         BACKEND_MODE_REMOTE_DP,
         EIM_TRANSPORT_MODE_ESIPA,
+        EIM_TRANSPORT_MODE_ESIPA_JSON,
         EIM_TRANSPORT_MODE_REST_RESOURCE,
         TRANSPORT_MODE_PCSC,
     )
@@ -77,6 +79,9 @@ class SGPConfig:
     CAPABILITIES: dict = field(default=None)
 
     READER_INDEX: int = 0
+    # A registered remote reader has no PC/SC ordinal: READER_INDEX carries
+    # REMOTE_READER_INDEX (-1) and this names the binding the channel opens.
+    READER_NAME: str = ""
     TRANSPORT_MODE: str = TRANSPORT_MODE_PCSC
 
     BACKEND_MODE: str = BACKEND_MODE_REMOTE_DP
@@ -88,7 +93,8 @@ class SGPConfig:
     EIM_TIMEOUT_SECONDS: int = 30
     EIM_TRANSPORT_MODE: str = EIM_TRANSPORT_MODE_ESIPA
     EIM_HTTP_PATH: str = "/gsma/rsp2/asn1"
-    EIM_HTTP_PROTOCOL: str = "gsma/rsp/v2.1.0"
+    # SGP.32 v1.3 section 6.1: the highest SGP.32 version the IPA supports.
+    EIM_HTTP_PROTOCOL: str = "gsma/rsp/v1.3.0"
     EIM_REQUEST_VARIANT: int = 0
     EIM_GET_PACKAGE_NOTIFY_STATE_CHANGE: bool = False
     EIM_GET_PACKAGE_STATE_CHANGE_CAUSE: str = ""
@@ -219,15 +225,19 @@ class SGPConfig:
                 f"Unsupported BACKEND_MODE '{self.BACKEND_MODE}'. Supported values: {', '.join(supported_backends)}."
             )
 
-        supported_eim_transports = [EIM_TRANSPORT_MODE_ESIPA, EIM_TRANSPORT_MODE_REST_RESOURCE]
+        supported_eim_transports = [
+            EIM_TRANSPORT_MODE_ESIPA,
+            EIM_TRANSPORT_MODE_ESIPA_JSON,
+            EIM_TRANSPORT_MODE_REST_RESOURCE,
+        ]
         if self.EIM_TRANSPORT_MODE not in supported_eim_transports:
             errors.append(
                 f"Unsupported EIM_TRANSPORT_MODE '{self.EIM_TRANSPORT_MODE}'. "
                 f"Supported values: {', '.join(supported_eim_transports)}."
             )
 
-        if self.READER_INDEX < 0:
-            errors.append("READER_INDEX must be zero or greater.")
+        if self.READER_INDEX < 0 and len(str(self.READER_NAME or "").strip()) == 0:
+            errors.append("READER_INDEX must be zero or greater unless READER_NAME names a remote reader.")
 
         es9_url = str(self.ES9_BASE_URL).strip()
         smdp_address = str(self.RSP_SERVER_URL).strip()

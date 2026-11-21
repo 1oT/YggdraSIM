@@ -6,7 +6,7 @@
 Upstream pySim installs its SAIP library but does not install the
 ``contrib/saip-tool.py`` script.  Frozen builds therefore cannot safely launch
 that script through ``sys.executable`` or discover it in the host filesystem.
-This module implements the ProfilePackage command contract directly over the
+The adapter implements the ProfilePackage command contract directly over the
 installed ``pySim.esim.saip`` API.
 
 It is intentionally a normal callable, not a generic script runner.  The
@@ -83,6 +83,12 @@ def _hex(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+def _key_field_hex(value: Any) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:02X}"
+    return _hex(value)
 
 
 def _safe_component(value: object, fallback: str) -> str:
@@ -266,13 +272,19 @@ def _info(pes: Any, options: argparse.Namespace) -> int:
             f"{_hex(instance.get('instanceAID'))}"
         )
         for key in list(getattr(security_domain, "keys", []) or []):
+            components = list(getattr(key, "key_components", []) or [])
             print(
                 "    Key "
                 f"KVN=0x{int(getattr(key, 'key_version_number', 0)):02X}, "
                 f"KID=0x{int(getattr(key, 'key_identifier', 0)):02X}, "
-                f"components={len(getattr(key, 'key_components', []) or [])} "
-                "(data redacted)"
+                f"components={len(components)}"
             )
+            for component in components:
+                print(
+                    f"      type={_key_field_hex(getattr(component, 'key_type', None))} "
+                    f"data={_hex(getattr(component, 'key_data', None))} "
+                    f"macLength={getattr(component, 'mac_length', '')}"
+                )
 
     rfms = list(pes.pe_by_type.get("rfm", []))
     print(f"RFM instances: {len(rfms)}")

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """WebSocket route that bridges xterm.js to a PTY child (Milestone B-2).
 
 The client connects to ``/api/terminal/<module>`` with the bearer in the
@@ -12,7 +11,7 @@ The client connects to ``/api/terminal/<module>`` with the bearer in the
   before close.
 * Client -> server: text frames carry JSON control messages
   (``{"type": "resize", "rows": 40, "cols": 140}``) or ``{"type":
-  "stdin", "data": "…"}``. Binary frames are interpreted as raw stdin
+  "stdin", "data": "..."}``. Binary frames are interpreted as raw stdin
   bytes so paste workflows work without JSON wrapping.
 
 The WebSocket bypass on the main ASGI auth middleware means we have to
@@ -58,8 +57,8 @@ def _expected_token(websocket: WebSocket) -> str:
     if isinstance(raw_token, str) and raw_token:
         return raw_token
     if isinstance(config, dict):
-        # Shouldn't happen in production — the redacted form never
-        # carries the raw token — but keeps the types straight.
+        # Shouldn't happen in production -- the redacted form never
+        # carries the raw token -- but keeps the types straight.
         return str(config.get("token_hint", ""))
     return ""
 

@@ -4,7 +4,7 @@
 """Regression tests for the APDU recorder + GUI live stream.
 
 The user reported that the bottom-dock APDU panel only showed
-synthetic action summaries — wire-level APDUs from SCP03 / pyscard /
+synthetic action summaries -- wire-level APDUs from SCP03 / pyscard /
 the relay never made it into the dock. The fix funnels every
 ``connection.transmit`` call through
 :mod:`yggdrasim_common.apdu_recorder`, exposes the live stream over a
@@ -96,7 +96,7 @@ class ApduRecorderUnitTests(unittest.TestCase):
     def test_subscriber_exception_does_not_block_recording(self) -> None:
         # A misbehaving sync subscriber must NEVER prevent the recorder
         # from delivering events to other subscribers or appending to
-        # the buffer — that's the whole point of the try/except wrap.
+        # the buffer -- that's the whole point of the try/except wrap.
         good_seen: list[str] = []
         self.recorder.subscribe(lambda ex: (_ for _ in ()).throw(RuntimeError("boom")))
         self.recorder.subscribe(lambda ex: good_seen.append(ex.apdu_hex))
@@ -120,7 +120,7 @@ class ApduRecorderUnitTests(unittest.TestCase):
             detach = self.recorder.attach_queue(queue, loop=loop)
             try:
                 # Recording from the same loop thread still routes
-                # through ``call_soon_threadsafe`` — exercise it.
+                # through ``call_soon_threadsafe`` -- exercise it.
                 self.recorder.record(self._make_exchange(apdu="DEAD"))
                 # Spin the loop once so the call_soon callback fires.
                 await asyncio.sleep(0)
@@ -254,7 +254,7 @@ class WrapConnectionTests(unittest.TestCase):
 
     def test_wrap_records_err_on_raised_transmit(self) -> None:
         # Connection drop must still produce a recorder entry so the
-        # GUI dock visibly shows something happened — otherwise the
+        # GUI dock visibly shows something happened -- otherwise the
         # operator just sees a silent UI error and an empty APDU tab.
         wrapped = self.mod.wrap_connection(
             _RaisingConnection(RuntimeError("link down")),
@@ -313,7 +313,7 @@ class CardBackendIntegrationTests(unittest.TestCase):
     def test_pcsc_branch_uses_reader_name_as_source(self) -> None:
         backend = importlib.import_module(_BACKEND_MOD)
 
-        # Hand-rolled real classes — we deliberately avoid MagicMock
+        # Hand-rolled real classes -- we deliberately avoid MagicMock
         # here because its auto-attribute behaviour makes
         # ``getattr(conn, "_yggdrasim_apdu_traced", False)`` evaluate
         # to a truthy mock object, which would let ``wrap_connection``
@@ -354,7 +354,7 @@ class CardBackendIntegrationTests(unittest.TestCase):
         conn.transmit([0x00, 0xC0])
         snap = recorder.snapshot()
         self.assertEqual(len(snap), 1)
-        # Source must be the reader name — gives operators per-reader
+        # Source must be the reader name -- gives operators per-reader
         # grouping in the dock.
         self.assertEqual(snap[0].source, "ACS APG8201 00 00")
 

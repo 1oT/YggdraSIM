@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Fourth-pass SAIP server action wiring (registry, ids, enums, coverage).
 
 Complements earlier GUI audits with ``yggdrasim_common/gui_server/actions/saip.py``
@@ -77,7 +76,7 @@ def action_spec_symbols_match_registry_register(saip_py: str | None = None) -> l
 
 
 def duplicate_saip_action_ids(saip_py: str | None = None) -> list[str]:
-    """No two ``ActionSpec`` blocks may share the same ``id="saip.…"``."""
+    """No two ``ActionSpec`` blocks may share the same ``id="saip...."``."""
     text = _saip_py_text(saip_py)
     ids = re.findall(r'id="(saip\.[a-z0-9_]+)"', text)
     counts = Counter(ids)

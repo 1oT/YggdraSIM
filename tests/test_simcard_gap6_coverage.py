@@ -303,7 +303,7 @@ class ProvideLocalInformationTests(unittest.TestCase):
 
     def test_location_info_response_latches_on_terminal_response(self) -> None:
         cmd = self._activate_provide_local_info(0x00)
-        loc_info = bytes.fromhex("62F2200000FFFE0001")
+        loc_info = bytes.fromhex("00F1200000FFFE0001")
         tr = self._build_terminal_response(
             command_number=cmd,
             qualifier=0x00,
@@ -360,11 +360,14 @@ class ProvideLocalInformationTests(unittest.TestCase):
         self.assertEqual(self.state.toolkit.imeisv, imeisv)
 
     def test_battery_state_response_latches(self) -> None:
-        cmd = self._activate_provide_local_info(0x0D)
+        # TS 102 223 v18.3 §8.6: the Charge State of the Battery is
+        # command qualifier '0A'; TS 101 220 v19 Table 7.23 gives the
+        # Battery state tag as '63' / 'E3'.
+        cmd = self._activate_provide_local_info(0x0A)
         tr = self._build_terminal_response(
             command_number=cmd,
-            qualifier=0x0D,
-            extra=tlv("DC", bytes((0x03,))),
+            qualifier=0x0A,
+            extra=tlv("E3", bytes((0x03,))),
         )
         self.toolkit.handle_terminal_response(tr)
         self.assertEqual(self.state.toolkit.battery_state, 0x03)

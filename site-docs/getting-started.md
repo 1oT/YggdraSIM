@@ -13,9 +13,10 @@ Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 - optional Wireshark, `osmo-remsim-client-st2`, and SIMtrace2 for HIL work
 - optional `Tools.CardBridge` + SSH tunnel when the card reader is on a
   different host than the YggdraSIM process
-- optional on-disk `pysim/` checkout when you need SAIP ASN.1 compile or
-  the SCP11 local / eIM-local flows (see the *Optional pySim checkout*
-  section below)
+- optional on-disk `pysim/` checkout, only when you work on pySim itself;
+  the SAIP ASN.1 compile and the SCP11 local / eIM-local flows use the
+  installed pySim (see *Developer checkout (advanced)* under *pySim
+  provisioning* below)
 
 ## Install the runtime
 
@@ -133,10 +134,12 @@ yggdrasim-suci-tool
 
 ## pySim provisioning
 
-YggdraSIM treats [`pySim`](https://github.com/osmocom/pysim) as an
-**upstream** dependency rather than a vendored copy. The canonical
-distribution channel is the `[saip]` extra, which installs upstream
-pySim directly from its GitHub mirror:
+YggdraSIM treats [`pySim`](https://github.com/osmocom/pysim) as a
+dependency rather than a vendored copy, pinned to
+[`hampushellsberg-dev/pysim`](https://github.com/hampushellsberg-dev/pysim):
+osmocom pySim master with the fixes in `upstream_patches/osmocom-pysim-*`
+on top, one commit each, until osmocom merges them. The install pulls that
+tree directly from GitHub:
 
 ```bash
 python -m pip install -e '.[saip]'
@@ -152,11 +155,12 @@ do not touch SAIP; `yggdrasim --doctor` reports *pySim: WARN*
 
 ### Developer checkout (advanced)
 
-If you want to iterate against an unreleased upstream branch, drop a
-checkout at `<repo>/pysim`:
+If you want to work on pySim itself, drop a checkout of the pinned fork
+at `<repo>/pysim`; it has to carry the same fixes as the pin, since the
+SAIP tools refuse a pySim without them:
 
 ```bash
-git clone https://github.com/osmocom/pysim.git pysim
+git clone https://github.com/hampushellsberg-dev/pysim.git pysim
 ```
 
 The `pysim/` directory is listed in `.gitignore` and is never
@@ -168,10 +172,14 @@ vendored.
 
 ## Read next
 
+- Read the [User Manual](sources/guides/USER_MANUAL.md) for the modules,
+  the concepts the GUI and the CLI share and work on a real card, then its
+  [GUI](sources/guides/USER_MANUAL_GUI.md) and
+  [CLI](sources/guides/USER_MANUAL_CLI.md) chapters.
 - Use [Operator Surfaces](operator-surfaces.md) to choose the right module.
 - Use [Universal GUI Command Center](subsystems/gui-command-center.md) when
   you want a browser/desktop workbench with live APDU streaming.
-- Use [Remote APDU Streaming](how-to/remote-apdu-streaming.md) when the
+- Use [Card Bridge over SSH](how-to/remote-apdu-streaming.md) when the
   reader or HIL rig is on another host.
 - Use [Install RemSIM / APDU Streaming](how-to/install-remsim-apdu-streaming.md)
   before bringing up a SIMtrace2/RemSIM lab host.

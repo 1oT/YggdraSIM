@@ -180,7 +180,7 @@ class ActiveRenderingTests(unittest.TestCase):
 
     def test_determinate_bar_uses_hash_filled_and_space_empty_cells(self) -> None:
         """The loading bar motif is ``#####`` for completed cells and
-        raw spaces for the remainder — dashes and dots must not leak
+        raw spaces for the remainder -- dashes and dots must not leak
         into the rendered footer regardless of completion percentage.
         """
 
@@ -197,7 +197,7 @@ class ActiveRenderingTests(unittest.TestCase):
             ) as bar:
                 bar.advance("phase-1", count=3)
         output_text = stream.getvalue()
-        # A 3/10 completion must render three filled hash cells —
+        # A 3/10 completion must render three filled hash cells --
         # the rendered footer embeds the bar inside square brackets
         # so we can assert on the opening segment directly.
         self.assertIn("[###", output_text)

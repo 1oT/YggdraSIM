@@ -49,6 +49,30 @@ Interactive wizards must be tag-granular. Each nested TLV, ASN.1 field, or
 distinct conceptual step gets its own wizard stage. This keeps the operator
 path navigable and the wizard maintainable as the spec evolves.
 
+## Shell command lines
+
+- Every interactive shell hands each command line, typed or from `--cmd`
+  / `--stdin`, to `yggdrasim_common.command_log.run_with_command_log`
+  before it parses the line, so `--log <file>` works on every command.
+  Pass a `debug` context that switches the shell's own debug output on
+  (raw APDU logging, a debug mode) and back; the helper turns the global
+  debug flag on itself.
+- A path that reaches the same handlers without a terminal, such as a GUI
+  action, refuses `--log` (`command_log.log_flag_present`): a file path in
+  a web request would be written on the server host.
+- Swap `sys.stdout` / `sys.stderr` around one command, never across a
+  prompt, so every swap stays nested and readline keeps the terminal.
+- Mark each line by what it reports: `[+]` a result, `[*]` a note, `[-]` a
+  failed step, `[!]` a refusal or an error, and `[!] Warning:` a caveat the
+  command carries on past. A batch loop runs each command under
+  `yggdrasim_common.batch_outcome.BatchOutcome.command`, which counts a
+  `[-]` line or a `[!]` line that is not a warning as a failure, and the
+  entry point exits 1 when `outcome.ok` is false. An empty answer, a state
+  that needs no action (no session to close) or a step the command recovers
+  from is `[*]` or a warning, never a bare `[!]`, or a batch that did its job
+  exits 1. A command that runs until it is stopped passes
+  `rule=RULE_STREAM`; one with a verdict of its own passes `verdict=`.
+
 ## APDU and crypto handling
 
 - ISO/IEC 7816-4 terminology is preferred: CLA, INS, P1, P2, Lc, Data, Le,
@@ -57,6 +81,54 @@ path navigable and the wizard maintainable as the spec evolves.
   `INSTALL FOR LOAD`, `INSTALL FOR INSTALL`, `PUT KEY`.
 - SCP11 payload shaping must respect the shared `SCP11/shared/` helpers
   instead of re-implementing the wheel per subsystem.
+
+## Reuse before building
+
+- Before writing a new decoder or encoder, an EF or ASN.1 definition, a
+  protocol stack, or a card, reader or network tool, check the osmocom
+  projects for one that exists: pySim first, then libosmocore and the
+  other projects on gitea.osmocom.org (simtrace2, osmo-remsim, osmo-epdg,
+  the osmo-ttcn3-hacks test suites).
+- Prefer importing it, then porting it, then using it as the reference
+  behaviour. Check its licence against GPL-3.0-or-later before copying
+  code.
+- When nothing fits, the change says what was checked and why it does
+  not fit.
+- A defect or gap found in a reused project is fixed twice: a patch with
+  its evidence under `upstream_patches/<name>/` (see the
+  `upstream_patches/osmocom-*` folders), and a compensation in this tree
+  that verifies its own effect.
+- A patch for a reused project is tested twice before it is sent: in the
+  upstream tree on its own (its test suite as its CI runs it, and the
+  patch's repro, at every commit of a series; a CI job that needs
+  hardware is read for what the patch changes in it) and joined with this tree
+  (the patch's tip installed, the compensations it replaces removed, and
+  every test here that reaches the project). A failure in either run sends
+  the patch back for rework, and both runs are repeated until both pass.
+
+## Specification tables
+
+- When a specification defines an enumeration or a structure, read the
+  whole table or clause and implement from that list, not from the rows
+  the change needs. Examples: a code table, a tag list, a result or cause
+  list, an EF list, service-table bits, the fields and conditions of a
+  command. A row that is not implemented is named in an explicit
+  not-supported set beside the table, never left to fall through to
+  "unknown".
+- A test enumerates the rows, with the clause and version they came from.
+  Every row is either implemented or in the not-supported set.
+- A code-to-name table that more than one surface reads lives in one
+  shared module: `yggdrasim_common/stk_tables.py`, `apdu_tables.py`,
+  `tls_tables.py`, `x509_tables.py`, `secured_packet.py` or `service_table_names.py`. The dissector's
+  `tables.lua` is generated from them. A surface that shows a subset
+  filters the shared table rather than copying it.
+- TLV, BER length and BCD coding come from `osmocom.tlv`,
+  `osmocom.utils` and `pySim.utils`. For CAT data objects, check
+  `pySim.cat` first (*Reuse before building*).
+- A wrong or missing row found in one copy of a table is looked for in
+  every copy.
+- The change states its coverage, such as `TS 102 223 v18.3 Table 9.4:
+  45/45 command types`, or names the rows it leaves out and why.
 
 ## Python conventions
 
@@ -70,7 +142,7 @@ path navigable and the wizard maintainable as the spec evolves.
   covers operator-visible runtime failures, `ValueError` covers malformed
   user or card data, `TypeError` covers contract violations, and dedicated
   `OSError` subclasses cover transport issues. Avoid `raise Exception(...)`
-  entirely — the pre-release security sweep removed every
+  entirely -- the pre-release security sweep removed every
   remaining occurrence from the production tree, so new occurrences show
   up clearly in code review.
 - `except Exception:` catches are acceptable only in display / TLV-fallback
@@ -117,6 +189,24 @@ When you change a decoder, call it with `b""`, a single byte, a truncated
 TLV header, a length that over-claims its body (`b"\x62\xc8"`), a
 long-form length with no body, and an odd-nibble BCD run. Anything other
 than a clean rejection is a defect.
+
+## GUI frontend
+
+- `gui_frontend/src/` is the source; `yggdrasim_common/gui_server/static/`
+  is build output. Rebuild with `./scripts/build_gui_frontend.sh` after
+  every source change; `tests/test_gui_source_manifests.py` requires the
+  served bundle to be byte-identical to a fresh build.
+- One design system, 22 themes. Colour reaches a rule through a theme
+  token or not at all; the per-file literal budget in
+  `tests/test_gui_design_system_consistency.py` only shrinks. New floating
+  surfaces (`position: fixed`) are app chrome or transient overlays;
+  action output renders inline.
+- The page CSP forbids inline scripts, inline styles, inline handlers and
+  `eval`. Build DOM with `createElement` / `textContent`.
+- Every operator-visible label is anchored in a specification or marked
+  YggdraSIM-coined in `guides/NAMING_CONVENTIONS.md`.
+- The full contract, the CSS layer map and the theme registration steps
+  are in `gui_frontend/README.md`.
 
 ## Git and commits
 

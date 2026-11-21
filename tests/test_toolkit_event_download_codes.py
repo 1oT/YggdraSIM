@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Event-download dispatch against the ETSI TS 102 223 §8.25 event list.
 
 Each case sends one ENVELOPE (EVENT DOWNLOAD) and asserts that the code

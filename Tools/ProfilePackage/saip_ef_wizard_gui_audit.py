@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Cross-checks simulator ``_FILE_SPECS`` against Command Center EF wizards.
 
 ``yggdrasim_common/gui_server/static/app.js`` registers dedicated transparent
@@ -94,8 +93,6 @@ _EF_WIZARD_ORPHAN_TRANSPARENT_KEYS: frozenset[str] = frozenset(
         "ef-supi-nai",
         "ef-5gs3gppguti",
         "ef-5gsn3gppguti",
-        "ef-gba",
-        "ef-pscoi",
         "ef-bst",
         "ef-plmnsel",
         "ef-pst",
@@ -133,8 +130,6 @@ def record_wizard_keys_subset_of_specs_or_orphans(app_js: str | None = None) -> 
         "ef-ext3",
         "ef-ext4",
         "ef-ext5",
-        "ef-oplmnwlan",
-        "ef-uplmnwlan",
     })
     bad: list[str] = []
     for key in sorted(parse_saip_record_wizard_ef_keys(text)):
@@ -253,12 +248,12 @@ def ef_decoded_edit_coverage_gaps(app_js: str | None = None) -> list[str]:
     A key is "covered" when at least one of the following holds:
 
     * the dispatcher routes it (``_decode_known_ef_payload`` returns a
-      populated decoded dict — drives the per-record / per-EF generic
+      populated decoded dict -- drives the per-record / per-EF generic
       decoded-edit panel);
     * a dedicated transparent wizard is registered in ``_SAIP_WIZARDS``;
     * a dedicated record wizard is registered in ``_SAIP_RECORD_WIZARDS``;
     * ``_decode_ef_*`` opaque-passthrough catalog has the key (the panel
-      still mounts on the ``decoded`` payload — opaque-annotated, but
+      still mounts on the ``decoded`` payload -- opaque-annotated, but
       JSON-shaped).
 
     Returns the sorted list of orphan keys; expected to be empty.
@@ -378,11 +373,11 @@ def pe_decoded_edit_coverage_gaps(app_js: str | None = None) -> list[str]:
         if lo in registry or lo.replace("-", "") in registry_nodash:
             continue
         if lo in _PE_DECODED_PANEL_OPTOUTS:
-            # Opt-out PE without a typed editor — coverage gap.
+            # Opt-out PE without a typed editor -- coverage gap.
             out.append(pe)
             continue
         # Any other PE rides the default ``supportsDecodedPanel = true``
-        # path — covered by the per-PE generic decoded panel.
+        # path -- covered by the per-PE generic decoded panel.
     return out
 
 
@@ -435,7 +430,7 @@ def main() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Typed-wizard backlog — informational only.
+# Typed-wizard backlog -- informational only.
 #
 # Typed-wizard upgrades land in waves rather than a single big-bang.
 # ``typed_wizard_backlog_by_wave()`` emits the current list of ef-keys

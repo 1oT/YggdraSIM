@@ -10,8 +10,8 @@ pySim's typed walker (``pysim_gfm_walk``). These tests pin:
   * DF / ADF / EF distinctions follow ``File.from_fileDescriptor``.
   * Body bytes match the result of ``File.file_content_from_tuples``
     so ``fillFileOffset`` + ``fillFileContent`` interleavings stay
-    correct (TS 102 222 §6.3.2.2.2 / TCA Profile Interoperability
-    §3.5.4 erased-flash semantics).
+    correct, with the gaps an offset skips left erased rather than
+    zeroed (TCA Profile Interoperability §8.3.5 / §9.10).
   * The PRIVATE 7 ``linkPath`` extension is preserved.
   * The ``_consume_generic_file_management`` materialiser produces
     the same node tree shape as the legacy walker.
@@ -90,10 +90,11 @@ class GfmWalkBasicTests(unittest.TestCase):
         self.assertEqual(ef.body, b"\x08\x29\x43\x60\x09\x32\x76\x54\xf3")
         self.assertEqual(ef.lcsi, 0x05)
 
-    def test_fill_file_offset_padded_with_zeroes_then_content(self) -> None:
-        # SAIP §5.1: fillFileOffset advances the cursor; gaps before
-        # the first fillFileContent are left as the BytesIO default
-        # (0x00). The simulator's runtime padding kicks in afterwards.
+    def test_fill_file_offset_leaves_the_gap_erased_then_content(self) -> None:
+        # TCA SAIP §8.3.5: fillFileOffset advances the cursor and writes
+        # nothing, so a gap before the first fillFileContent keeps the
+        # file's creation content -- erased, since this createFCP carries
+        # no fill/repeat pattern (§9.10).
         decoded = {
             "gfm-header": {"identification": 1, "mandated": None},
             "fileManagementCMD": [
@@ -109,8 +110,10 @@ class GfmWalkBasicTests(unittest.TestCase):
         entries = pysim_gfm_walk(decoded)
 
         self.assertEqual(len(entries), 1)
-        # pySim's BytesIO seeks past 4 bytes (zero-pad) before writing.
-        self.assertEqual(entries[0].body, b"\x00\x00\x00\x00\xab\xcd\xef")
+        # pySim's BytesIO grows the skipped region with NUL; the
+        # compensation in Tools/ProfilePackage/saip_pysim_compat.py
+        # restores the erased state the eUICC actually reports.
+        self.assertEqual(entries[0].body, b"\xff\xff\xff\xff\xab\xcd\xef")
         self.assertEqual(entries[0].fid, 0x2FE2)
 
     def test_df_then_ef_yields_two_entries_in_order(self) -> None:

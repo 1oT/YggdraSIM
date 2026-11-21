@@ -8,7 +8,7 @@ command and the diff TUI. It needs to accept exactly the same inputs
 the inspector accepts via ``OPEN`` / ``USE``: transcode JSON, simulator
 manifest JSON, raw DER, and hex-dump ``*.txt`` / ``*.hex`` / ``*.varder``
 profiles.
-The hex branch is the one that motivated this test module — the
+The hex branch is the one that motivated this test module -- the
 shell previously reported ``"not recognised as transcode JSON ... and
 DER decode failed"`` for hex-text inputs because the loader fed ASCII
 hex directly into ``ProfileElementSequence.from_der``.

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
@@ -14,6 +15,28 @@ from urllib.parse import quote, urlsplit
 
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_ERROR_MESSAGE_CHARACTERS = 4096
+
+
+def _unreachable_message(reason: Any) -> str:
+    """Describe a failed connection in terms of what to do about it.
+
+    A name that will not resolve and a host that refuses the connection
+    read alike in a one-line error and call for opposite responses. A rig
+    is usually named by the private network it sits on, so a resolution
+    failure is nearly always that network being down rather than the rig.
+    """
+    if isinstance(reason, socket.gaierror):
+        return (
+            "agent hostname did not resolve. A rig is normally named by the "
+            "private network it sits on, so check that network is up, or "
+            f"record this host by IP address instead ({reason})"
+        )
+    if isinstance(reason, ConnectionRefusedError):
+        return (
+            "agent refused the connection: the host answers but nothing is "
+            f"listening on that port ({reason})"
+        )
+    return f"agent unreachable: {reason}"
 
 
 class RemoteLabClientError(RuntimeError):
@@ -88,7 +111,7 @@ def _json_request(
             payload=payload_obj,
         ) from exc
     except urllib.error.URLError as exc:
-        raise RemoteLabClientError(f"agent unreachable: {exc.reason}") from exc
+        raise RemoteLabClientError(_unreachable_message(exc.reason)) from exc
     except TimeoutError as exc:
         raise RemoteLabClientError("agent request timed out") from exc
     except (OSError, ValueError) as exc:
@@ -156,17 +179,27 @@ class RemoteLabAgentClient:
         user: str = "",
         client_id: str = "",
         requested_ttl_seconds: int = 3600,
+        card_offer: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Reserve a rig.
+
+        ``card_offer`` is required by a rig whose kind is ``modem``: that
+        rig holds no card, so the caller supplies one as ``{"url": ...,
+        "token": ...}`` pointing at a Card Bridge the rig can reach.
+        """
         encoded_rig_id = quote(str(rig_id or "").strip(), safe="")
+        payload: dict[str, Any] = {
+            "user": user,
+            "client_id": client_id,
+            "requested_ttl_seconds": int(requested_ttl_seconds),
+        }
+        if card_offer is not None:
+            payload["card_offer"] = dict(card_offer)
         return _json_request(
             f"{self.base_url}/api/v1/rigs/{encoded_rig_id}/sessions",
             method="POST",
             token=self.token,
-            payload={
-                "user": user,
-                "client_id": client_id,
-                "requested_ttl_seconds": int(requested_ttl_seconds),
-            },
+            payload=payload,
             timeout_seconds=self.timeout_seconds,
         )
 

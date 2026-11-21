@@ -11,7 +11,8 @@ Round-13 closes the following:
   Extended Logical Channels, Additional Interfaces, eUICC
   Capabilities, E-UTRAN secure-channel hint).
 * 3GPP TS 31.103 §4.2.7 ISIM ``EF.IST`` (FID 6F07) seeded with
-  the four core IMS service bits flagged.
+  P-CSCF address and GBA; HTTP Digest and GBA-based Local Key
+  Establishment stay clear.
 * 3GPP TS 31.103 §4.2.8 ISIM ``EF.PCSCF`` (FID 6F09) seeded with
   a deterministic ``pcscf.<realm>`` FQDN.
 * ETSI TS 102 223 §6.4.2 ``MORE TIME`` and §6.4.3 ``POLL
@@ -141,8 +142,10 @@ class IsimServiceTableTests(_EngineHarness):
         self.assertIsNotNone(ist)
         self.assertEqual(ist.structure, "transparent")
         self.assertGreaterEqual(len(ist.data), 1)
-        # All eight bits of byte 0 advertised by the simulator.
-        self.assertEqual(ist.data[0] & 0x0F, 0x0F)
+        # Services 1 (P-CSCF address) and 2 (GBA) advertised; 3 (HTTP
+        # Digest) and 4 (GBA-based Local Key Establishment) clear, since
+        # AUTHENTICATE implements neither context.
+        self.assertEqual(ist.data[0] & 0x0F, 0x03)
 
 
 class IsimPcscfTests(_EngineHarness):

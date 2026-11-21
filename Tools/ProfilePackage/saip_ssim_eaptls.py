@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""PE-SSIM-EAPTLSParameters — X.509 certificate / chain / key import.
+"""PE-SSIM-EAPTLSParameters -- X.509 certificate / chain / key import.
 
 3GPP TS 33.402 §6 / RFC 5216 (EAP-TLS) require a SSIM applet that
 holds the device certificate, the corresponding RSA / ECC private
@@ -196,7 +195,7 @@ def keys_match(cert_pem_or_der: bytes, key_pem_or_der: bytes) -> dict[str, Any]:
     """Verify the public key in ``cert_pem_or_der`` matches the private key.
 
     When ``cryptography`` is unavailable the comparison degrades to
-    "unknown" — the caller can still import the pair, just without
+    "unknown" -- the caller can still import the pair, just without
     the integrity assertion. SHA-256 is computed over the DER-encoded
     SubjectPublicKeyInfo and surfaced so the GUI can flag drift even
     in the no-crypto path.

@@ -144,7 +144,7 @@ jobs:
           Copy-Item -LiteralPath '.\dist\yggdrasim-gui-clean.exe' `
             -Destination (Join-Path $bundle 'yggdrasim-gui-clean.exe')
           @"
-          UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
           Commit: $env:GITHUB_SHA
           Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
           Platform: Windows x86_64
@@ -191,7 +191,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $notes = Join-Path $env:RUNNER_TEMP 'windows-draft-notes.md'
           @"
-          # INCOMPLETE — WINDOWS UNSIGNED TEST BUILD — DO NOT USE
+          # INCOMPLETE -- WINDOWS UNSIGNED TEST BUILD -- DO NOT USE
 
           Exact revision: ``$env:GITHUB_SHA``
 
@@ -208,7 +208,7 @@ jobs:
             --prerelease `
             --latest=false `
             --target $env:GITHUB_SHA `
-            --title "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --title "INCOMPLETE -- WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
             --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'Could not create draft Release.' }
 
@@ -295,7 +295,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $notes = Join-Path $env:RUNNER_TEMP 'windows-complete-notes.md'
           @"
-          # COMPLETE — WINDOWS UNSIGNED TEST BUILD — NOT FOR PRODUCTION
+          # COMPLETE -- WINDOWS UNSIGNED TEST BUILD -- NOT FOR PRODUCTION
 
           The Windows ZIP and its SHA-256 sidecar were uploaded, redownloaded,
           checksum-verified, extracted, and both executables passed ``--version``
@@ -310,7 +310,7 @@ jobs:
           Microsoft Defender SmartScreen. This draft is not a production release.
           "@ | Set-Content -Encoding utf8 -LiteralPath $notes
           & gh release edit $env:TEST_TAG `
-            --title "COMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --title "COMPLETE -- WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
             --notes-file $notes
           if ($LASTEXITCODE -ne 0) { throw 'Could not finalize draft Release.' }
           & gh release view $env:TEST_TAG --json url `
@@ -329,14 +329,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 0 }
           $notes = Join-Path $env:RUNNER_TEMP 'windows-incomplete-notes.md'
           @"
-          # INCOMPLETE — WINDOWS UNSIGNED TEST BUILD — DO NOT USE
+          # INCOMPLETE -- WINDOWS UNSIGNED TEST BUILD -- DO NOT USE
 
           A build, upload, or verification step failed for exact revision
           ``$env:GITHUB_SHA``. Inspect:
           $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
           "@ | Set-Content -Encoding utf8 -LiteralPath $notes
           & gh release edit $env:TEST_TAG `
-            --title "INCOMPLETE — WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
+            --title "INCOMPLETE -- WINDOWS UNSIGNED TEST BUILD $env:TEST_TAG" `
             --notes-file $notes
           # Best effort: the run has already failed, and a cleanup blip must
           # not mask the real failure with a second red step.

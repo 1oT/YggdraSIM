@@ -35,12 +35,13 @@
 }
 
 .view h1 {
-  font-size: 26px;
+  font-size: var(--title-size);
   line-height: 1.2;
   margin: 0 0 8px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  background: var(--gradient-brand);
+  font-family: var(--font-head);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-track);
+  background: var(--brand-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -77,7 +78,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 18px 20px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
   transition: transform var(--transition-mid),
     box-shadow var(--transition-mid),
     border-color var(--transition-fast);
@@ -89,14 +90,14 @@
   position: absolute;
   inset: 0 0 auto 0;
   height: 2px;
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   opacity: 0;
   transition: opacity var(--transition-mid);
   pointer-events: none;
 }
 
 .card:hover {
-  box-shadow: var(--shadow-card-hover);
+  box-shadow: var(--surface-shadow-hover);
   border-color: var(--border-strong);
 }
 
@@ -140,7 +141,7 @@ dd {
   margin: 8px 0 4px;
   line-height: 1;
   letter-spacing: -0.02em;
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -162,8 +163,8 @@ dd {
   background: var(--bg-elev-2);
   border: 1px solid var(--border-strong);
   color: var(--fg);
-  padding: 7px 14px;
-  min-height: 34px;
+  padding: var(--btn-pad);
+  min-height: var(--btn-h);
   border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 12px;
@@ -178,7 +179,7 @@ dd {
 .btn:hover {
   border-color: var(--accent);
   background: var(--bg-hover);
-  transform: translateY(-1px);
+  transform: translateY(var(--hover-lift));
 }
 
 .btn:active {
@@ -197,24 +198,68 @@ dd {
 }
 
 .btn-primary {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
   font-weight: 600;
-  box-shadow: 0 4px 14px -4px var(--accent-glow);
+  box-shadow: 0 4px 14px -4px var(--glow);
 }
 
 .btn-primary:hover {
-  background: var(--gradient-accent);
+  background: var(--accent-fill);
   border-color: transparent;
   color: var(--accent-fg);
-  box-shadow: 0 8px 22px -6px var(--accent-glow);
+  box-shadow: 0 8px 22px -6px var(--glow);
   filter: brightness(1.08);
 }
 
 .btn-primary:disabled {
   box-shadow: none;
   filter: grayscale(0.3);
+}
+
+/* The four modifiers below are the only sanctioned variants of `.btn`.
+ * Each was previously defined in one view's scope (or not at all), so
+ * the same class rendered as a plain button elsewhere. */
+.btn-small {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.btn-secondary {
+  background: var(--bg-elev);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-dim);
+}
+
+.btn-ghost:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-color: var(--border);
+  transform: none;
+}
+
+.btn-danger {
+  background: var(--fail-soft);
+  border-color: color-mix(in oklab, var(--fail) 42%, var(--border));
+  color: var(--fail);
+}
+
+.btn-danger:hover {
+  background: color-mix(in oklab, var(--fail) 24%, var(--bg-elev));
+  border-color: var(--fail);
+  color: var(--fail);
 }
 
 .inline-actions {
@@ -262,7 +307,7 @@ dd {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
 }
 
 .data-table th,
@@ -657,6 +702,52 @@ dd {
 
 .env-flag-action--clear {
   color: var(--fg-muted);
+}
+
+/* The confirmation of a sensitive flag, a line of its own under the row. */
+.env-flag-confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--warn) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.env-flag-confirm-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The question a button that writes to the card asks, a line under it. */
+.cc-write-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--warn) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--warn) 10%, var(--bg-elev));
+  color: var(--fg);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cc-write-confirm-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 1180px) {

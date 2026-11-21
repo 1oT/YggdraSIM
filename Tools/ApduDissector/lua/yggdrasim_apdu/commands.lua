@@ -302,11 +302,22 @@ end
 
 -- --------------------------------------------------------------------- PIN
 local function describe_pin(command)
+    -- TS 102 221 v18.4 clauses 11.1.9.1.2 and 11.1.13.1.2: only VERIFY
+    -- PIN and UNBLOCK PIN define an empty data field, and it reads the
+    -- retry counter rather than presenting a PIN. CHANGE / ENABLE /
+    -- DISABLE PIN carry a mandatory Lc (clauses 11.1.10.2, 11.1.11.2,
+    -- 11.1.12.2), so an empty one there is a malformed command, not a
+    -- query.
+    local queries_counter = (
+        (command.ins == M.INS_VERIFY or command.ins == M.INS_UNBLOCK_PIN)
+        and (command.lc == nil or command.lc == 0)
+    )
     return {
         kind = "pin",
         reference = command.p2,
         reference_name = key_reference_name(command.p2),
         value_length = command.data_length,
+        retry_counter_query = queries_counter,
     }
 end
 
@@ -390,6 +401,9 @@ function M.summary(description)
         )
     end
     if description.kind == "pin" then
+        if description.retry_counter_query then
+            return description.reference_name .. " retry counter"
+        end
         return description.reference_name
     end
     if description.kind == "channel" then

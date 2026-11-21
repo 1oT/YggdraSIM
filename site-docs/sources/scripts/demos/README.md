@@ -32,7 +32,7 @@ python3 scripts/demos/demo_profile_lifecycle.py
 ## Recording tips
 
 * Use a 100×30 or 120×34 terminal for a clean 16:9 capture.
-* Leave `YGGDRASIM_DEMO_FAST` unset for live recordings — the built-in pauses
+* Leave `YGGDRASIM_DEMO_FAST` unset for live recordings -- the built-in pauses
   are tuned to give viewers time to read each banner.
 * Each script writes to a fresh `/tmp/yggdrasim_*_demo_*` directory; nothing
   in the repo is mutated, so multiple takes are safe.

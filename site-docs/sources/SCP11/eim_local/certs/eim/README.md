@@ -52,7 +52,7 @@ card's default BF55 identity is configured separately through
 
 ## Certificate profile expected by tooling
 
-Bundled OpenSSL templates emit the following shape — operator-issued
+Bundled OpenSSL templates emit the following shape -- operator-issued
 certificates do not need to match it exactly, but the profile is a
 useful reference:
 
@@ -84,6 +84,6 @@ hint, source preference, curve, lexical), and BYO-keys checklist are
 in:
 
 - [`guides/CONFIGURATION_AND_CERTIFICATES.md`](../../../../guides/CONFIGURATION_AND_CERTIFICATES.md)
-  — § *Local eIM signing certificates*
+  -- § *Local eIM signing certificates*
 
 Selector code: [`SCP11/eim_local/eim_cert_store.py`](https://github.com/1oT/YggdraSIM/blob/main/SCP11/eim_local/eim_cert_store.py).

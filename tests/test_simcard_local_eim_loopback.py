@@ -149,7 +149,7 @@ class _SimulatorEimLoopbackBase(unittest.TestCase):
 
 class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
     """Confirm discover_card() crosses every BFxx surface the eIM
-    relies on and gets a parseable answer (Mode A — local simulator)."""
+    relies on and gets a parseable answer (Mode A -- local simulator)."""
 
     def test_select_isdr_returns_9000_against_simulator(self) -> None:
         session = self._build_session()
@@ -163,6 +163,17 @@ class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
         # EID is configurable but always reported as 32 hex characters.
         self.assertEqual(len(eid), 32, f"EID should be 32 BCD digits, got '{eid}'")
         self.assertTrue(eid.isdigit(), f"EID must be all digits, got '{eid}'")
+
+    def test_get_eid_registers_the_simulated_eid_with_the_local_eim(self) -> None:
+        from SCP11.eim_local.engine.service import LocalEim
+
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(
+            os.environ, {"YGGDRASIM_LOCAL_EIM_STORE": store}
+        ):
+            eid = self._build_session().get_eid()
+            record = LocalEim(Path(store)).record(eid)
+        self.assertIsNotNone(record)
+        self.assertEqual(record.label, "detected by a local ISD-R session")
 
     def test_get_euicc_info1_returns_bf20_envelope(self) -> None:
         session = self._build_session()
@@ -264,7 +275,7 @@ class IsdrDiscoveryAgainstSimulatorTests(_SimulatorEimLoopbackBase):
 
 class AddInitialEimAgainstSimulatorTests(_SimulatorEimLoopbackBase):
     """Confirm a SGP.32 AddInitialEim package travels eIM -> sim and
-    lands a new entry in the simulator's eIM list (Mode A — local
+    lands a new entry in the simulator's eIM list (Mode A -- local
     simulator)."""
 
     def _write_signing_cert(self, target_dir: Path) -> Path:

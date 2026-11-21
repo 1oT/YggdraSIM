@@ -36,7 +36,9 @@ try:
         encode_authenticate_server_request,
         encode_ctx_params1,
         encode_prepare_download_request,
+        encode_rsp_type,
         encode_smdp_signed2,
+        rsp_type_members,
     )
 except ImportError:
     from asn1_registry import ASN1Registry
@@ -45,7 +47,9 @@ except ImportError:
         encode_authenticate_server_request,
         encode_ctx_params1,
         encode_prepare_download_request,
+        encode_rsp_type,
         encode_smdp_signed2,
+        rsp_type_members,
     )
 
 _PY_SIM_RSP_ASN1 = None
@@ -56,13 +60,63 @@ if compile_asn1_subdir is not None:
         _PY_SIM_RSP_ASN1 = None
 
 
+# SGP.22 v3.1 DeviceInfo and DeviceCapabilities members in definition order (page 441, page 442).
+DEVICE_INFO_MEMBERS = (
+    "tac",
+    "deviceCapabilities",
+    "imei",
+    "preferredLanguages",
+    "deviceTestMode",
+    "lpaRspCapability",
+)
+DEVICE_CAPABILITY_MEMBERS = (
+    "gsmSupportedRelease",
+    "utranSupportedRelease",
+    "cdma2000onexSupportedRelease",
+    "cdma2000hrpdSupportedRelease",
+    "cdma2000ehrpdSupportedRelease",
+    "eutranEpcSupportedRelease",
+    "contactlessSupportedRelease",
+    "rspCrlSupportedVersion",
+    "nrEpcSupportedRelease",
+    "nr5gcSupportedRelease",
+    "eutran5gcSupportedRelease",
+    "lpaSvn",
+    "catSupportedClasses",
+    "euiccFormFactorType",
+    "deviceAdditionalFeatureSupport",
+)
+
+
+def _bit_string(value, name: str) -> tuple[bytes, int]:
+    """A named BIT STRING as asn1tools takes it: (bytes, bit count) as given, or the bit numbers set.
+
+    From bit numbers the count ends at the highest one set, as DER drops trailing zero bits.
+    """
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], (bytes, bytearray)):
+        return bytes(value[0]), int(value[1])
+    numbers = sorted({int(number) for number in value})
+    if numbers and numbers[0] < 0:
+        raise ValueError(f"{name}: bit numbers start at 0")
+    count = numbers[-1] + 1 if numbers else 0
+    data = bytearray((count + 7) // 8)
+    for number in numbers:
+        data[number // 8] |= 0x80 >> (number % 8)
+    return bytes(data), count
+
+
 class PayloadBuilder:
     """Constructs SGP.22 AuthenticateServer and PrepareDownload payloads."""
 
     @staticmethod
     def build_auth_server(signed1, signature, cert, ctx_params, root_ci_id: bytes = None) -> bytes:
-        """Build the ES9+.AuthenticateServer request TLV payload (SGP.22 §5.7.13)."""
+        """Build the ES9+.AuthenticateServer request TLV payload (SGP.22 §5.7.13).
+
+        Encoded with pySim's SGP.22 v3.1 module; without it, the asn1crypto model in
+        ``asn1_registry`` builds ctxParams1 and gives the same bytes.
+        """
         safe_ctx_params = PayloadBuilder._normalize_ctx_params(ctx_params)
+        pysim_ctx_params = PayloadBuilder._normalize_pysim_ctx_params(safe_ctx_params)
         signed1_der = PayloadBuilder._asn1crypto_or_bytes_to_der(signed1)
         certificate_der = PayloadBuilder._asn1crypto_or_bytes_to_der(cert)
 
@@ -72,13 +126,15 @@ class PayloadBuilder:
                 server_signature1=bytes(signature),
                 euicc_ci_pk_id_to_be_used=bytes(root_ci_id or b""),
                 server_certificate_der=certificate_der,
-                ctx_params=PayloadBuilder._normalize_pysim_ctx_params(safe_ctx_params),
+                ctx_params=pysim_ctx_params,
             )
             if len(encoded) > 0:
                 return encoded
-            ctx_params_der = PayloadBuilder._build_ctx_params1_with_pysim(safe_ctx_params)
-        else:
-            ctx_content = ASN1Registry.CtxParamsForCommonAuthentication(safe_ctx_params)
+        ctx_params_der = PayloadBuilder._build_ctx_params1_with_pysim(safe_ctx_params)
+        if len(ctx_params_der) == 0:
+            ctx_content = ASN1Registry.CtxParamsForCommonAuthentication(
+                PayloadBuilder._asn1crypto_ctx_params(pysim_ctx_params)
+            )
             ctx_choice = ASN1Registry.CtxParams1(
                 name="ctxParamsForCommonAuthentication",
                 value=ctx_content,
@@ -117,31 +173,68 @@ class PayloadBuilder:
         return PayloadBuilder._wrap_tlv(bytes.fromhex("BF38"), outer_value)
 
     @staticmethod
+    def encode_device_info(device_info: dict) -> bytes:
+        """DER DeviceInfo as the AuthenticateServer ctxParams1 carries it, for every surface that sends one.
+
+        SGP.22 v3.1 DeviceInfo (page 441) through pySim's v3.1 module, AUTOMATIC TAGS: tac '80',
+        deviceCapabilities 'A1', imei '82', preferredLanguages 'A3', deviceTestMode '84',
+        lpaRspCapability '85'. The values go through the ctxParams1 normalisation, so the eIM and the
+        SM-DP+ are told the same device. Empty when the v3.1 module is unavailable.
+        """
+        if len(rsp_type_members("DeviceInfo", v3=True)) == 0:
+            return b""
+        normalized = PayloadBuilder._normalize_ctx_params({"deviceInfo": dict(device_info)})
+        value = PayloadBuilder._normalize_pysim_ctx_params(normalized)["deviceInfo"]
+        return encode_rsp_type("DeviceInfo", value, v3=True)
+
+    @staticmethod
     def _build_ctx_params1_with_pysim(ctx_params: dict) -> bytes:
-        choice_value = PayloadBuilder._normalize_pysim_ctx_params(ctx_params)
-        encoded = encode_ctx_params1(choice_value)
-        if len(encoded) > 0:
-            return encoded
-        return _PY_SIM_RSP_ASN1.encode(
-            "CtxParams1",
-            ("ctxParamsForCommonAuthentication", choice_value),
-        )
+        """CtxParams1 through pySim's SGP.22 v3.1 module; empty when it is unavailable."""
+        return encode_ctx_params1(PayloadBuilder._normalize_pysim_ctx_params(ctx_params))
 
     @staticmethod
     def _normalize_pysim_ctx_params(ctx_params: dict) -> dict:
-        device_info = dict(ctx_params.get("deviceInfo", {}))
-        capabilities = dict(device_info.get("deviceCapabilities", {}))
-        pysim_device_info = {
-            "tac": bytes(device_info.get("tac", b"")),
-            "deviceCapabilities": PayloadBuilder._normalize_pysim_capabilities(capabilities),
-        }
+        """The CtxParamsForCommonAuthentication members PayloadBuilder fills, as pySim's v3.1 module takes them.
+
+        operationType, iccid, matchingIdSource and vendorSpecificExtension (SGP.22 v3.1 page 449)
+        are not filled here; operationType is then its DEFAULT, profileDownload.
+        """
         choice_value = {
-            "deviceInfo": pysim_device_info,
+            "deviceInfo": PayloadBuilder._normalize_device_info(dict(ctx_params.get("deviceInfo", {}))),
         }
         matching_id = str(ctx_params.get("matchingId", "")).strip()
         if len(matching_id) > 0:
             choice_value["matchingId"] = matching_id
         return choice_value
+
+    @staticmethod
+    def _normalize_device_info(device_info: dict) -> dict:
+        """SGP.22 v3.1 DeviceInfo values for asn1tools; a member name v3.1 does not define is refused."""
+        unknown = set(device_info) - set(DEVICE_INFO_MEMBERS)
+        if unknown:
+            raise ValueError(f"DeviceInfo members SGP.22 v3.1 does not define: {', '.join(sorted(unknown))}")
+        tac = bytes(device_info.get("tac", b""))
+        if len(tac) != 4:
+            raise ValueError(f"DeviceInfo tac is Octet4 (SGP.22 v3.1); got {len(tac)} bytes")
+        normalized: dict = {
+            "tac": tac,
+            "deviceCapabilities": PayloadBuilder._normalize_pysim_capabilities(
+                dict(device_info.get("deviceCapabilities", {}))
+            ),
+        }
+        imei = bytes(device_info.get("imei", b"") or b"")
+        if len(imei) > 0:
+            if len(imei) != 8:
+                raise ValueError(f"DeviceInfo imei is Octet8 (SGP.22 v3.1); got {len(imei)} bytes")
+            normalized["imei"] = imei
+        languages = [str(language) for language in (device_info.get("preferredLanguages") or [])]
+        if languages:
+            normalized["preferredLanguages"] = languages
+        if device_info.get("deviceTestMode"):
+            normalized["deviceTestMode"] = None
+        if device_info.get("lpaRspCapability") is not None:
+            normalized["lpaRspCapability"] = _bit_string(device_info["lpaRspCapability"], "lpaRspCapability")
+        return normalized
 
     @staticmethod
     def _normalize_ctx_params(ctx_params: dict) -> dict:
@@ -170,26 +263,57 @@ class PayloadBuilder:
 
     @staticmethod
     def _normalize_pysim_capabilities(capabilities: dict) -> dict:
-        normalized = {}
-        ordered_fields = [
-            "gsmSupportedRelease",
-            "utranSupportedRelease",
-            "cdma2000onexSupportedRelease",
-            "cdma2000hrpdSupportedRelease",
-            "cdma2000ehrpdSupportedRelease",
-            "eutranSupportedRelease",
-            "contactlessSupportedRelease",
-            "rspCrlSupportedVersion",
-            "rspRpmSupportedVersion",
-        ]
-        for field_name in ordered_fields:
-            value = capabilities.get(field_name)
-            if value is None and field_name == "eutranSupportedRelease":
-                value = capabilities.get("eutranEpcSupportedRelease")
+        """SGP.22 v3.1 DeviceCapabilities values for asn1tools, in definition order.
+
+        eutranSupportedRelease, the SGP.22 v2 name, is read as eutranEpcSupportedRelease; any other
+        name v3.1 does not define (rspRpmSupportedVersion included) is refused rather than dropped.
+        """
+        given = dict(capabilities)
+        if "eutranSupportedRelease" in given and "eutranEpcSupportedRelease" not in given:
+            given["eutranEpcSupportedRelease"] = given.pop("eutranSupportedRelease")
+        given.pop("eutranSupportedRelease", None)
+        unknown = set(given) - set(DEVICE_CAPABILITY_MEMBERS)
+        if unknown:
+            raise ValueError(f"DeviceCapabilities members SGP.22 v3.1 does not define: {', '.join(sorted(unknown))}")
+        normalized: dict = {}
+        for field_name in DEVICE_CAPABILITY_MEMBERS:
+            value = given.get(field_name)
             if value is None:
                 continue
-            normalized[field_name] = bytes(value)
+            if field_name == "catSupportedClasses":
+                normalized[field_name] = _bit_string(value, field_name)
+            elif field_name == "euiccFormFactorType":
+                normalized[field_name] = int(value)
+            elif field_name == "deviceAdditionalFeatureSupport":
+                features = dict(value)
+                if set(features) - {"naiSupport"}:
+                    raise ValueError("DeviceAdditionalFeatureSupport defines naiSupport only (SGP.22 v3.1)")
+                normalized[field_name] = {key: bytes(item) for key, item in features.items()}
+            else:
+                normalized[field_name] = bytes(value)
         return normalized
+
+    @staticmethod
+    def _asn1crypto_ctx_params(pysim_ctx_params: dict) -> dict:
+        """The asn1tools values of _normalize_pysim_ctx_params in the forms the asn1crypto model takes."""
+        from asn1crypto import core
+
+        def bits(value: tuple[bytes, int]) -> tuple[int, ...]:
+            data, count = value
+            return tuple((data[index // 8] >> (7 - index % 8)) & 1 for index in range(count))
+
+        ctx = dict(pysim_ctx_params)
+        device_info = dict(ctx["deviceInfo"])
+        capabilities = dict(device_info["deviceCapabilities"])
+        if "catSupportedClasses" in capabilities:
+            capabilities["catSupportedClasses"] = bits(capabilities["catSupportedClasses"])
+        device_info["deviceCapabilities"] = capabilities
+        if "lpaRspCapability" in device_info:
+            device_info["lpaRspCapability"] = bits(device_info["lpaRspCapability"])
+        if "deviceTestMode" in device_info:
+            device_info["deviceTestMode"] = core.Null()
+        ctx["deviceInfo"] = device_info
+        return ctx
 
     @staticmethod
     def build_prepare_download(transaction_id, euicc_sig1, cert, key) -> bytes:

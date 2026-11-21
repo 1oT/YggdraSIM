@@ -5,7 +5,7 @@
 
 The live route module pulls FastAPI / Pydantic at import time. When
 those optional dependencies are missing (the lean ``yggdrasim`` install)
-the module isn't importable — we ``skipUnless`` the entire suite in
+the module isn't importable -- we ``skipUnless`` the entire suite in
 that case so the rest of the test matrix stays green on lean CIs.
 
 Coverage:
@@ -36,7 +36,7 @@ try:
     _live_module = importlib.import_module(
         "yggdrasim_common.gui_server.routes.live"
     )
-except Exception:  # pragma: no cover — environment-dependent
+except Exception:  # pragma: no cover -- environment-dependent
     _live_module = None
 
 from yggdrasim_common.card_backend import (
@@ -102,7 +102,7 @@ class _StubBridge:
 
 @unittest.skipUnless(
     _live_module is not None,
-    "FastAPI/Pydantic not installed — install yggdrasim[gui-server] to run",
+    "FastAPI/Pydantic not installed -- install yggdrasim[gui-server] to run",
 )
 class GuiLiveRemoteReaderTests(unittest.TestCase):
     def setUp(self) -> None:

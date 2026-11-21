@@ -216,6 +216,31 @@ class PluginCapabilityRegistrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not be None"):
             manager.register_capability("example.capability", None)
 
+    def test_failing_extender_is_recorded_and_later_providers_still_run(self) -> None:
+        class _BrokenProvider:
+            def extend_target(self, target: object) -> None:
+                raise RuntimeError("stale attribute")
+
+        class _WorkingProvider:
+            def extend_target(self, target: object) -> None:
+                target.extended_by_second = True
+
+        class _Target:
+            pass
+
+        manager = plugin_runtime.PluginManager()
+        manager._loaded = True
+        manager.register_capability("a.broken", _BrokenProvider())
+        manager.register_capability("b.working", _WorkingProvider())
+        target = _Target()
+
+        manager.extend_target(target)
+
+        self.assertTrue(getattr(target, "extended_by_second", False))
+        self.assertIn("a.broken:extend", manager._load_errors)
+        self.assertIn("_Target", manager._load_errors["a.broken:extend"])
+        self.assertIn("stale attribute", manager._load_errors["a.broken:extend"])
+
     def test_failed_plugin_registration_rolls_back_capabilities(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             plugin_path = Path(temp_dir) / "broken_plugin.py"

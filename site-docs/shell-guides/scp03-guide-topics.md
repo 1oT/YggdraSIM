@@ -303,8 +303,9 @@ the inner APDU payload:
 
 ### Configuration
 
-The shell guide points operators to `ota_config.ini` for `TAR`, `SPI`, `KIC`,
-`KID`, transport, and key material.
+The shell guide points operators to `set` in the SCP80 shell for `TAR`, `SPI`,
+`KIC`, `KID`, transport, and key material, stored per ICCID in the device
+inventory.
 
 ## CONFIG
 
@@ -325,7 +326,7 @@ The guide distinguishes source runs from frozen executables:
 
 ### SCP80 and SCP11 split
 
-- `SCP80/ota_config.ini` holds the OTA runtime configuration
+- the device inventory holds the SCP80 OTA configuration per ICCID
 - `SCP11/live` is the live relay shell
 - `SCP11/test` is the test relay shell
 - `SCP11/local_access` is the local `AuthenticateServer` and `LOAD-PROFILE` path

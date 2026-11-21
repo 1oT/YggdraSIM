@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 PE-SecurityDomain structured editor.
 
@@ -157,7 +156,7 @@ class _KeyRow(Vertical):
             f"sd_key_{self._index}_keyType",
             "Component keyType:",
             mode="hex",
-            placeholder="1–2 bytes",
+            placeholder="1-2 bytes",
             hint="Hex bytes · Apply commits this PE.",
             id=f"sd_key_row_{self._index}_keyType",
             classes="sd_key_apply_slot",
@@ -409,7 +408,7 @@ class SecurityDomainEditor(BasePeEditor):
         if self._key_count == 0:
             host.mount(
                 Static(
-                    "(empty keyList — use '+ Add key entry' to start)",
+                    "(empty keyList -- use '+ Add key entry' to start)",
                     classes="sd_section_note",
                 ),
             )

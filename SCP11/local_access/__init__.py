@@ -16,9 +16,11 @@ __all__ = [
 def __getattr__(name):
     if name == "LocalAccessConfig":
         from .config import LocalAccessConfig
+
         return LocalAccessConfig
     if name in ("LocalIsdrSession", "LocalSessionState", "OpenSessionResult"):
         from .session import LocalIsdrSession, LocalSessionState, OpenSessionResult
+
         mapping = {
             "LocalIsdrSession": LocalIsdrSession,
             "LocalSessionState": LocalSessionState,
@@ -37,6 +39,7 @@ def __getattr__(name):
             encode_store_metadata_request_from_file,
             load_metadata_json_document,
         )
+
         mapping = {
             "build_store_metadata_request_payload": build_store_metadata_request_payload,
             "encode_store_metadata_request": encode_store_metadata_request,

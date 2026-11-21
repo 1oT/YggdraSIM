@@ -28,8 +28,8 @@ from Tools.ProfilePackage.saip_json_codec import jsonify_document
 from Tools.ProfilePackage.saip_tool import SaipToolBridge
 
 
-_TELNA_STYLE_SAMPLE = (
-    "A0819A800102810100821354656C6E615F494D534931305F544341322E30"
+_VENDOR_STYLE_SAMPLE = (
+    "A0819A800102810100821344656D6F315F494D534931305F544341322E30"
     "830A{iccid:ICCID:10}840100A5088100820084008B00"
     "A638060667810F01020106{smsc:MSISDN:5:nibble_swap}"
     "0667810F010203"
@@ -54,14 +54,14 @@ class TestInlinePlaceholderParsing(unittest.TestCase):
 
     def test_detect_ignores_ygg_simple_placeholder(self) -> None:
         # {IMSI} (the native YggdraSIM form) must NOT be picked up by the
-        # typed-placeholder regex — that surface is handled elsewhere.
+        # typed-placeholder regex -- that surface is handled elsewhere.
         self.assertFalse(detect_inline_placeholders("AA{IMSI}BB"))
 
     def test_detect_returns_true_for_compact_typed_placeholder(self) -> None:
         self.assertTrue(detect_inline_placeholders("AA{imsiIMSI8EncodeIMSI}BB"))
 
     def test_substitute_produces_pure_hex(self) -> None:
-        substituted, records = substitute_inline_placeholders(_TELNA_STYLE_SAMPLE)
+        substituted, records = substitute_inline_placeholders(_VENDOR_STYLE_SAMPLE)
         cleaned = substituted.replace(" ", "").replace("\n", "").upper()
         self.assertEqual(len(records), 2)
         for character in cleaned:
@@ -72,7 +72,7 @@ class TestInlinePlaceholderParsing(unittest.TestCase):
                 self.assertIn(character, "0123456789ABCDEF")
 
     def test_substitute_captures_record_fields(self) -> None:
-        _substituted, records = substitute_inline_placeholders(_TELNA_STYLE_SAMPLE)
+        _substituted, records = substitute_inline_placeholders(_VENDOR_STYLE_SAMPLE)
         first, second = records
         self.assertEqual(first.variable_name, "iccid")
         self.assertEqual(first.type_name, "ICCID")
@@ -279,7 +279,7 @@ class TestEditorSaveRoundTrip(unittest.TestCase):
 
 class TestSidecarRoundTrip(unittest.TestCase):
     def test_records_to_payload_and_back_round_trips(self) -> None:
-        _substituted, records = substitute_inline_placeholders(_TELNA_STYLE_SAMPLE)
+        _substituted, records = substitute_inline_placeholders(_VENDOR_STYLE_SAMPLE)
         payload = records_to_sidecar_payload(records)
         restored = sidecar_payload_to_records(payload)
         self.assertEqual(len(restored), len(records))
@@ -291,7 +291,7 @@ class TestSidecarRoundTrip(unittest.TestCase):
             self.assertEqual(original.sentinel_hex, restored_record.sentinel_hex)
 
     def test_sidecar_file_round_trips(self) -> None:
-        _substituted, records = substitute_inline_placeholders(_TELNA_STYLE_SAMPLE)
+        _substituted, records = substitute_inline_placeholders(_VENDOR_STYLE_SAMPLE)
         with tempfile.TemporaryDirectory() as tmp_root:
             sidecar = Path(tmp_root) / "payload.placeholders.json"
             write_sidecar(sidecar, records)
@@ -316,7 +316,7 @@ class TestSubstituteInlineInEditorJson(unittest.TestCase):
     ``lint_profile_json_buffer`` calls
     :func:`substitute_inline_placeholders_in_editor_json` so that
     ``bytes.fromhex`` never sees a placeholder literal. The paths it
-    returns are fed into the linter as ``placeholder_paths`` — the
+    returns are fed into the linter as ``placeholder_paths`` -- the
     FAIL/WARN → INFO downgrade then makes sure a template-bearing
     buffer renders softer than a genuinely broken profile.
     """

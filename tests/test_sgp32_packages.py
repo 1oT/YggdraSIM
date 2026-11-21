@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for ``SIMCARD.sgp32_packages`` pure-function helpers.
 
 Covers: encoded_length, encode_euicc_package_error_unsigned,
@@ -166,7 +165,7 @@ class DecodeEuiccPackageRequestTests(unittest.TestCase):
             decode_euicc_package_request(blob)
 
     def test_missing_required_fields_raises(self) -> None:
-        # SEQUENCE body containing only eimId — missing eidValue, counterValue, package.
+        # SEQUENCE body containing only eimId -- missing eidValue, counterValue, package.
         signed_inner = _tlv(bytes.fromhex("80"), b"eim")
         signed = _tlv(b"\x30", signed_inner)
         sig_tlv = _tlv(bytes.fromhex("5F37"), b"\xAB" * 64)

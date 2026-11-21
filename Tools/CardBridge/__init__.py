@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-"""YggdraSIM Card Bridge — standalone PC/SC relay daemon.
+"""YggdraSIM Card Bridge -- standalone PC/SC relay daemon.
 
 The Card Bridge publishes a locally-attached PC/SC reader over a
 loopback HTTP service that speaks the same protocol as
 ``Tools/HilBridge/apdu_relay``. The intended deployment is:
 
 * The bridge runs on the machine the card reader is plugged into.
-* Bridge binds to ``127.0.0.1`` only — never the network.
+* Bridge binds to ``127.0.0.1`` only -- never the network.
 * Remote consumers reach the bridge through an SSH ``LocalForward``
   (``ssh -L 8642:127.0.0.1:8642 <pc-host>``).
 * SSH supplies stream encryption, integrity, and peer authentication

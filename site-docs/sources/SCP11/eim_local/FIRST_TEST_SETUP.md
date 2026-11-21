@@ -91,11 +91,13 @@ Queue order is deterministic:
 ```shell
 python -m SCP11.eim_local
 STATUS
-ADD-INITIAL-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/templates/template_add_initial_eim.json
+IDENTITY NEW 1.3.6.1.4.1.32473.999.10.124 eim.example.test
+ASSOCIATE
 GET-EIM-CONFIG
-ADD-EIM package "/path/to/local_eim_signing_cert.pem" Workspace/LocalEIM/eim_packages/fake_eim_add_eim_package.json
+QUEUE LIST-PROFILES
+DELIVER --once
+OPS completed
 HOTFOLDER-LIST --json
-HOTFOLDER-FETCH --json
 RESP-LOG 20
 ```
 

@@ -1,0 +1,149 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
+ */
+
+/* Local eIM leaf editor (js/local-eim-leaf-editor.js): attribute rows and
+   extension blocks inside the Local eIM page. Reads tokens only and reuses
+   the page's field, button and notice classes. */
+
+.lle-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* An attribute that shares its relative distinguished name with the row above. */
+.lle-row--joined {
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* Widths for the controls of a row. They are flex bases, so they are set on the children of a row
+   only: under a column (a labelled field, an extension's title) the same basis would be a height. */
+.lle-row > .lle-type {
+  flex: 0 1 150px;
+  min-width: 100px;
+}
+
+.lle-row > .lle-string {
+  flex: 0 1 140px;
+  min-width: 100px;
+}
+
+.lle-row > .lle-oid {
+  flex: 0 1 160px;
+  min-width: 120px;
+}
+
+.lle-row > .lle-keyid,
+.lep-inline-form-bar > .lle-keyid {
+  flex: 0 1 280px;
+  min-width: 200px;
+}
+
+.lle-row > .lle-value {
+  flex: 1 1 150px;
+  min-width: 120px;
+}
+
+.lle-ext-title > .lle-oid {
+  max-width: 280px;
+}
+
+.lle-row-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.lle-tool {
+  min-width: 28px;
+  padding: 4px 6px;
+  line-height: 1;
+}
+
+.lle-check {
+  flex: 0 0 auto;
+}
+
+.lle-ext {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+
+.lle-ext + .lle-ext {
+  margin-top: 8px;
+}
+
+.lle-ext-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lle-ext-title {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lle-ext-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.lle-ext-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lle-ext-body.lle-row {
+  flex-direction: row;
+}
+
+.lle-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.lle-textarea {
+  width: 100%;
+  min-height: 3.2em;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.lle-textarea--tall {
+  min-height: 12em;
+}
+
+.lep-page .lle-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* An issued leaf answers with several lines. */
+.lle-notice {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

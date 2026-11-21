@@ -73,7 +73,7 @@ def test_accumulator_long_line_flushed_at_cap():
 
 
 # ---------------------------------------------------------------------------
-# decode_line — request shapes
+# decode_line -- request shapes
 # ---------------------------------------------------------------------------
 
 
@@ -102,7 +102,7 @@ def test_decode_csim_request_case2_no_data():
 
 
 def test_decode_csim_request_rejects_length_mismatch():
-    # length declares 14 hex chars but the body has 12 — at_simlink
+    # length declares 14 hex chars but the body has 12 -- at_simlink
     # will reject it, so the decoder must too.
     entry = at_decoder.decode_line('AT+CSIM=14,"00A4000400"', "tx")
     assert entry is None
@@ -136,7 +136,7 @@ def test_decode_crsm_request_rejects_unknown_command():
 
 
 # ---------------------------------------------------------------------------
-# decode_line — response shapes
+# decode_line -- response shapes
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +189,7 @@ def test_decode_unknown_line_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# feed_and_decode — integration
+# feed_and_decode -- integration
 # ---------------------------------------------------------------------------
 
 

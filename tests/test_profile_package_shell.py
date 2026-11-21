@@ -184,7 +184,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                 "====================================================================== header",
                 "{'connectivityParameters': 'a118350702000003000002470d085465726d696e616c0361706ea00f0607918406010092f88101008201f6'}",
                 "====================================================================== securityDomain",
-                "{'instance': {'applicationSpecificParametersC9': '81028000810203708201f08701f0', 'applicationParameters': {'uiccToolkitApplicationSpecificParametersField': '0100010100000202011606b2010000000000'}}, 'sdPersoData': ['00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74']}",
+                "{'instance': {'applicationSpecificParametersC9': '81028000810203708201f08701f0', 'applicationParameters': {'uiccToolkitApplicationSpecificParametersField': '0100010100000202011606b2010000000000'}}, 'sdPersoData': ['00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839383832303132333435363738393031323302400186070003a50300200089368a0d3139382e35312e3130302e34328b13383938383230393837363534333231303938378c102f67736d612f61646d696e6167656e74']}",
             ]
         )
         result = SaipCommandResult(
@@ -206,7 +206,7 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertIn("192.0.2.10", rendered)
         self.assertIn("Remote Endpoint", rendered)
         self.assertIn("identifierAscii", rendered)
-        self.assertIn("8944501605246763362", rendered)
+        self.assertIn("8988201234567890123", rendered)
         self.assertIn("setBits", rendered)
         self.assertIn("/gsma/adminagent", rendered)
 
@@ -357,7 +357,7 @@ class ProfilePackageShellTests(unittest.TestCase):
                     }
                 ],
                 "sdPersoData": [
-                    "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74"
+                    "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839383832303132333435363738393031323302400186070003a50300200089368a0d3139382e35312e3130302e34328b13383938383230393837363534333231303938378c102f67736d612f61646d696e6167656e74"
                 ],
                 "applicationParameters": {
                     "uiccToolkitApplicationSpecificParametersField": "0100010100000202011606b2010000000000"
@@ -424,12 +424,12 @@ class ProfilePackageShellTests(unittest.TestCase):
         self.assertEqual(puk_retry["decoded"]["remainingAttempts"], 10)
 
         sd_perso = normalized["sdPersoData"]
-        self.assertEqual(sd_perso["raw"][0], "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839343435303136303532343637363333363202400186070003a50300200089368a0d3133392e3136322e31352e36338b13383931303330303030303030363835333633338c102f67736d612f61646d696e6167656e74")
+        self.assertEqual(sd_perso["raw"][0], "00707a8578841c010301400102028182350103390205dc3c030227be3e0521c000020a8517133839383832303132333435363738393031323302400186070003a50300200089368a0d3139382e35312e3130302e34328b13383938383230393837363534333231303938378c102f67736d612f61646d696e6167656e74")
         transport_parameters = sd_perso["decoded"][0]["items"][0]["decoded"][0]["decoded"][0]["decoded"]
         self.assertEqual(transport_parameters[0]["decoded"]["decimal"], 81921)
         self.assertEqual(transport_parameters[1]["decoded"]["hex"], "8182")
         identifier_block = sd_perso["decoded"][0]["items"][0]["decoded"][0]["decoded"][1]["decoded"]
-        self.assertEqual(identifier_block["identifierAscii"], "8944501605246763362")
+        self.assertEqual(identifier_block["identifierAscii"], "8988201234567890123")
         self.assertEqual(identifier_block["trailerHex"], "024001")
         security_parameters = sd_perso["decoded"][0]["items"][0]["decoded"][0]["decoded"][2]["decoded"]
         self.assertEqual(security_parameters[0]["decoded"]["hex"], "a50300")
@@ -437,18 +437,22 @@ class ProfilePackageShellTests(unittest.TestCase):
 
         toolkit = normalized["applicationParameters"]["uiccToolkitApplicationSpecificParametersField"]
         self.assertEqual(toolkit["raw"], "0100010100000202011606b2010000000000")
-        self.assertEqual(toolkit["decoded"]["format"], "ETSI TS 102 226 toolkit app specific parameters")
-        self.assertEqual(toolkit["decoded"]["rawHex"], "0100010100000202011606b2010000000000")
-        self.assertEqual(toolkit["decoded"]["accessDomain"], "00")
-        self.assertEqual(toolkit["decoded"]["priorityLevelOfToolkitAppInstance"], 1)
-        self.assertEqual(toolkit["decoded"]["maxNumberOfTimers"], 1)
-        self.assertEqual(toolkit["decoded"]["maxNumberOfChannels"], 2)
-        self.assertEqual(toolkit["decoded"]["minimumSecurityLevelRaw"], "0116")
-        self.assertEqual(toolkit["decoded"]["tarValues"], ["b20100", "000000"])
-        self.assertEqual(toolkit["decoded"]["trailingPadding"], "00")
-        self.assertEqual(toolkit["decoded"]["minimumSecurityLevelInferred"], "0x16")
-        self.assertEqual(toolkit["decoded"]["minimumSecurityLevelDecimal"], 22)
-        self.assertEqual(toolkit["decoded"]["tarInferred"], "b20100")
+        # ETSI TS 102 226 V19.0.0 §8.2.1.3.2.2.1, the reading the GUI shares.
+        decoded = toolkit["decoded"]
+        self.assertEqual(decoded["format"], "ETSI TS 102 226 UICC toolkit parameters")
+        self.assertEqual(decoded["rawHex"], "0100010100000202011606B2010000000000")
+        self.assertNotIn("accessDomain", decoded)
+        self.assertEqual(decoded["priorityLevelOfToolkitAppInstance"], 1)
+        self.assertEqual(decoded["maxNumberOfTimers"], 0)
+        self.assertEqual(decoded["maxTextLengthForMenuEntry"], 1)
+        self.assertEqual(decoded["menuEntries"], [{"position": 0, "id": 0}])
+        self.assertEqual(decoded["maxNumberOfChannels"], 2)
+        self.assertEqual(decoded["minimumSecurityLevelRaw"], "0116")
+        self.assertEqual(decoded["tarValues"], ["B20100", "000000"])
+        self.assertEqual(decoded["maxNumberOfServices"], 0)
+        self.assertEqual(decoded["minimumSecurityLevelInferred"], "0x16")
+        self.assertEqual(decoded["minimumSecurityLevelDecimal"], 22)
+        self.assertEqual(decoded["tarInferred"], "B20100")
 
     def test_normalize_dump_value_converts_mandatory_service_nulls_to_true(self) -> None:
         normalized = self.shell._normalize_dump_value(
@@ -1536,6 +1540,83 @@ class ProfilePackageShellRandomizeAkaTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self.shell._cmd_randomize_aka("reports/ignored.der FOO=bar")
         self.assertIn("Unknown RANDOMIZE-AKA option", str(ctx.exception))
+
+
+class ProfilePackageShellRfmTests(unittest.TestCase):
+    """The RFM verb lists PE-RFM scopes and moves one between the MF and an ADF."""
+
+    def setUp(self) -> None:
+        from Tools.ProfilePackage.saip_json_codec import (
+            build_decoded_document_from_sequence,
+            ensure_workspace_pysim_on_path,
+        )
+
+        self.workspace_root = Path(__file__).resolve().parents[1]
+        ensure_workspace_pysim_on_path(self.workspace_root)
+        from pySim.esim.saip import ProfileElementSequence
+
+        self.profile_path = (
+            self.workspace_root / "Tools" / "ProfilePackage" / "profile" / "reference_test_profile.txt"
+        )
+        text = "".join(self.profile_path.read_text(encoding="utf-8").split())
+        self.pes = ProfileElementSequence.from_der(bytes.fromhex(text))
+        self.document = build_decoded_document_from_sequence(self.pes, intro_lines=["rfm"])
+        self.rfm_index = next(
+            index for index, pe in enumerate(self.pes.pe_list) if pe.type == "rfm"
+        )
+        usim = next(pe for pe in self.pes.pe_list if pe.type == "usim")
+        self.usim_aid = bytes(usim.decoded["adf-usim"][0][1]["dfName"]).hex().upper()
+        self.shell = ProfilePackageShell(workspace_root=self.workspace_root)
+        self.shell.bridge.build_decoded_dump_document = lambda _mode: self.document
+
+    def _run(self, line: str) -> str:
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            self.shell._cmd_rfm(line)
+        return captured.getvalue()
+
+    def test_lists_rfm_elements_with_their_default_directory(self) -> None:
+        text = self._run("")
+        self.assertRegex(text, rf"\n\s+{self.rfm_index}\s+rfm\s+A00000055910100002\s+B00001\s+ADF.USIM")
+        self.assertIn(self.usim_aid, text)
+        self.assertIn("ADFs in the profile: ADF.USIM", text)
+
+    def test_mf_without_output_is_a_dry_run(self) -> None:
+        text = self._run(f"{self.rfm_index} MF")
+        self.assertIn("adfRFMAccess removed", text)
+        self.assertIn("MF (UICC shared file system RFM", text)
+        self.assertIn("Dry run", text)
+        self.assertNotIn("adfRFMAccess", self.document["sections"]["rfm"])
+
+    def test_adf_by_name_writes_der_with_inherited_domains(self) -> None:
+        from pySim.esim.saip import ProfileElementSequence
+
+        self._run(f"{self.rfm_index} MF")
+        with tempfile.TemporaryDirectory(dir=self.workspace_root) as temp_dir:
+            out = Path(temp_dir) / "rebound.der"
+            text = self._run(f"{self.rfm_index} ADF USIM ACCESS=00 OUTPUT={out}")
+            self.assertIn("ADF.USIM", text)
+            self.assertIn("Wrote", text)
+            reread = ProfileElementSequence.from_der(out.read_bytes())
+        rfm = reread.pe_list[self.rfm_index].decoded
+        binding = rfm["adfRFMAccess"]
+        self.assertEqual(bytes(binding["adfAID"]).hex().upper(), self.usim_aid)
+        self.assertEqual(bytes(binding["adfAccessDomain"]), b"\x00")
+        self.assertEqual(bytes(binding["adfAdminAccessDomain"]), bytes(rfm["uiccAdminAccessDomain"]))
+
+    def test_in_place_refuses_a_hex_input_before_changing_anything(self) -> None:
+        self.shell.bridge.current_input_file = self.profile_path
+        with self.assertRaises(ValueError) as ctx:
+            self.shell._cmd_rfm(f"{self.rfm_index} MF IN-PLACE")
+        self.assertIn("OUTPUT=<file.der>", str(ctx.exception))
+        self.assertIn("adfRFMAccess", self.document["sections"]["rfm"])
+
+    def test_refuses_a_non_rfm_index_and_an_unknown_adf(self) -> None:
+        with self.assertRaises(ValueError):
+            self.shell._cmd_rfm("0 MF")
+        with self.assertRaises(ValueError):
+            self.shell._cmd_rfm(f"{self.rfm_index} ADF ISIM")
+        with self.assertRaises(ValueError):
+            self.shell._cmd_rfm(f"{self.rfm_index} MF ACCESS=00")
 
 
 if __name__ == "__main__":

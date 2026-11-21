@@ -1,19 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """HTTP + WebSocket routes for the GUI ``Advanced > Host shell`` tab.
 
 Three endpoints:
 
-* ``GET  /api/host-shell/capabilities`` — capability snapshot the SPA
+* ``GET  /api/host-shell/capabilities`` -- capability snapshot the SPA
   consults before rendering the sidebar entry. ``?scope=hil-modem``
   reports the constrained serial-terminal capability used by the HIL
   module.
-* ``GET  /api/host-shell/devices`` — best-effort enumeration of the
+* ``GET  /api/host-shell/devices`` -- best-effort enumeration of the
   serial devices the operator might want to paste into ``socat`` /
   ``tio`` / ``minicom``. Read-only, no side effects.
-* ``WS   /api/host-shell`` — bridges xterm.js to a host-shell PTY. Same
+* ``WS   /api/host-shell`` -- bridges xterm.js to a host-shell PTY. Same
   framing as ``/api/terminal/{module}``: binary frames carry raw PTY
   bytes; JSON text frames carry control messages
   (``{"type": "stdin" | "resize" | "signal" | "at_decode"}``).
@@ -28,9 +27,9 @@ handshake and refuses connections (after sending one ``error`` text
 frame) when the env flag is unset, so the always-mounted route is
 safe to leave in place.
 
-Full operator-facing walkthrough — enabling the env flag, sidebar UX,
+Full operator-facing walkthrough -- enabling the env flag, sidebar UX,
 HTTP / WebSocket payload shapes, ``at_decoded`` framing, modem-CLI
-recipes, threat model, and troubleshooting — lives in
+recipes, threat model, and troubleshooting -- lives in
 :file:`guides/GUI_HOST_SHELL_GUIDE.md`.
 """
 
@@ -39,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
@@ -75,7 +74,7 @@ def get_capabilities(scope: str = "") -> dict:
 def get_devices() -> dict:
     """Return the serial-device picker payload.
 
-    Devices are advisory — they only feed the "Insert at cursor"
+    Devices are advisory -- they only feed the "Insert at cursor"
     affordance in the SPA; the PTY is byte-for-byte transparent and the
     operator can type anything they like into it.
     """
@@ -133,14 +132,15 @@ async def host_shell_socket(websocket: WebSocket) -> None:
     scope = str(websocket.query_params.get("scope") or "").strip().lower()
     hil_modem_scope = scope == "hil-modem"
 
-    if hil_modem_scope and not host_shell_module.is_hil_modem_enabled():
+    if hil_modem_scope and not host_shell_module.is_hil_modem_available():
         await websocket.accept(subprotocol=websocket_accept_protocol(websocket))
         await websocket.send_text(
             json.dumps({
                 "event": "error",
                 "message": (
-                    "HIL modem terminal is disabled. It requires the full "
-                    "Linux/source HIL capability and YGGDRASIM_GUI_HIL_MODEM=1."
+                    "HIL modem terminal is unavailable on this build. It "
+                    "needs one that carries the HIL bridge, on a platform "
+                    "that supports it."
                 ),
             })
         )
@@ -214,12 +214,21 @@ async def host_shell_socket(websocket: WebSocket) -> None:
         return
 
     decoder_state = _DecoderState()
-    await websocket.send_text(json.dumps({
-        "event": "spawned",
-        "pid": session.pid,
-        "shell": None if command else host_shell_module.resolve_shell(),
-        "configured_command": bool(command),
-    }))
+    # Everything from here owns a forked child. A send that raises before
+    # the try/finally below -- the peer closing in this exact window is
+    # enough -- unwinds past the only close() there is, leaving the ssh /
+    # tio child running and the PTY master fd leaked.
+    try:
+        await websocket.send_text(json.dumps({
+            "event": "spawned",
+            "pid": session.pid,
+            "shell": None if command else host_shell_module.resolve_shell(),
+            "configured_command": bool(command),
+        }))
+    except Exception:
+        await session.close()
+        _LOGGER.info("gui.host_shell.spawn_frame_undeliverable peer=%s", peer)
+        return
 
     reader_task = asyncio.create_task(_pump_output(session, websocket, decoder_state))
     try:
@@ -231,12 +240,14 @@ async def host_shell_socket(websocket: WebSocket) -> None:
                 payload = bytes(message["bytes"])
                 session.send(payload)
                 if decoder_state.enabled:
-                    _emit_decoded(websocket, decoder_state.tx_accumulator, payload, "tx")
+                    _emit_decoded(
+                        websocket, decoder_state.tx_accumulator, payload, "tx", decoder_state.tasks
+                    )
                 continue
             text = message.get("text") or ""
             if len(text) == 0:
                 continue
-            await _handle_client_text(session, text, decoder_state)
+            await _handle_client_text(session, text, decoder_state, websocket)
     except WebSocketDisconnect:
         pass
     except Exception as error:  # pragma: no cover - defensive
@@ -247,6 +258,9 @@ async def host_shell_socket(websocket: WebSocket) -> None:
             await reader_task
         except (asyncio.CancelledError, Exception):
             pass
+        for pending in list(decoder_state.tasks):
+            pending.cancel()
+        decoder_state.tasks.clear()
         await session.close()
         try:
             await websocket.close()
@@ -269,12 +283,20 @@ class _DecoderState:
     byte level on a real serial device).
     """
 
-    __slots__ = ("enabled", "tx_accumulator", "rx_accumulator")
+    __slots__ = ("enabled", "tx_accumulator", "rx_accumulator", "tasks")
 
     def __init__(self) -> None:
         self.enabled: bool = False
         self.tx_accumulator = at_decoder.LineAccumulator()
         self.rx_accumulator = at_decoder.LineAccumulator()
+        # Pending decoded-frame sends; cancelled when the socket closes so
+        # a burst in the last tick cannot outlive the connection.
+        self.tasks: set[asyncio.Task[Any]] = set()
+
+
+# Long enough that an idle PTY costs nothing, short enough that nobody
+# perceives it between a keystroke and its echo.
+_PTY_IDLE_POLL_SECONDS = 0.01
 
 
 async def _pump_output(session, websocket: WebSocket, decoder: _DecoderState) -> None:
@@ -284,14 +306,18 @@ async def _pump_output(session, websocket: WebSocket, decoder: _DecoderState) ->
         if chunk is None:
             break
         if len(chunk) == 0:
-            await asyncio.sleep(0)
+            # read_once returns immediately when the PTY has nothing, so
+            # yielding with sleep(0) spun this loop at full speed and an
+            # idle shell pinned a core in the process that also serves the
+            # card relay. A terminal cannot tell this pause from none.
+            await asyncio.sleep(_PTY_IDLE_POLL_SECONDS)
             continue
         try:
             await websocket.send_bytes(chunk)
         except (WebSocketDisconnect, RuntimeError):
             break
         if decoder.enabled:
-            _emit_decoded(websocket, decoder.rx_accumulator, chunk, "rx")
+            _emit_decoded(websocket, decoder.rx_accumulator, chunk, "rx", decoder.tasks)
     try:
         await websocket.send_text(json.dumps({"event": "exit", "status": 0}))
     except Exception:
@@ -303,6 +329,7 @@ def _emit_decoded(
     accumulator: at_decoder.LineAccumulator,
     chunk: bytes,
     direction: str,
+    tasks: set[asyncio.Task[Any]] | None = None,
 ) -> None:
     """Synchronous-style fan-out: every decoded entry becomes a JSON frame.
 
@@ -320,7 +347,10 @@ def _emit_decoded(
             payload = json.dumps(entry)
         except (TypeError, ValueError):
             continue
-        loop.create_task(_send_decoded_frame(websocket, payload))
+        task = loop.create_task(_send_decoded_frame(websocket, payload))
+        if tasks is not None:
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
 
 
 async def _send_decoded_frame(websocket: WebSocket, payload: str) -> None:
@@ -330,7 +360,34 @@ async def _send_decoded_frame(websocket: WebSocket, payload: str) -> None:
         return
 
 
-async def _handle_client_text(session, raw: str, decoder: _DecoderState) -> None:
+def _decode_client_input(
+    websocket: WebSocket | None,
+    decoder: _DecoderState,
+    chunk: bytes,
+) -> None:
+    """Decode what the operator typed as tx, the way binary input is.
+
+    Every shipped frontend sends keystrokes as ``{"type": "stdin"}`` text
+    frames, not binary ones, so leaving this to the binary path meant the
+    decoded pane never showed a tx entry at all: the only trace of a typed
+    command was the modem echoing it back, credited to the modem.
+    """
+    if websocket is None or not decoder.enabled or len(chunk) == 0:
+        return
+    # Pressing Enter in a terminal sends a bare CR, and the accumulator
+    # only completes a line on LF, so typed input would sit in the buffer
+    # unterminated and never decode. The modem's echo arrives CRLF and
+    # decodes fine, which is why a typed command showed up as rx only.
+    normalized = chunk.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    _emit_decoded(websocket, decoder.tx_accumulator, normalized, "tx", decoder.tasks)
+
+
+async def _handle_client_text(
+    session,
+    raw: str,
+    decoder: _DecoderState,
+    websocket: WebSocket | None = None,
+) -> None:
     """JSON control frames; falls back to raw stdin for unknown shapes."""
     payload: Optional[dict] = None
     try:
@@ -343,9 +400,7 @@ async def _handle_client_text(session, raw: str, decoder: _DecoderState) -> None
     if payload is None:
         chunk = raw.encode("utf-8", errors="replace")
         session.send(chunk)
-        if decoder.enabled:
-            for _ in decoder.tx_accumulator.feed(chunk):
-                pass
+        _decode_client_input(websocket, decoder, chunk)
         return
 
     kind = str(payload.get("type") or "").lower()
@@ -353,11 +408,7 @@ async def _handle_client_text(session, raw: str, decoder: _DecoderState) -> None
         data = payload.get("data") or ""
         chunk = str(data).encode("utf-8", errors="replace")
         session.send(chunk)
-        # AT decode for the typed-stdin path is handled by the caller
-        # of _emit_decoded — this branch only handles the
-        # PTY-write side-effect; the byte stream of typed input shows
-        # up via the tx_accumulator already because the WS receive loop
-        # mirrors the bytes through _emit_decoded for binary frames.
+        _decode_client_input(websocket, decoder, chunk)
         return
     if kind == "resize":
         rows = int(payload.get("rows") or 0)

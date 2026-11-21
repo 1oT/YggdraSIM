@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Offline-tool Command Center actions.
 
-Wraps the pure-function engine panels (BER-TLV parse, ASN.1/TLV decode,
-SW translate, EUICCInfo2 decode, SAIP lint, eIM lint, GSMA error-code
-tables) as Command Center actions so the same task lives alongside
-subsystem flows in one unified surface. No hardware is involved;
-dispatchers run synchronously on the FastAPI threadpool.
+The context decoder, the ASN.1/TLV decode against a schema, the TERMINAL
+PROFILE decode and build, SAIP lint, eIM lint and the GSMA error-code
+tables as Command Center actions, so the same task lives alongside the
+subsystem flows. No hardware is involved; dispatchers run synchronously
+on the FastAPI threadpool. A bare TLV, a status word, an EUICCInfo2 and
+an EUICCResponse have no action of their own: the context decoder reads
+each of them.
 
 All dispatchers resolve their backend through
 ``yggdrasim_common.registry`` so the action layer stays uncoupled from
@@ -20,6 +21,7 @@ from __future__ import annotations
 import binascii
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -65,66 +67,9 @@ def _schema_paths_from_text(raw: Any) -> list[Path] | None:
     return paths or None
 
 
-def _tlv_dict_to_nodes(parsed: dict) -> list[dict[str, Any]]:
-    """Same projection the ``/api/tools/tlv/parse`` route uses, but returns
-    plain dicts (the GUI can JSON-round-trip these directly).
-    """
-    nodes: list[dict[str, Any]] = []
-    for tag_int, raw_value in parsed.items():
-        values = raw_value if isinstance(raw_value, list) else [raw_value]
-        for value in values:
-            tag_hex = format(tag_int, "X")
-            if len(tag_hex) % 2 == 1:
-                tag_hex = "0" + tag_hex
-            if isinstance(value, dict):
-                children = _tlv_dict_to_nodes(value)
-                total = _estimate_nested_length(value)
-                nodes.append({
-                    "tag_hex": tag_hex,
-                    "length": total,
-                    "children": children,
-                })
-            else:
-                raw_bytes = bytes(value) if isinstance(value, (bytes, bytearray)) else b""
-                nodes.append({
-                    "tag_hex": tag_hex,
-                    "length": len(raw_bytes),
-                    "value_hex": raw_bytes.hex().upper(),
-                })
-    return nodes
-
-
-def _estimate_nested_length(parsed: dict) -> int:
-    total = 0
-    for raw_value in parsed.values():
-        values = raw_value if isinstance(raw_value, list) else [raw_value]
-        for value in values:
-            if isinstance(value, dict):
-                total += _estimate_nested_length(value)
-            elif isinstance(value, (bytes, bytearray)):
-                total += len(value)
-    return total
-
-
 # ----------------------------------------------------------------------
 # Dispatchers
 # ----------------------------------------------------------------------
-
-
-def _dispatch_tlv_decode(ctx: ActionContext, *, hex: Any = None) -> dict[str, Any]:
-    from yggdrasim_common import registry as yggdrasim_registry
-
-    data = _parse_hex(str(hex or ""), field_name="hex")
-    parser_cls = yggdrasim_registry.get("scp03.core.utils.tlv")
-    result = parser_cls.parse_detailed(data)
-    nodes = _tlv_dict_to_nodes(result["parsed"])
-    return {
-        "complete": bool(result.get("complete", False)),
-        "consumed": int(result.get("consumed", 0)),
-        "error": result.get("error"),
-        "nodes": nodes,
-        "input_length": len(data),
-    }
 
 
 def _dispatch_asn1_tlv_decode(
@@ -157,62 +102,27 @@ def _dispatch_asn1_tlv_decode(
         raise ValueError(f"ASN.1/TLV decode failed: {error}") from error
 
 
-def _dispatch_sw_lookup(ctx: ActionContext, *, sw: Any = None) -> dict[str, Any]:
-    from yggdrasim_common import registry as yggdrasim_registry
+# What the Decoder panel shows of one input: the page draws a card per exchange, and a thousand
+# of them (some 55 000 nodes, a few megabytes of JSON) is a size seen to render at once.
+CONTEXT_DECODE_PANEL_EXCHANGES = 1000
 
-    raw = str(sw or "").replace(" ", "").strip().upper()
-    if len(raw) != 4:
-        raise ValueError("sw must be exactly 4 hex characters (e.g. '9000').")
+
+def _dispatch_context_decode(
+    ctx: ActionContext,
+    *,
+    input_text: Any = None,
+    context: Any = None,
+) -> dict[str, Any]:
+    from Tools.Asn1TlvDecode.context import decode_context_text
+    from Tools.Asn1TlvDecode.main import DecodeError
+
+    text = str(input_text or "")
+    if len(text.strip()) == 0:
+        raise ValueError("input_text is empty.")
     try:
-        data = binascii.unhexlify(raw)
-    except (binascii.Error, ValueError) as error:
-        raise ValueError(f"sw is not valid hex: {error}") from error
-    sw1, sw2 = data[0], data[1]
-    translator_cls = yggdrasim_registry.get("scp03.core.utils.sw")
-    description = translator_cls.translate(sw1, sw2)
-    return {
-        "sw_hex": format((sw1 << 8) | sw2, "04X"),
-        "sw1": sw1,
-        "sw2": sw2,
-        "description": description,
-    }
-
-
-def _dispatch_euicc_info2(ctx: ActionContext, *, hex: Any = None) -> dict[str, Any]:
-    from yggdrasim_common import registry as yggdrasim_registry
-
-    data = _parse_hex(str(hex or ""), field_name="hex")
-    if len(data) < 2 or data[:2] != b"\xBF\x22":
-        raise ValueError("EUICCInfo2 payload must start with tag BF22.")
-    build_detail = yggdrasim_registry.get("scp03.logic.euicc_info2.build_detail")
-    build_validation = yggdrasim_registry.get("scp03.logic.euicc_info2.build_validation")
-    try:
-        detail_tuples = build_detail(data)
-    except Exception as error:
-        raise ValueError(f"EUICCInfo2 decode failed: {error}") from error
-    try:
-        validation_tuples = build_validation(data)
-    except Exception as error:
-        raise ValueError(f"EUICCInfo2 validation failed: {error}") from error
-
-    detail = [
-        {"indent": int(i), "label": str(l), "value": str(v)} for i, l, v in detail_tuples
-    ]
-    validation = [
-        {"indent": int(i), "label": str(l), "value": str(v)} for i, l, v in validation_tuples
-    ]
-    return {
-        "detail_lines": detail,
-        "validation_lines": validation,
-        "input_length": len(data),
-    }
-
-
-def _dispatch_sima_response_decode(ctx: ActionContext, *, hex: Any = None) -> dict[str, Any]:
-    from SCP11.shared.sima_response import decode_sima_response
-
-    data = _parse_hex(str(hex or ""), field_name="hex")
-    return decode_sima_response(data)
+        return decode_context_text(text, hint=str(context or "auto"), max_exchanges=CONTEXT_DECODE_PANEL_EXCHANGES)
+    except DecodeError as error:
+        raise ValueError(f"Context decode failed: {error}") from error
 
 
 def _dispatch_saip_lint(
@@ -278,6 +188,12 @@ def _dispatch_gsma_codes(ctx: ActionContext) -> dict[str, Any]:
 
     wanted = [
         ("es10b_profile_state", "SGP22_ES10B_PROFILE_STATE_RESULT"),
+        # SGP.22 v3.1 §5.7.16 to §5.7.18 give each of the three functions its
+        # own enumeration; the merged table above cannot name a value whose
+        # meaning differs between them.
+        ("enable_profile", "SGP22_ENABLE_PROFILE_RESULT"),
+        ("disable_profile", "SGP22_DISABLE_PROFILE_RESULT"),
+        ("delete_profile", "SGP22_DELETE_PROFILE_RESULT"),
         ("notification_sent", "SGP22_NOTIFICATION_SENT_RESULT"),
         ("download_error", "SGP22_DOWNLOAD_ERROR_CODE"),
         ("profile_installation", "SGP22_PROFILE_INSTALLATION_RESULT_REASON"),
@@ -296,31 +212,191 @@ def _dispatch_gsma_codes(ctx: ActionContext) -> dict[str, Any]:
     return {"tables": tables, "order": order}
 
 
+_TP_ADDRESS_LIST = r"^\s*\d{1,3}\.\d(?:-\d)?(?:\s*[,\s]\s*\d{1,3}\.\d(?:-\d)?)*\s*$"
+
+
+def _tp_items(raw: Any) -> list[str]:
+    """One facility per line; a line of addresses only may hold several, comma-separated.
+
+    A facility name may itself contain commas ("MCC, MNC, LAC, Cell ID & IMEI"),
+    so only a line made of addresses is split.
+    """
+    items: list[str] = []
+    for line in str(raw or "").splitlines():
+        text = line.strip()
+        if len(text) == 0:
+            continue
+        if re.match(_TP_ADDRESS_LIST, text):
+            items.extend(part for part in re.split(r"[,\s]+", text) if part)
+        else:
+            items.append(text)
+    return items
+
+
+def _tp_values(raw: Any) -> list[tuple[str, int]]:
+    """``ADDRESS=VALUE`` per line or comma-separated; VALUE in decimal or 0x hex."""
+    values: list[tuple[str, int]] = []
+    for line in str(raw or "").splitlines():
+        for chunk in line.split(","):
+            text = chunk.strip()
+            if len(text) == 0:
+                continue
+            item, separator, value = text.rpartition("=")
+            if separator != "=" or len(item.strip()) == 0:
+                raise ValueError(f"field value {text!r} is not ADDRESS=VALUE")
+            try:
+                values.append((item.strip(), int(value.strip(), 0)))
+            except ValueError as error:
+                raise ValueError(f"field value {text!r}: {value.strip()!r} is not a number") from error
+    return values
+
+
+def _tp_detail_lines(result: Any, *, set_only: bool) -> list[dict[str, Any]]:
+    """One line per byte, the bits and fields under it, the TS 31.111 reading under those."""
+    from yggdrasim_common import terminal_profile
+
+    data = result.profile
+    lines: list[dict[str, Any]] = []
+    current_byte = 0
+    for facility, value in result.values:
+        if set_only and value == 0:
+            continue
+        if facility.byte != current_byte:
+            current_byte = facility.byte
+            title = terminal_profile.BYTE_TITLES.get(current_byte, "")
+            lines.append({
+                "indent": 0,
+                "label": f"Byte {current_byte}" + (f" ({title})" if title else ""),
+                "value": f"{data[current_byte - 1]:02X}" if current_byte <= len(data) else "absent",
+            })
+        shown = ("yes" if value else "no") if facility.width == 1 else str(value)
+        lines.append({
+            "indent": 1,
+            "label": f"{facility.address} {facility.describe()}",
+            "value": shown,
+        })
+        if len(facility.usat) > 0:
+            lines.append({"indent": 2, "label": "TS 31.111", "value": facility.usat})
+    return lines
+
+
+def _tp_finding_lines(findings: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "indent": 0,
+            "label": f"{finding.severity} {finding.address}".strip(),
+            "value": finding.text,
+        }
+        for finding in findings
+    ]
+
+
+def _dispatch_tp_decode(
+    ctx: ActionContext,
+    *,
+    profile: Any = None,
+    compare: Any = None,
+    show: Any = None,
+) -> dict[str, Any]:
+    from yggdrasim_common import terminal_profile
+
+    data, notes = terminal_profile.split_apdu(terminal_profile.parse_hex(str(profile or "")))
+    compare_text = str(compare or "").strip()
+    if len(compare_text) > 0:
+        other, other_notes = terminal_profile.split_apdu(terminal_profile.parse_hex(compare_text))
+        changed = terminal_profile.diff(data, other)
+        detail = [
+            {"indent": 0, "label": "Profile", "value": data.hex().upper()},
+            {"indent": 0, "label": "Compared with", "value": other.hex().upper()},
+        ]
+        detail.extend(
+            {
+                "indent": 1,
+                "label": f"{facility.address} {facility.describe()}",
+                "value": f"{left} -> {right}",
+            }
+            for facility, left, right in changed
+        )
+        return {
+            "input_length": len(data),
+            "note": (
+                terminal_profile.count_text(len(changed), "facility differs", "facilities differ")
+                + f" between the profile ({len(data)} B) and the comparison ({len(other)} B)."
+            ),
+            "detail_lines": detail,
+            "validation_lines": _tp_finding_lines(list(notes) + list(other_notes)),
+        }
+    result = terminal_profile.decode(data)
+    set_only = str(show or "all").strip().lower() == "set"
+    detail = [{"indent": 0, "label": "Profile", "value": data.hex().upper() or "(empty)"}]
+    detail.extend(_tp_detail_lines(result, set_only=set_only))
+    return {
+        "input_length": len(data),
+        "note": (
+            f"TERMINAL PROFILE, {terminal_profile.count_text(len(data), 'byte', 'bytes')} "
+            f"({terminal_profile.SPEC})."
+        ),
+        "detail_lines": detail,
+        "validation_lines": _tp_finding_lines(list(notes) + list(result.findings)),
+    }
+
+
+_TP_BASES = ("maximal", "empty", "pasted")
+
+
+def _dispatch_tp_build(
+    ctx: ActionContext,
+    *,
+    base: Any = None,
+    base_profile: Any = None,
+    set_items: Any = None,
+    clear_items: Any = None,
+    field_values: Any = None,
+    length: Any = None,
+) -> dict[str, Any]:
+    from yggdrasim_common import terminal_profile
+
+    base_name = str(base or "maximal").strip().lower()
+    if base_name not in _TP_BASES:
+        raise ValueError(f"base must be one of {', '.join(_TP_BASES)}.")
+    start = b""
+    if base_name == "maximal":
+        start = terminal_profile.maximal()
+    elif base_name == "pasted":
+        if len(str(base_profile or "").strip()) == 0:
+            raise ValueError("base_profile is empty; paste the profile to start from.")
+        start, _ = terminal_profile.split_apdu(terminal_profile.parse_hex(str(base_profile)))
+    built = terminal_profile.build(
+        start,
+        set_items=_tp_items(set_items),
+        clear_items=_tp_items(clear_items),
+        values=_tp_values(field_values),
+        length=None if length is None else int(length),
+    )
+    result = terminal_profile.decode(built)
+    detail = [
+        {"indent": 0, "label": "Profile", "value": built.hex().upper() or "(empty)"},
+        {
+            "indent": 0,
+            "label": "TERMINAL PROFILE APDU",
+            "value": terminal_profile.terminal_profile_apdu(built).hex().upper(),
+        },
+    ]
+    detail.extend(_tp_detail_lines(result, set_only=True))
+    return {
+        "input_length": len(built),
+        "note": (
+            f"Built from the {base_name} profile: "
+            f"{terminal_profile.count_text(len(built), 'byte', 'bytes')}."
+        ),
+        "detail_lines": detail,
+        "validation_lines": _tp_finding_lines(result.findings),
+    }
+
+
 # ----------------------------------------------------------------------
 # Spec registration
 # ----------------------------------------------------------------------
-
-
-TLV_DECODE_SPEC = ActionSpec(
-    id="tool.tlv.decode",
-    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="TLV parse",
-    description="Decode a BER-TLV hex buffer into a tag / length / value tree.",
-    inputs=(
-        ActionField(
-            name="hex",
-            label="TLV hex",
-            kind="hex",
-            required=True,
-            multiline=True,
-            placeholder="6F 16 84 08 A0 00 00 01 51 00 00 00 …",
-            help="Compact or spaced hex; mixed case allowed.",
-        ),
-    ),
-    output_kind="tlv_tree",
-    dispatcher=_dispatch_tlv_decode,
-    tags=("decode", "tlv"),
-)
 
 
 ASN1_TLV_DECODE_SPEC = ActionSpec(
@@ -374,68 +450,54 @@ ASN1_TLV_DECODE_SPEC = ActionSpec(
 )
 
 
-SW_LOOKUP_SPEC = ActionSpec(
-    id="tool.sw.lookup",
+CONTEXT_DECODE_SPEC = ActionSpec(
+    id="tool.decoder.context",
     subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="Status-word lookup",
-    description="Translate a 2-byte SW response (e.g. 9000, 6A82) into a human description.",
-    inputs=(
-        ActionField(
-            name="sw",
-            label="SW",
-            kind="string",
-            required=True,
-            placeholder="9000",
-            help="Two-byte hex, e.g. '9000', '6A 82', '6982'.",
-        ),
+    title="Context decoder",
+    description=(
+        "Decode an APDU, a response, a bare TLV, a status word, a script of "
+        "one command per row or a whole exchange trace against the "
+        "specification the CLA/INS pair selects: UICC file commands, CAT, "
+        "GlobalPlatform, ES10 and 3GPP authentication. A "
+        "ProfileInstallationResult or a bare EUICCResponse is headed by its "
+        "outcome, and an EUICCInfo2 carries the SGP.32 check."
     ),
-    output_kind="json",
-    dispatcher=_dispatch_sw_lookup,
-    tags=("decode", "sw"),
-)
-
-
-EUICC_INFO2_SPEC = ActionSpec(
-    id="tool.euicc_info2.decode",
-    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="EUICCInfo2 decode",
-    description="Decode an EUICCInfo2 (tag BF22) TLV blob into labeled detail lines + validation.",
     inputs=(
         ActionField(
-            name="hex",
-            label="EUICCInfo2 hex",
-            kind="hex",
+            name="input_text",
+            label="APDU, response, TLV, script or trace",
+            kind="text",
             required=True,
             multiline=True,
-            placeholder="BF 22 81 …",
-            help="Compact hex of the EUICCInfo2 response.",
+            placeholder="00A4040407A0000000871002\n< 6F...9000",
+            help=(
+                "One hex string, or several rows: one command per row as in a "
+                "script file (# starts a comment), or exchanges. Rows may start "
+                "with >, <, ->, <-, C:, R: or carry sw=XXXX; without a marker a "
+                "row that is a known command starts a new exchange and any other "
+                "row answers the one above. Separators and 0x prefixes are "
+                "ignored. AT+CSIM, +CRSM, +CGLA and +CRLA lines are read as "
+                "exchanges; PEM, a JSON body, base64, an identifier in digits, "
+                "an ATR and TLS records are read where hex is not."
+            ),
         ),
-    ),
-    output_kind="key_value_lines",
-    dispatcher=_dispatch_euicc_info2,
-    tags=("decode", "euicc"),
-)
-
-
-SIMA_RESPONSE_DECODE_SPEC = ActionSpec(
-    id="tool.sima_response.decode",
-    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
-    title="SIMa response decode",
-    description="Decode a SIMa simaResponse TLV into final-result fields and a TLV tree.",
-    inputs=(
         ActionField(
-            name="hex",
-            label="SIMa response hex",
-            kind="hex",
-            required=True,
-            multiline=True,
-            placeholder="30 07 A0 05 30 03 80 01 00",
-            help="Paste the simaResponse value from ProfileInstallationResult.",
+            name="context",
+            label="Context",
+            kind="enum",
+            required=False,
+            default="auto",
+            choices=["auto", "apdu", "response", "es10", "gp", "uicc", "cat", "tlv", "sw", "ef"],
+            help=(
+                "Auto detects from CLA/INS and the leading tag; pick a domain to force it. "
+                "apdu reads every row as a command, response every row as an answer. "
+                "ef reads the content of a file: the file identifier on the first line, the content below."
+            ),
         ),
     ),
-    output_kind="sima_response",
-    dispatcher=_dispatch_sima_response_decode,
-    tags=("decode", "sima", "sgp22"),
+    output_kind="context_decode",
+    dispatcher=_dispatch_context_decode,
+    tags=("decode", "apdu", "tlv", "es10", "gp", "cat"),
 )
 
 
@@ -488,7 +550,7 @@ EIM_LINT_SPEC = ActionSpec(
             kind="text",
             required=True,
             multiline=True,
-            placeholder="{ \"header\": { … }, \"body\": { … } }",
+            placeholder="{ \"header\": { ... }, \"body\": { ... } }",
         ),
     ),
     output_kind="json",
@@ -509,11 +571,132 @@ GSMA_CODES_SPEC = ActionSpec(
 )
 
 
-get_registry().register(TLV_DECODE_SPEC)
+TP_DECODE_SPEC = ActionSpec(
+    id="tool.tp.decode",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
+    title="TERMINAL PROFILE decode",
+    description=(
+        "Name each facility a TERMINAL PROFILE claims (ETSI TS 102 223 §5.2, "
+        "3GPP TS 31.111 §5.2), report bits its coding keeps 0, or compare two profiles."
+    ),
+    inputs=(
+        ActionField(
+            name="profile",
+            label="Profile hex",
+            kind="text",
+            required=True,
+            multiline=True,
+            placeholder="80 10 00 00 27 FF FF FF FF 1F ...",
+            help=(
+                "The profile bytes or the whole TERMINAL PROFILE APDU; spaces, "
+                "colons and 0x prefixes are accepted."
+            ),
+        ),
+        ActionField(
+            name="compare",
+            label="Compare with",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="FF FF FF FF 1F ...",
+            help="Optional second profile; the result then lists only the facilities that differ.",
+        ),
+        ActionField(
+            name="show",
+            label="Show",
+            kind="enum",
+            required=False,
+            default="all",
+            choices=["all", "set"],
+            help="all lists every bit and field; set lists only what the profile claims.",
+        ),
+    ),
+    output_kind="key_value_lines",
+    dispatcher=_dispatch_tp_decode,
+    tags=("decode", "cat", "terminal-profile"),
+)
+
+
+TP_BUILD_SPEC = ActionSpec(
+    id="tool.tp.build",
+    subsystem=OFFLINE_TOOLS_SUBSYSTEM,
+    title="TERMINAL PROFILE build",
+    description=(
+        "Build a TERMINAL PROFILE by setting and clearing facilities and count fields, "
+        "starting from the toolchain's maximal profile, an empty one or a pasted one."
+    ),
+    inputs=(
+        ActionField(
+            name="base",
+            label="Start from",
+            kind="enum",
+            required=False,
+            default="maximal",
+            choices=list(_TP_BASES),
+            help=(
+                "maximal is the profile every YggdraSIM shell sends: every facility "
+                "claimed, every bit coded 0 left clear."
+            ),
+        ),
+        ActionField(
+            name="base_profile",
+            label="Pasted profile",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="FF FF FF FF 1F ...",
+            help="Used when Start from is pasted; the whole APDU is accepted too.",
+        ),
+        ActionField(
+            name="set_items",
+            label="Set",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="5.5\nEvent: Data available",
+            help=(
+                "One facility per line, by byte.bit as the specification counts them "
+                "(5.5 = byte 5 b5) or by a piece of its name; addresses may share a line."
+            ),
+        ),
+        ActionField(
+            name="clear_items",
+            label="Clear",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="33.1",
+            help="Same form as Set; clearing a field sets it to 0.",
+        ),
+        ActionField(
+            name="field_values",
+            label="Field values",
+            kind="text",
+            required=False,
+            multiline=True,
+            placeholder="13.6-8=1\n11.1-8=0x08",
+            help="ADDRESS=VALUE per line, decimal or 0x; a field by its bit range.",
+        ),
+        ActionField(
+            name="length",
+            label="Length",
+            kind="int",
+            required=False,
+            min_value=0,
+            max_value=255,
+            help="Optional; pads with zero bytes and never cuts a byte that carries a set bit.",
+        ),
+    ),
+    output_kind="key_value_lines",
+    dispatcher=_dispatch_tp_build,
+    tags=("build", "cat", "terminal-profile"),
+)
+
+
+get_registry().register(CONTEXT_DECODE_SPEC)
 get_registry().register(ASN1_TLV_DECODE_SPEC)
-get_registry().register(SW_LOOKUP_SPEC)
-get_registry().register(EUICC_INFO2_SPEC)
-get_registry().register(SIMA_RESPONSE_DECODE_SPEC)
 get_registry().register(SAIP_LINT_SPEC)
 get_registry().register(EIM_LINT_SPEC)
 get_registry().register(GSMA_CODES_SPEC)
+get_registry().register(TP_DECODE_SPEC)
+get_registry().register(TP_BUILD_SPEC)

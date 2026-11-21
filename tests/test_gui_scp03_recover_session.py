@@ -12,7 +12,7 @@ park the card in a state where SELECT-by-FID returns 6A82 until
 the card is cold-reset. Rather than pile more pre-restore retries
 on the backend, we added two things:
 
-1. **Backend**: ``scp03.recover_session`` — cold-reset the card,
+1. **Backend**: ``scp03.recover_session`` -- cold-reset the card,
    drop the secure-channel state, re-instantiate the
    ``FileSystemController``, walk MF, and swap the fresh controller
    into the session handle.
@@ -22,7 +22,7 @@ on the backend, we added two things:
    data optimistically, fires the fresh read underneath, and
    auto-fires a recovery + retry if the fresh read fails.
 
-These tests pin the contract of both halves — the backend is a
+These tests pin the contract of both halves -- the backend is a
 pure-Python unit test (no PC/SC, no pySim), the frontend is a
 static-bundle pin of the state / helper / wiring symbols.
 """
@@ -42,7 +42,7 @@ def _read(name: str) -> str:
 
 # ----------------------------------------------------------------------
 # Backend fakes (shared surface with test_gui_scp03_fs_state_restore.py,
-# kept inline so this file is self-contained — easier to read the
+# kept inline so this file is self-contained -- easier to read the
 # dispatcher contract without hopping across files).
 # ----------------------------------------------------------------------
 
@@ -124,7 +124,7 @@ def _install_fakes(monkeypatch, session: _FakeSession) -> None:
     monkeypatch.setattr(sessions_mod, "get_manager", lambda: _FakeManager(session))
 
     # ``_dispatch_recover_session`` does a local ``from SCP03.logic.fs
-    # import FileSystemController`` — patch the real module's attribute
+    # import FileSystemController`` -- patch the real module's attribute
     # so the dispatcher gets our drift-aware fake. The fake matches the
     # dispatcher's constructor signature (``(transporter)``).
     from SCP03.logic import fs as fs_mod
@@ -138,7 +138,7 @@ def _install_fakes(monkeypatch, session: _FakeSession) -> None:
 
 
 # ----------------------------------------------------------------------
-# Backend — ``scp03.recover_session`` dispatcher contract
+# Backend -- ``scp03.recover_session`` dispatcher contract
 # ----------------------------------------------------------------------
 
 
@@ -153,7 +153,7 @@ def test_recover_session_calls_cold_reset(monkeypatch) -> None:
 
     result = mod._dispatch_recover_session(ctx=object(), session_id=sess.id)
 
-    assert tp.reset_called == 1, "cold reset skipped — state won't recover"
+    assert tp.reset_called == 1, "cold reset skipped -- state won't recover"
     assert tp.reset_session_called == 1, \
         "secure-channel state must be dropped alongside the cold reset"
     assert result["reset_ok"] is True
@@ -165,7 +165,7 @@ def test_recover_session_swaps_fresh_fs_controller(monkeypatch) -> None:
 
     If we reused the old controller, its stale ``current_fid`` +
     ``current_fcp`` bookkeeping would silently confuse the next
-    ``_dispatch_read_selected`` call — defeating the whole point
+    ``_dispatch_read_selected`` call -- defeating the whole point
     of recovery.
     """
     from yggdrasim_common.gui_server.actions import scp03 as mod
@@ -208,7 +208,7 @@ def test_recover_session_returns_scan_shape(monkeypatch) -> None:
 
 
 def test_recover_session_survives_scan_failure(monkeypatch) -> None:
-    """If ``scan_tree`` raises, the dispatcher MUST still return — the
+    """If ``scan_tree`` raises, the dispatcher MUST still return -- the
     cold reset succeeded and is useful on its own."""
     from yggdrasim_common.gui_server.actions import scp03 as mod
     from SCP03.logic import fs as fs_mod
@@ -259,7 +259,7 @@ def test_recover_session_spec_registered() -> None:
 
 
 # ----------------------------------------------------------------------
-# Frontend — static contract of the cache + recovery flow
+# Frontend -- static contract of the cache + recovery flow
 # ----------------------------------------------------------------------
 
 
@@ -292,7 +292,7 @@ def test_cache_cleared_on_rescan() -> None:
     rescan_idx = js.index("async function scp03Rescan(tab")
     rescan_window = js[rescan_idx:rescan_idx + 1800]
     assert "tab.fcpCache = {}" in rescan_window, \
-        "rescan must drop the cache — the card may be different"
+        "rescan must drop the cache -- the card may be different"
 
 
 def test_frontend_helpers_present() -> None:
@@ -313,23 +313,23 @@ def test_read_selected_flow_calls_recovery_on_failure() -> None:
     """``readSelectedForTab`` MUST wire recovery + retry on failed reads."""
     js = _read("app.js")
     fn_idx = js.index("async function readSelectedForTab(tab, path, previewEl)")
-    # 12k is generous — covers the whole phased flow. If this ever
+    # 12k is generous -- covers the whole phased flow. If this ever
     # shrinks the assertion fails fast, because the recovery call would
     # drop out of the substring.
     block = js[fn_idx:fn_idx + 12000]
     # Phase 1: optimistic cache render before the wire read.
     assert "scp03RenderFromCache(" in block, \
-        "optimistic cache render missing — preview will flicker on click"
+        "optimistic cache render missing -- preview will flicker on click"
     # Phase 2: fresh read.
     assert "scp03DoReadSelected(tab, path)" in block, \
         "read-selected helper call missing"
     # Phase 3: recovery on failure.
     assert "scp03RecoverSession(tab)" in block, \
-        "no recovery call — reads that fail will never retry"
+        "no recovery call -- reads that fail will never retry"
     # Phase 4: retry after recovery.
     second_hit = block.count("scp03DoReadSelected(tab, path)")
     assert second_hit >= 2, \
-        "post-recovery retry missing — the whole point of the recovery flow"
+        "post-recovery retry missing -- the whole point of the recovery flow"
 
 
 def test_recovery_updates_scan_tree_in_place() -> None:
@@ -342,11 +342,11 @@ def test_recovery_updates_scan_tree_in_place() -> None:
     assert "data.tree" in fn_block, \
         "recovery response's tree field not read back into tab.scanData"
     assert "tab.lastRecoverAt" in fn_block, \
-        "recovery timestamp not stamped — banner age display goes blank"
+        "recovery timestamp not stamped -- banner age display goes blank"
 
 
 # ----------------------------------------------------------------------
-# CSS — status banner visual contract
+# CSS -- status banner visual contract
 # ----------------------------------------------------------------------
 
 

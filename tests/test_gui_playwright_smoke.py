@@ -9,14 +9,14 @@ boots, the token bootstrap works, the Command Center navigation renders,
 and the **SCP11 Local / Local SM-DP+** subsystem reaches its reader-scoped
 dashboard or reader-session gate.
 
-Self-skipping policy — the test is deliberately CI-inert until a
+Self-skipping policy -- the test is deliberately CI-inert until a
 headless-browser lane exists:
 
 * Skipped if ``fastapi`` / ``uvicorn`` are not importable (the GUI
   extra has not been installed).
 * Skipped if ``playwright`` is not importable.
 * Skipped if the Chromium browser binary is not available to
-  Playwright — the test never calls ``playwright install``.
+  Playwright -- the test never calls ``playwright install``.
 
 To run locally once the lane is wired:
 
@@ -48,7 +48,7 @@ import pytest
 
 
 _FASTAPI_AVAILABLE = True
-try:  # pragma: no cover — skip-path metadata
+try:  # pragma: no cover -- skip-path metadata
     import fastapi as _fastapi  # noqa: F401
     import uvicorn as _uvicorn  # noqa: F401
 except ImportError:
@@ -57,16 +57,16 @@ except ImportError:
 
 _PLAYWRIGHT_AVAILABLE = True
 _PLAYWRIGHT_IMPORT_ERROR = ""
-try:  # pragma: no cover — skip-path metadata
+try:  # pragma: no cover -- skip-path metadata
     from playwright.sync_api import sync_playwright  # type: ignore
-except ImportError as error:  # pragma: no cover — only triggered without pw
+except ImportError as error:  # pragma: no cover -- only triggered without pw
     _PLAYWRIGHT_AVAILABLE = False
     _PLAYWRIGHT_IMPORT_ERROR = str(error)
 
 
 needs_gui_stack = pytest.mark.skipif(
     not _FASTAPI_AVAILABLE,
-    reason="FastAPI / uvicorn not installed — gui extra missing.",
+    reason="FastAPI / uvicorn not installed -- gui extra missing.",
 )
 needs_playwright = pytest.mark.skipif(
     not _PLAYWRIGHT_AVAILABLE,
@@ -176,19 +176,19 @@ def _headless_gui_server():
 def _playwright_browser():
     """Module-scoped Chromium browser instance.
 
-    Skips if the Chromium binary isn't installed — we never invoke
+    Skips if the Chromium binary isn't installed -- we never invoke
     ``playwright install`` from the test suite.
     """
     if not _PLAYWRIGHT_AVAILABLE:
         pytest.skip("playwright not importable.")
     try:
         playwright_ctx = sync_playwright().start()
-    except Exception as error:  # pragma: no cover — import-time surprise
+    except Exception as error:  # pragma: no cover -- import-time surprise
         pytest.skip(f"playwright failed to start: {error!r}")
     try:
         try:
             browser = playwright_ctx.chromium.launch(headless=True)
-        except Exception as error:  # pragma: no cover — missing binary
+        except Exception as error:  # pragma: no cover -- missing binary
             pytest.skip(
                 "chromium binary unavailable to playwright "
                 f"({error!r}). Run `playwright install chromium` first."
@@ -227,9 +227,11 @@ class TestCommandCenterSmoke:
         # The SPA strips ``?t=<token>`` from the URL and stashes it in
         # sessionStorage on first paint, so a simple navigation is all
         # we need to authenticate every subsequent fetch.
-        page.goto(f"{base_url}/?t={token}", wait_until="domcontentloaded", timeout=10_000)
+        page.goto(
+            f"{base_url}/?t={token}", wait_until="domcontentloaded", timeout=10_000
+        )
 
-        # 1. API badge flips from "checking…" to "healthy" (or at least a
+        # 1. API badge flips from "checking..." to "healthy" (or at least a
         #    non-error state) once ``GET /api/health`` lands.
         page.wait_for_function(
             """() => {
@@ -286,11 +288,9 @@ class TestCommandCenterSmoke:
         # 4. Click over to the SCP03 subsystem and verify the workbench
         #    layout promoted the session-tab strip to the very top, shows
         #    the per-tab reader sidebar, and replaced the flat ribbon
-        #    with the grouped ribbon-tab strip. No card is required —
+        #    with the grouped ribbon-tab strip. No card is required --
         #    we only check the skeleton renders for a fresh tab.
-        page.click(
-            '#command-center-nav .subsystem-entry[data-cc-subsystem="SCP03"]'
-        )
+        page.click('#command-center-nav .subsystem-entry[data-cc-subsystem="SCP03"]')
         page.wait_for_selector(
             "#cc-actions .cc-workbench[data-wb='scp03'] .scp03-topbar",
             timeout=5_000,
@@ -299,7 +299,7 @@ class TestCommandCenterSmoke:
             "#cc-actions .cc-workbench[data-wb='scp03'] .scp03-shell .scp03-reader-pane",
             timeout=5_000,
         )
-        # Fresh tab has no session, so we expect the welcome panel —
+        # Fresh tab has no session, so we expect the welcome panel --
         # not the ribbon-v2. This asserts the welcome path is wired.
         page.wait_for_selector(
             "#cc-actions .scp03-session-main .scp03-session-welcome",

@@ -16,7 +16,12 @@
   overflow: auto;
   font-family: var(--font-mono);
   font-size: 12px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--surface-shadow);
+}
+
+/* Lines an action prints while it runs; its answer replaces them. */
+.cc-live-trace {
+  max-height: 260px;
 }
 
 .flow-row {

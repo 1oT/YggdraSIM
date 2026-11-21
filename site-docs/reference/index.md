@@ -44,6 +44,15 @@ list, or a structured cross-reference, not a walkthrough.
 
     [Open](cli-matrix.md)
 
+-   :material-tune-variant: __Environment Flags__
+
+    ---
+
+    Every `YGGDRASIM_*` flag: what it accepts, its default, and where an
+    override is stored.
+
+    [Open](env-flags.md)
+
 -   :material-database-outline: __State Schema__
 
     ---

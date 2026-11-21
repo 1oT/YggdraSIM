@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP11/shared/gsma_error_codes.py.
 
 Covers all 14 public functions:
@@ -124,9 +123,9 @@ class DescribeSgp32EimPackageResultErrorTests(unittest.TestCase):
 
 class DescribeSgp32ProfileDownloadErrorReasonTests(unittest.TestCase):
 
-    def test_code_1_transaction_id_error(self) -> None:
-        result = describe_sgp32_profile_download_error_reason(1)
-        self.assertIsInstance(result, str)
+    def test_code_104_ecall_active(self) -> None:
+        result = describe_sgp32_profile_download_error_reason(104)
+        self.assertEqual(result, "ecallActive(104)")
 
     def test_unknown_code_returns_string(self) -> None:
         result = describe_sgp32_profile_download_error_reason(254)
@@ -206,14 +205,14 @@ class ResolveSgp32EimPackageResultErrorCodeTests(unittest.TestCase):
 class ResolveSgp32ProfileDownloadErrorReasonCodeTests(unittest.TestCase):
 
     def test_known_int_passthrough(self) -> None:
-        self.assertEqual(resolve_sgp32_profile_download_error_reason_code(1), 1)
+        self.assertEqual(resolve_sgp32_profile_download_error_reason_code(104), 104)
 
     def test_unknown_returns_default(self) -> None:
         self.assertEqual(resolve_sgp32_profile_download_error_reason_code(500, 127), 127)
 
     def test_name_resolves(self) -> None:
-        result = resolve_sgp32_profile_download_error_reason_code("transactionIdError")
-        self.assertEqual(result, 1)
+        result = resolve_sgp32_profile_download_error_reason_code("ecallActive")
+        self.assertEqual(result, 104)
 
 
 if __name__ == "__main__":

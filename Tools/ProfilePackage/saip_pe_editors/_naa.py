@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """
 Filesystem-bearing PE editors (USIM / ISIM / CSIM / Telecom families).
 
@@ -22,12 +21,12 @@ The editor exposes:
   filesystem templates.
 * A check-tree of EF members so the operator can quickly see which EFs
   are currently materialised inside the PE. Toggling a check-box drops
-  the corresponding EF from the PE — adding new EFs still routes
+  the corresponding EF from the PE -- adding new EFs still routes
   through the existing "Add file" / template defaults flow because
   materialising a fresh EF requires the FCP defaults from
   ``saip_pe_quick_add``.
 
-This editor never mutates the EF *content* itself — that lives in the
+This editor never mutates the EF *content* itself -- that lives in the
 File System tab so the operator gets a single place to edit record
 bodies instead of hunting through the PE editor.
 """
@@ -52,7 +51,7 @@ from ._header import PeHeaderForm
 
 
 # Curated list of the SAIP eUICC filesystem template IDs the project
-# regularly ships. Used to populate the dropdown — operators can still
+# regularly ships. Used to populate the dropdown -- operators can still
 # type any OID into the input and the editor will accept it.
 _TEMPLATE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("2.23.143.1.2.1", "MF (TS 102 221)"),
@@ -187,7 +186,7 @@ class _NaaPeEditorBase(BasePeEditor):
         if len(ef_keys) == 0:
             host.mount(
                 Static(
-                    "(no EF members declared at the PE root — content lives "
+                    "(no EF members declared at the PE root -- content lives "
                     "under template defaults or has been suppressed)",
                     classes="naa_section_note",
                 ),

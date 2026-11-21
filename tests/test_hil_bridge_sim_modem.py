@@ -292,9 +292,9 @@ class HilBridgeSimulatedModemTests(unittest.TestCase):
         self.assertEqual(side_trip_sw1, 0x61)
 
         # 7FFF/<EF> must still resolve to the previously activated USIM
-        # because TS 102 221 §8.4.2.3 keeps the "currently selected
-        # application" sticky until an explicit SELECT-by-AID switches
-        # it.
+        # because TS 102 221 v18.4 §8.5.0 (application selection) lets
+        # only an explicit SELECT-by-AID change the current ADF that
+        # '7FFF' references.
         _, post_sw1, post_sw2 = self.channel.transmit(bytes.fromhex("00A40804047FFF6F07"))
         self.assertEqual(post_sw1, 0x61)
         post_fcp, post_drain_sw1, post_drain_sw2 = self._drain_get_response(0x00, post_sw2)

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for SCP03/logic/sgp32_decode.py pure utility functions.
 
 Covers: decode_integer, decode_text_or_hex, decode_bcd_digits,

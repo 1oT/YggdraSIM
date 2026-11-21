@@ -242,6 +242,50 @@ class LoaderKillSwitchTests(_EnvIsolationMixin, unittest.TestCase):
         self.assertIn("none", str(ctx.exception))
 
 
+class ShippedTemplateTests(_EnvIsolationMixin, unittest.TestCase):
+    """The seeded quirks file, unedited, starts the simulator without the gate.
+
+    A new runtime root seeds ``Workspace/SIMCARD/sim_quirks.py`` from the
+    template, which installs nothing; the gate used to refuse it, so the
+    simulator did not start until quirks were allowed or switched off.
+    """
+
+    def setUp(self) -> None:
+        self._clear_env()
+        self._temp = tempfile.TemporaryDirectory()
+        template = Path(__file__).resolve().parents[1] / "SIMCARD" / "sim_quirks_template.py"
+        self.template_bytes = template.read_bytes()
+        self.quirks_path = Path(self._temp.name) / "sim_quirks.py"
+
+    def tearDown(self) -> None:
+        self._clear_env()
+        self._temp.cleanup()
+
+    def test_unedited_seeded_copy_loads_as_an_empty_registry_without_the_gate(self) -> None:
+        self.quirks_path.write_bytes(self.template_bytes)
+
+        registry = load_quirk_registry(str(self.quirks_path))
+
+        self.assertEqual(len(registry.before_apdu_hooks), 0)
+        self.assertEqual(len(registry.after_apdu_hooks), 0)
+        self.assertEqual(len(registry.on_reset_hooks), 0)
+        self.assertEqual(len(registry.state_hooks), 0)
+
+    def test_an_edited_copy_still_needs_the_gate(self) -> None:
+        self.quirks_path.write_bytes(self.template_bytes + b"\nmetadata_overrides = {'atr': '3B00'}\n")
+
+        with self.assertRaises(PermissionError):
+            load_quirk_registry(str(self.quirks_path))
+
+    def test_one_changed_byte_is_an_edit(self) -> None:
+        changed = bytearray(self.template_bytes)
+        changed[-2] = ord("X") if changed[-2] != ord("X") else ord("Y")
+        self.quirks_path.write_bytes(bytes(changed))
+
+        with self.assertRaises(PermissionError):
+            load_quirk_registry(str(self.quirks_path))
+
+
 class EnvFlagRegistrationTests(unittest.TestCase):
     """Lock the new kill switch into the shared env-flag catalog."""
 

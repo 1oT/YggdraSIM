@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import plistlib
 import struct
 import sys
 import tempfile
@@ -56,8 +57,23 @@ class DesktopEntryRenderingTests(unittest.TestCase):
         self.assertIn("[Desktop Entry]", body)
         self.assertIn("Type=Application", body)
         self.assertIn("Terminal=false", body)
-        self.assertIn("Exec=/opt/bin/yggdrasim-desktop", body)
+        self.assertIn("Exec=/opt/bin/yggdrasim-desktop %f", body)
         self.assertIn("TryExec=/opt/bin/yggdrasim-desktop", body)
+
+    def test_entry_is_an_open_with_handler_for_text_files(self) -> None:
+        # ``%f`` hands the right-clicked file to the launcher and the MIME
+        # line lists the entry under Open With for .txt and .varder, which
+        # both resolve to text/plain. No type of its own is declared for
+        # .varder: a type whose only handler is this entry would make it
+        # the double-click default, which the entry must never be.
+        body = shortcuts.render_desktop_entry(_target("/opt/bin/yggdrasim-desktop"))
+        self.assertIn("\nMimeType=text/plain;\n", body)
+        self.assertNotIn("varder", body)
+        self.assertEqual(shortcuts.OPEN_WITH_MIME_TYPES, ("text/plain",))
+
+    def test_exec_field_code_is_not_percent_escaped(self) -> None:
+        line = shortcuts._desktop_exec_line(("/opt/100%/yggdrasim-desktop",))
+        self.assertEqual(line, "/opt/100%%/yggdrasim-desktop %f")
 
     def test_string_list_keys_are_semicolon_terminated(self) -> None:
         body = shortcuts.render_desktop_entry(_target("/opt/bin/yggdrasim-desktop"))
@@ -134,6 +150,45 @@ class LinuxInstallTests(unittest.TestCase):
             self.assertEqual(self._install(force=True), shortcuts.EXIT_OK)
         self.assertIn("Terminal=false", self.entry.read_text(encoding="utf-8"))
 
+    def _install_with_defaults(self, before: str, after: str) -> tuple[mock.Mock, mock.Mock]:
+        """Install with ``xdg-mime`` answering ``before`` then ``after``."""
+        query = mock.Mock(side_effect=[before, after])
+        setter = mock.Mock(return_value=True)
+        emit = mock.Mock()
+        with mock.patch.object(shortcuts, "_refresh_desktop_database", return_value=True), \
+                mock.patch.object(shortcuts, "query_default_handler", query), \
+                mock.patch.object(shortcuts, "set_default_handler", setter), \
+                mock.patch.object(shortcuts, "_emit", emit):
+            self.assertEqual(
+                shortcuts.install_linux(
+                    self.target, install_dir=self.install_dir, dry_run=False, force=False
+                ),
+                shortcuts.EXIT_OK,
+            )
+        return setter, emit
+
+    def test_install_puts_back_a_default_it_displaced(self) -> None:
+        setter, emit = self._install_with_defaults("editor.desktop", "yggdrasim.desktop")
+        setter.assert_called_once_with("editor.desktop", "text/plain")
+        self.assertTrue(
+            any("kept editor.desktop" in str(call.args[0]) for call in emit.call_args_list)
+        )
+
+    def test_install_leaves_an_unchanged_default_alone(self) -> None:
+        setter, _emit = self._install_with_defaults("editor.desktop", "editor.desktop")
+        setter.assert_not_called()
+
+    def test_install_reports_a_type_that_had_no_default(self) -> None:
+        setter, emit = self._install_with_defaults("", "yggdrasim.desktop")
+        setter.assert_not_called()
+        self.assertTrue(
+            any("no default application" in str(call.args[0]) for call in emit.call_args_list)
+        )
+
+    def test_install_skips_the_guard_when_xdg_mime_is_unknown(self) -> None:
+        setter, _emit = self._install_with_defaults(None, None)
+        setter.assert_not_called()
+
     def test_uninstall_removes_the_entry(self) -> None:
         with mock.patch.object(shortcuts, "_refresh_desktop_database"):
             self._install()
@@ -193,13 +248,82 @@ class WindowsShortcutRenderingTests(unittest.TestCase):
         self.assertIn("$link.TargetPath = 'C:/venv/Scripts/pythonw.exe'", script)
         self.assertIn("$link.Arguments = '-m main.gui'", script)
 
+    def test_open_with_registers_the_executable_by_file_name(self) -> None:
+        script = shortcuts.render_open_with_script(
+            _target(r"C:\Users\op\pipx\venvs\yggdrasim\Scripts\yggdrasim-desktop.exe")
+        )
+        self.assertIsNotNone(script)
+        assert script is not None
+        self.assertIn(
+            r"$app = 'HKCU:\Software\Classes\Applications\yggdrasim-desktop.exe'", script
+        )
+        self.assertIn(
+            r"""-Value '"C:\Users\op\pipx\venvs\yggdrasim\Scripts\yggdrasim-desktop.exe" "%1"'""",
+            script,
+        )
+        self.assertIn("-Name '.txt' -Value ''", script)
+        self.assertIn("-Name '.varder' -Value ''", script)
+        self.assertIn(r"'HKCU:\Software\Classes\.varder\OpenWithList\yggdrasim-desktop.exe'", script)
+        # The default stays with the operator's editor: nothing writes the
+        # UserChoice key or a ProgId under the extension itself.
+        self.assertNotIn("UserChoice", script)
+        self.assertNotIn(r"Classes\.txt' ", script)
+
+    def test_open_with_skips_the_module_fallback(self) -> None:
+        self.assertIsNone(
+            shortcuts.render_open_with_script(
+                _target("C:/venv/Scripts/pythonw.exe", "-m", "main.gui")
+            )
+        )
+
+    def test_open_with_removal_covers_both_entry_points(self) -> None:
+        script = shortcuts.render_open_with_removal_script()
+        self.assertIn(r"Applications\yggdrasim-desktop.exe'", script)
+        self.assertIn(r"Applications\yggdrasim-gui.exe'", script)
+        self.assertIn(r".txt\OpenWithList\yggdrasim-desktop.exe'", script)
+        self.assertIn("SilentlyContinue", script)
+
 
 class MacosAppletRenderingTests(unittest.TestCase):
     def test_applet_backgrounds_the_command(self) -> None:
         source = shortcuts.render_applescript(_target("/opt/bin/yggdrasim-desktop"))
-        self.assertTrue(source.startswith("do shell script"))
-        self.assertIn("'/opt/bin/yggdrasim-desktop'", source)
-        self.assertIn("> /dev/null 2>&1 &", source)
+        self.assertTrue(source.startswith("on run\n"))
+        self.assertIn('do shell script "\'/opt/bin/yggdrasim-desktop\' > /dev/null 2>&1 &"', source)
+        self.assertEqual(source.count("> /dev/null 2>&1 &"), 2)
+
+    def test_applet_opens_dropped_files_through_the_launcher(self) -> None:
+        source = shortcuts.render_applescript(_target("/opt/bin/yggdrasim-desktop"))
+        self.assertIn("on open theItems", source)
+        self.assertIn("quoted form of POSIX path of anItem", source)
+        self.assertIn(
+            'do shell script "\'/opt/bin/yggdrasim-desktop\'" & fileArguments & " > /dev/null 2>&1 &"',
+            source,
+        )
+
+    def test_document_types_are_declared_as_alternate_handlers(self) -> None:
+        with tempfile.TemporaryDirectory() as work_dir:
+            app_path = Path(work_dir) / "YggdraSIM.app"
+            contents = app_path / "Contents"
+            contents.mkdir(parents=True)
+            with (contents / "Info.plist").open("wb") as handle:
+                plistlib.dump({"CFBundleName": "YggdraSIM"}, handle)
+            with mock.patch.object(shortcuts, "_emit"):
+                self.assertTrue(shortcuts.apply_macos_document_types(app_path, dry_run=False))
+            with (contents / "Info.plist").open("rb") as handle:
+                info = plistlib.load(handle)
+        self.assertEqual(info["CFBundleName"], "YggdraSIM")
+        types_declared = info["CFBundleDocumentTypes"]
+        self.assertEqual(len(types_declared), 2)
+        self.assertTrue(all(entry["LSHandlerRank"] == "Alternate" for entry in types_declared))
+        self.assertEqual(types_declared[0]["LSItemContentTypes"], ["public.plain-text"])
+        self.assertEqual(types_declared[1]["CFBundleTypeExtensions"], ["varder"])
+
+    def test_document_types_dry_run_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as work_dir:
+            app_path = Path(work_dir) / "YggdraSIM.app"
+            with mock.patch.object(shortcuts, "_emit"):
+                self.assertTrue(shortcuts.apply_macos_document_types(app_path, dry_run=True))
+            self.assertFalse(app_path.exists())
 
     def test_user_applications_dir_is_the_default(self) -> None:
         self.assertEqual(

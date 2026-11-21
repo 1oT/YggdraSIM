@@ -6,36 +6,36 @@
 
 /* -- Theme: Catppuccin · Latte (warm pastel light, mauve accent) --------- */
 html[data-theme="catppuccin-latte"] {
-  --bg: #eff1f5;
+  --bg: #e6e9ef;
   --bg-elev: #ffffff;
-  --bg-elev-2: #e6e9ef;
+  --bg-elev-2: #dce0e8;
   --surface: #ffffff;
-  --surface-alt: rgba(0, 0, 0, 0.04);
+  --surface-alt: rgba(0, 0, 0, 0.05);
   --bg-hover: rgba(76, 79, 105, 0.06);
-  --border: rgba(76, 79, 105, 0.16);
-  --border-strong: rgba(76, 79, 105, 0.30);
+  --border: rgba(76, 79, 105, 0.28);
+  --border-strong: rgba(76, 79, 105, 0.48);
   --fg: #4c4f69;
-  --fg-dim: #626579;
+  --fg-dim: #5c5f72;
   --fg-muted: var(--fg-dim);
-  --accent: #8839ef;
+  --accent: #7f2fe6;
   --accent-strong: #1e66d0;
   --accent-soft: rgba(136, 57, 239, 0.10);
   --accent-fg: #ffffff;
   --accent-glow: rgba(136, 57, 239, 0.32);
-  --gradient-accent: linear-gradient(135deg, #8839ef 0%, #1e66d0 60%, #0e6097 100%);
-  --gradient-brand: linear-gradient(135deg, #8839ef 0%, #8f3b80 100%);
+  --gradient-accent: linear-gradient(135deg, #7f2fe6 0%, #1e66d0 60%, #0e6097 100%);
+  --gradient-brand: linear-gradient(135deg, #7f2fe6 0%, #8f3b80 100%);
   --ok: #246817;
   --ok-soft: rgba(64, 160, 43, 0.14);
   --warn: #8a5200;
   --warn-soft: rgba(223, 142, 29, 0.14);
-  --fail: #d20f39;
+  --fail: #c60d35;
   --fail-soft: rgba(210, 15, 57, 0.14);
   --code-bg: #e6e9ef;
   --kbd-bg: rgba(239, 241, 245, 0.98);
-  --shadow-card: 0 10px 26px rgba(76, 79, 105, 0.08);
-  --shadow-card-hover: 0 20px 44px rgba(76, 79, 105, 0.14);
+  --shadow-card: 0 1px 2px rgba(76, 79, 105, 0.06), 0 8px 22px -6px rgba(76, 79, 105, 0.14);
+  --shadow-card-hover: 0 2px 4px rgba(76, 79, 105, 0.08), 0 16px 34px -8px rgba(76, 79, 105, 0.20);
   --shadow-glow-accent: 0 0 0 1px var(--accent-soft), 0 14px 36px -12px var(--accent-glow);
-  --topbar-bg: rgba(255, 255, 255, 0.84);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
   --theme-tint:
     radial-gradient(circle at 8% 4%, rgba(136, 57, 239, 0.10), transparent 42%),
     radial-gradient(circle at 90% 96%, rgba(30, 102, 245, 0.08), transparent 46%),

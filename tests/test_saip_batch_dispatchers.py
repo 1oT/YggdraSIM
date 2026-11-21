@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Integration tests for ``saip.batch_lint_paths`` and ``saip.batch_personalize``.
 
 These dispatchers are the GUI-side equivalents of the CLI verbs
@@ -138,7 +137,7 @@ class BatchPersonalizeTests(unittest.TestCase):
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _make_template(self) -> Path:
-        # Minimal placeholder-bearing template — the engine expects a
+        # Minimal placeholder-bearing template -- the engine expects a
         # transcoded JSON document with __ygg_token_defs__ + at least
         # one occurrence of each placeholder.
         template_path = self._tmpdir / "template.json"

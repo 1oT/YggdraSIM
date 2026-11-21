@@ -414,7 +414,19 @@ class ProductionReleaseIsolationTests(unittest.TestCase):
         )
         self.assertIn("gh release create", publish)
         self.assertIn("--verify-tag", publish)
-        self.assertIn("--notes-from-tag", publish)
+        # The checkout's refs/tags/<tag> is the commit (actions/checkout
+        # issue 290), so a local-tag read publishes the commit message.
+        # The body is the verified tag object's message, judged before
+        # creation and read back after it.
+        self.assertNotIn("--notes-from-tag", publish)
+        for marker in (
+            "git/tags/${TAG_OBJECT}\" --jq '.message'",
+            "scripts/release/release_notes.py check",
+            "--changelog CHANGELOG.md",
+            '--notes-file "${NOTES}"',
+            "scripts/release/release_notes.py published",
+        ):
+            self.assertIn(marker, publish)
         self.assertIn(PINNED_ATTEST_ACTION, publish)
         self.assertRegex(
             publish,
@@ -435,6 +447,9 @@ class ProductionReleaseIsolationTests(unittest.TestCase):
             'git rev-list -n 1 "refs/tags/${TAG}"',
             "refs/remotes/origin/main",
             'git merge-base --is-ancestor "${GITHUB_SHA}"',
+            "git for-each-ref --format='%(contents)'",
+            "scripts/release/release_notes.py check",
+            "--changelog CHANGELOG.md",
             "tag_object_sha=",
         ):
             self.assertIn(marker, policy)

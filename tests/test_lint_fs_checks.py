@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Tests for YRL-FS-* lint rules (EF content size consistency).
 
-No pySim dependency — exercises the pure-function linter against
+No pySim dependency -- exercises the pure-function linter against
 synthetic profile documents built from plain dicts.
 """
 
@@ -85,7 +84,7 @@ class EfFillContentSizeTests(unittest.TestCase):
         self.assertIn("YRL-FS-001", codes)
 
     def test_missing_fill_content_no_finding(self) -> None:
-        # efFileSize present but no fillFileContent — no YRL-FS-001
+        # efFileSize present but no fillFileContent -- no YRL-FS-001
         doc = {
             "sections": {
                 "header": {
@@ -190,7 +189,7 @@ class ArrReferenceTests(unittest.TestCase):
 
     def test_valid_rule_index_no_finding(self) -> None:
         # EF.ARR has 3 records of 8 bytes = 24 bytes total.
-        # 3-byte SAR: 2F 06 (FID) + 01 (rule index 1) — within range [0..2].
+        # 3-byte SAR: 2F 06 (FID) + 01 (rule index 1) -- within range [0..2].
         arr_fill = "AA" * 24   # 24 bytes = 3 records of 8
         doc = _arr_profile(arr_fill, 8, "2F0601")
         codes = [f.code for f in _lint(doc)]
@@ -275,7 +274,7 @@ class PinPukEncodingTests(unittest.TestCase):
     """YRL-PIN-*: PIN/PUK byte-level encoding checks."""
 
     def test_valid_pin_no_findings(self) -> None:
-        # max=3 remaining=3, 8-byte value — no PIN linter hits
+        # max=3 remaining=3, 8-byte value -- no PIN linter hits
         doc = _pin_profile(3, 3, "31323334FFFFFFFF")
         codes = [f.code for f in _lint(doc)]
         self.assertNotIn("YRL-PIN-001", codes)
@@ -321,7 +320,7 @@ class PinPukEncodingTests(unittest.TestCase):
         self.assertEqual(hit.evidence["byte_length"], 4)
 
     def test_valid_puk_no_findings(self) -> None:
-        # 8-byte pukValue — no YRL-PIN-003
+        # 8-byte pukValue -- no YRL-PIN-003
         doc = _pin_profile(3, 3, "31323334FFFFFFFF", "3132333435363738")
         codes = [f.code for f in _lint(doc)]
         self.assertNotIn("YRL-PIN-003", codes)
@@ -637,7 +636,7 @@ def _rfm_pe(tar_hex_list: list[str], key_ref: str | None = None) -> dict:
 
 
 class RfmTarLintTests(unittest.TestCase):
-    """YRL-RFM-001/002/003 — TAR uniqueness and key-reference checks."""
+    """YRL-RFM-001/002/003 -- TAR uniqueness and key-reference checks."""
 
     def test_unique_tars_no_rfm_finding(self) -> None:
         sections = {
@@ -706,10 +705,10 @@ def _ram_profile(ram_payload: dict) -> dict:
 
 
 class RamSdLintTests(unittest.TestCase):
-    """YRL-RAM-001/002/003 — securityDomainAID presence and AID format checks."""
+    """YRL-RAM-001/002/003 -- securityDomainAID presence and AID format checks."""
 
     def test_valid_sd_aid_no_finding(self) -> None:
-        # 7-byte AID (within 5–16)
+        # 7-byte AID (within 5-16)
         codes = [f.code for f in _lint(_ram_profile({"securityDomainAID": {"hex": "A0000000871002"}}))]
         self.assertNotIn("YRL-RAM-001", codes)
         self.assertNotIn("YRL-RAM-002", codes)
@@ -722,13 +721,13 @@ class RamSdLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "FAIL")
 
     def test_sd_aid_too_short_warns(self) -> None:
-        # 3-byte AID — below minimum 5
+        # 3-byte AID -- below minimum 5
         codes = [f.code for f in _lint(_ram_profile({"securityDomainAID": {"hex": "AABBCC"}}))]
         self.assertIn("YRL-RAM-002", codes)
         self.assertNotIn("YRL-RAM-001", codes)
 
     def test_sd_aid_too_long_warns(self) -> None:
-        # 17-byte AID — above maximum 16
+        # 17-byte AID -- above maximum 16
         long_aid = "AA" * 17
         codes = [f.code for f in _lint(_ram_profile({"securityDomainAID": {"hex": long_aid}}))]
         self.assertIn("YRL-RAM-002", codes)
@@ -736,7 +735,7 @@ class RamSdLintTests(unittest.TestCase):
     def test_load_package_aid_bad_length_warns(self) -> None:
         codes = [f.code for f in _lint(_ram_profile({
             "securityDomainAID": {"hex": "A0000000871002"},
-            "applicationLoadPackageAID": {"hex": "AABB"},  # 2 bytes — too short
+            "applicationLoadPackageAID": {"hex": "AABB"},  # 2 bytes -- too short
         }))]
         self.assertIn("YRL-RAM-003", codes)
         hit = next(f for f in _lint(_ram_profile({
@@ -794,7 +793,7 @@ def _ad_profile(ef_ad_hex: str, ef_imsi_hex: str | None = None) -> dict:
 
 
 class EfAdLintTests(unittest.TestCase):
-    """YRL-AD-001/002/003 — EF.AD mnc_length byte checks."""
+    """YRL-AD-001/002/003 -- EF.AD mnc_length byte checks."""
 
     def test_valid_mnc_length_2_no_finding(self) -> None:
         # 4-byte EF.AD, byte 4 = 0x02
@@ -819,7 +818,7 @@ class EfAdLintTests(unittest.TestCase):
         self.assertIn("YRL-AD-001", codes)
 
     def test_too_short_warns(self) -> None:
-        # 3-byte EF.AD — mnc_length byte absent
+        # 3-byte EF.AD -- mnc_length byte absent
         findings = _lint(_ad_profile("000000"))
         codes = [f.code for f in findings]
         self.assertIn("YRL-AD-002", codes)
@@ -828,7 +827,7 @@ class EfAdLintTests(unittest.TestCase):
 
     def test_mnc_length_3_with_filler_mnc_warns(self) -> None:
         # mnc_length=3 but IMSI digit 6 (third MNC nibble) is 'F'.
-        # IMSI 9-byte BCD: 08 | parity_d1 | d2d3 | d4d5 | d6d7 | d8d9 | …
+        # IMSI 9-byte BCD: 08 | parity_d1 | d2d3 | d4d5 | d6d7 | d8d9 | ...
         # MCC=001 MNC=01F subscriber=0000001 → 9 bytes (18 hex chars)
         # Byte layout: 08 10 00 F1 FF FF FF FF FF
         # index 8 (high nibble of byte 5) = 'F' (third MNC digit = filler)
@@ -879,7 +878,7 @@ def _ef_profile(fid: str, fill_hex: str) -> dict:
 
 
 class EfAccLintTests(unittest.TestCase):
-    """YRL-ACC-001/002 — EF.ACC encoding checks."""
+    """YRL-ACC-001/002 -- EF.ACC encoding checks."""
 
     def test_valid_two_byte_with_class_no_finding(self) -> None:
         # Class 0 set (bit 0), 2 bytes
@@ -912,7 +911,7 @@ class EfAccLintTests(unittest.TestCase):
 
 
 class EfHplmnLintTests(unittest.TestCase):
-    """YRL-HPLMN-001/002 — EF.HPLMNwAcT search timer checks."""
+    """YRL-HPLMN-001/002 -- EF.HPLMNwAcT search timer checks."""
 
     def test_valid_nonzero_timer_no_finding(self) -> None:
         # Timer = 0x02 (12 min)
@@ -928,7 +927,7 @@ class EfHplmnLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "WARN")
 
     def test_empty_content_fails(self) -> None:
-        # Empty hex — the method gets empty coerced hex
+        # Empty hex -- the method gets empty coerced hex
         # Use a 0-byte representation to trigger FAIL
         findings = _lint(_ef_profile("6F62", ""))
         codes = [f.code for f in findings]
@@ -973,10 +972,10 @@ def _est_profile(est_hex: str, ust_service_bits: bytes | None = None) -> dict:
 
 
 class EfSpnLintTests(unittest.TestCase):
-    """YRL-SPN-001/002/003 — EF.SPN encoding checks (3GPP TS 31.102 §4.2.12)."""
+    """YRL-SPN-001/002/003 -- EF.SPN encoding checks (3GPP TS 31.102 §4.2.12)."""
 
     # EF.SPN FID = 6F46; must be exactly 17 bytes.
-    # Byte 1 = display-conditions; bytes 2–17 = name (0xFF = filler).
+    # Byte 1 = display-conditions; bytes 2-17 = name (0xFF = filler).
 
     def _spn(self, hex_val: str) -> list:
         return _lint(_ef_profile("6F46", hex_val))
@@ -1001,7 +1000,7 @@ class EfSpnLintTests(unittest.TestCase):
         self.assertIn("YRL-SPN-001", codes)
 
     def test_reserved_bits_warns(self) -> None:
-        # Display-conditions byte = 0xFC — reserved bits 2-7 all set
+        # Display-conditions byte = 0xFC -- reserved bits 2-7 all set
         findings = self._spn("FC" + "54455354" + "FF" * 12)
         codes = [f.code for f in findings]
         self.assertIn("YRL-SPN-002", codes)
@@ -1022,7 +1021,7 @@ class EfSpnLintTests(unittest.TestCase):
 
 
 class EfSuciCalcInfoLintTests(unittest.TestCase):
-    """YRL-SUCI-001/002/003 — EF.SUCI-CALC-INFO encoding checks (TS 31.102 §4.4.11.3)."""
+    """YRL-SUCI-001/002/003 -- EF.SUCI-CALC-INFO encoding checks (TS 31.102 §4.4.11.3)."""
 
     def test_null_scheme_no_fail_but_info(self) -> None:
         # PSI=0x00 (null-scheme): no FAIL/WARN, but INFO emitted.
@@ -1049,7 +1048,7 @@ class EfSuciCalcInfoLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "FAIL")
 
     def test_profile_a_without_key_warns(self) -> None:
-        # PSI=0x01 + HNPK ID only — no key bytes
+        # PSI=0x01 + HNPK ID only -- no key bytes
         findings = _lint(_ef_profile("4F07", "0100"))
         codes = [f.code for f in findings]
         self.assertIn("YRL-SUCI-002", codes)
@@ -1065,7 +1064,7 @@ class EfSuciCalcInfoLintTests(unittest.TestCase):
 
 
 class EfKcLintTests(unittest.TestCase):
-    """YRL-KC-001/002 — EF.KC / EF.KCGPRS exact 9-byte checks (3GPP TS 31.102 §4.2.9b)."""
+    """YRL-KC-001/002 -- EF.KC / EF.KCGPRS exact 9-byte checks (3GPP TS 31.102 §4.2.9b)."""
 
     def test_valid_kc_9_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("4F20", "00" * 9))]
@@ -1091,7 +1090,7 @@ class EfKcLintTests(unittest.TestCase):
 
 
 class EfStartHfnLintTests(unittest.TestCase):
-    """YRL-STARTHFN-001 — EF.START-HFN exact 6-byte check (3GPP TS 31.102 §4.2.40)."""
+    """YRL-STARTHFN-001 -- EF.START-HFN exact 6-byte check (3GPP TS 31.102 §4.2.40)."""
 
     def test_valid_6_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("6F5B", "00" * 6))]
@@ -1111,7 +1110,7 @@ class EfStartHfnLintTests(unittest.TestCase):
 
 
 class EfEpsNscLintTests(unittest.TestCase):
-    """YRL-EPSNSC-001 — EF.EPSNSC exact 54-byte check (3GPP TS 31.102 §4.2.77)."""
+    """YRL-EPSNSC-001 -- EF.EPSNSC exact 54-byte check (3GPP TS 31.102 §4.2.77)."""
 
     def test_valid_54_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("6FE4", "FF" * 54))]
@@ -1131,7 +1130,7 @@ class EfEpsNscLintTests(unittest.TestCase):
 
 
 class EfKeysLintTests(unittest.TestCase):
-    """YRL-KEYS-001/002 — EF.KEYS / EF.KEYSPS exact 33-byte checks (3GPP TS 31.102 §4.2.9)."""
+    """YRL-KEYS-001/002 -- EF.KEYS / EF.KEYSPS exact 33-byte checks (3GPP TS 31.102 §4.2.9)."""
 
     def test_valid_keys_33_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("6F08", "00" * 33))]
@@ -1159,7 +1158,7 @@ class EfKeysLintTests(unittest.TestCase):
 
 
 class EfLociLintTests(unittest.TestCase):
-    """YRL-LOCI-001 — EF.LOCI exact 11-byte check (3GPP TS 31.102 §4.2.7)."""
+    """YRL-LOCI-001 -- EF.LOCI exact 11-byte check (3GPP TS 31.102 §4.2.7)."""
 
     def test_valid_11_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("6F7E", "FF" * 11))]
@@ -1179,7 +1178,7 @@ class EfLociLintTests(unittest.TestCase):
 
 
 class EfEpsLociLintTests(unittest.TestCase):
-    """YRL-EPSLOCI-001 — EF.EPSLOCI exact 18-byte check (3GPP TS 31.102 §4.2.76)."""
+    """YRL-EPSLOCI-001 -- EF.EPSLOCI exact 18-byte check (3GPP TS 31.102 §4.2.76)."""
 
     def test_valid_18_bytes_no_finding(self) -> None:
         codes = [f.code for f in _lint(_ef_profile("6FE3", "FF" * 18))]
@@ -1199,10 +1198,10 @@ class EfEpsLociLintTests(unittest.TestCase):
 
 
 class EfEstLintTests(unittest.TestCase):
-    """YRL-EST-001/002 — EF.EST encoding and UST coherence (3GPP TS 31.102 §4.2.46)."""
+    """YRL-EST-001/002 -- EF.EST encoding and UST coherence (3GPP TS 31.102 §4.2.46)."""
 
     def test_valid_zero_byte_no_finding(self) -> None:
-        # EST = 0x00 (no services enabled) with no UST — no coherence warning.
+        # EST = 0x00 (no services enabled) with no UST -- no coherence warning.
         codes = [f.code for f in _lint(_est_profile("00"))]
         self.assertNotIn("YRL-EST-001", codes)
         self.assertNotIn("YRL-EST-002", codes)
@@ -1240,7 +1239,7 @@ class EfEstLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "FAIL")
 
     def test_est_bit_set_ust_available_no_warning(self) -> None:
-        # UST byte 0 = 0xFF (all services 1–8 available) — FDN = service 2 = bit 1.
+        # UST byte 0 = 0xFF (all services 1-8 available) -- FDN = service 2 = bit 1.
         findings = _lint(_est_profile("01", ust_service_bits=bytes([0xFF])))
         codes = [f.code for f in findings]
         self.assertNotIn("YRL-EST-002", codes)
@@ -1262,7 +1261,7 @@ class EfEstLintTests(unittest.TestCase):
 
 
 class EfSmspLintTests(unittest.TestCase):
-    """YRL-SMSP-001/002 — EF.SMSP record length checks (3GPP TS 31.102 §4.2.27)."""
+    """YRL-SMSP-001/002 -- EF.SMSP record length checks (3GPP TS 31.102 §4.2.27)."""
 
     # EF.SMSP FID = 6F42; each record >= 28 bytes.
 
@@ -1363,7 +1362,7 @@ class AdnFdnLintTests(unittest.TestCase):
         self.assertNotIn("YRL-FDN-001", codes)
 
     def test_record_too_short_raises_fdn001(self) -> None:
-        # 13 bytes — one byte below minimum.
+        # 13 bytes -- one byte below minimum.
         too_short = "81060102030405060708090AFF"
         findings = self._lint("6F3B", too_short)
         codes = [f.code for f in findings]
@@ -1372,7 +1371,7 @@ class AdnFdnLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "FAIL")
 
     def test_num_len_over_10_warns_fdn002(self) -> None:
-        # num-len byte = 0x0B (11) — exceeds 10-byte BCD field.
+        # num-len byte = 0x0B (11) -- exceeds 10-byte BCD field.
         bad_num_len = "FF" * 8 + "81" + "0B" + "FF" * 10 + "FFFF"
         findings = self._lint("6F3B", bad_num_len)
         codes = [f.code for f in findings]
@@ -1381,7 +1380,7 @@ class AdnFdnLintTests(unittest.TestCase):
         self.assertEqual(hit.severity, "WARN")
 
     def test_num_len_ff_no_fdn002(self) -> None:
-        # num-len 0xFF = empty slot — must not trigger FDN-002.
+        # num-len 0xFF = empty slot -- must not trigger FDN-002.
         empty_slot = "FF" * 8 + "FF" + "FF" + "FF" * 10 + "FFFF"
         codes = [f.code for f in self._lint("6F3B", empty_slot)]
         self.assertNotIn("YRL-FDN-002", codes)
@@ -1398,11 +1397,11 @@ class PnnOplLintTests(unittest.TestCase):
     def _lint(self, fid: str, fill: str) -> list:
         return _lint(_gfm_fid_profile(fid, fill))
 
-    # BER-TLV: 80 09 <9 bytes name> — tag 80 present.
+    # BER-TLV: 80 09 <9 bytes name> -- tag 80 present.
     _PNN_VALID = "80" + "09" + "4E6574776F726B310000"
 
     def test_valid_pnn_no_pnn001(self) -> None:
-        # tag 80 present — must pass.
+        # tag 80 present -- must pass.
         codes = [f.code for f in self._lint("6FC5", self._PNN_VALID)]
         self.assertNotIn("YRL-PNN-001", codes)
 
@@ -1422,7 +1421,7 @@ class PnnOplLintTests(unittest.TestCase):
         self.assertNotIn("YRL-OPL-001", codes)
 
     def test_opl_not_multiple_of_8_warns(self) -> None:
-        # 9 bytes — not a multiple of 8.
+        # 9 bytes -- not a multiple of 8.
         bad = "FF" * 9
         findings = self._lint("6FC6", bad)
         codes = [f.code for f in findings]
@@ -1437,7 +1436,7 @@ class MsisdnFplmnEccGidLintTests(unittest.TestCase):
     def _lint(self, fid: str, fill: str) -> list:
         return _lint(_gfm_fid_profile(fid, fill))
 
-    # EF.MSISDN — valid 14-byte ADN record.
+    # EF.MSISDN -- valid 14-byte ADN record.
     _MSISDN_OK = "81" + "07" + "21436587092143" + "58" + "FF" * 8 + "FFFF"
 
     def test_msisdn_14_bytes_passes(self) -> None:
@@ -1505,7 +1504,7 @@ class SmsCbmiLintTests(unittest.TestCase):
     def _lint(self, fid: str, fill: str) -> list:
         return _lint(_gfm_fid_profile(fid, fill))
 
-    # EF.SMS — 176 bytes: status 0x05 (MT read) + 175 TPDU bytes.
+    # EF.SMS -- 176 bytes: status 0x05 (MT read) + 175 TPDU bytes.
     _SMS_176 = "05" + "FF" * 175
 
     def test_sms_176_bytes_passes(self) -> None:
@@ -1558,8 +1557,20 @@ def _iccid_profile(iccid_hex: str) -> dict:
     }
 
 
+def _luhn_remainder(digits: str) -> int:
+    total = 0
+    for position, digit_char in enumerate(reversed(digits)):
+        value = int(digit_char) * (2 if position % 2 else 1)
+        total += value - 9 if value > 9 else value
+    return total % 10
+
+
 class IccidLuhnLintTests(unittest.TestCase):
-    """YRL-ICC-004: Luhn mod-10 check digit on ICCID (ITU-T E.118 §3.3)."""
+    """YRL-ICC-004: Luhn check digit on header.iccid (ITU-T E.118 (09/2025) §6).
+
+    SAIP V3.4.1 §8.2.1 codes the header ICCID non-swapped, so the fixtures
+    are the digit strings themselves; only EF.ICCID is nibble-swapped.
+    """
 
     def _lint(self, iccid_hex: str) -> list:
         linter = SaipProfileLinter(strict=False)
@@ -1567,12 +1578,16 @@ class IccidLuhnLintTests(unittest.TestCase):
             _iccid_profile(iccid_hex), profile_label="test"
         ).findings
 
-    # BCD wire encoding is nibble-swapped: wire byte 0xAB carries natural
-    # digits B then A.  Body 8988201234567890123 → check digit 2 (Luhn mod-10).
-    # Full natural: 89882012345678901232.  Wire-encoded: 98880221436587092123.
-    _GOOD_ICCID = "98880221436587092123"  # natural → 89882012345678901232 Luhn=0
-    # Flip the check digit from 2 to 3 to produce a deliberate Luhn failure.
-    _BAD_ICCID  = "98880221436587092133"  # natural → 89882012345678901233 Luhn≠0
+    # Body 8988201234567890123 takes check digit 2; 3 breaks it.
+    _GOOD_ICCID = "89882012345678901232"
+    _BAD_ICCID = "89882012345678901233"
+    # The good ICCID written in EF.ICCID (nibble-swapped) order.
+    _SWAPPED_ICCID = "98880221436587092123"
+
+    def test_fixtures_hold_their_luhn_property(self) -> None:
+        self.assertEqual(_luhn_remainder(self._GOOD_ICCID), 0)
+        self.assertNotEqual(_luhn_remainder(self._BAD_ICCID), 0)
+        self.assertNotEqual(_luhn_remainder(self._SWAPPED_ICCID), 0)
 
     def test_valid_iccid_no_icc004(self) -> None:
         codes = [f.code for f in self._lint(self._GOOD_ICCID)]
@@ -1588,20 +1603,45 @@ class IccidLuhnLintTests(unittest.TestCase):
 
     def test_icc002_short_skips_luhn(self) -> None:
         # ICC-002 (wrong length) fires but ICC-004 must NOT fire on a
-        # truncated ICCID — the Luhn check only runs after length is confirmed.
+        # truncated ICCID -- the Luhn check only runs after length is confirmed.
         codes = [f.code for f in self._lint("898820123456789012")]
         self.assertIn("YRL-ICC-002", codes)
         self.assertNotIn("YRL-ICC-004", codes)
 
     def test_iccid_with_trailing_f_filler(self) -> None:
-        # 19-significant-digit ICCID with trailing F filler nibble.
-        # Body 898820123456789013 → check digit 2 → natural 8988201234567890132F.
-        # Wire-encoded: 988802214365870931F2.  Luhn on significant digits = 0.
-        iccid = "988802214365870931F2"
+        # A 19-digit ICCID padded with one trailing F; Luhn runs on the digits.
+        iccid = "8988201234567890132F"
+        self.assertEqual(_luhn_remainder(iccid.rstrip("F")), 0)
         findings = self._lint(iccid)
         codes = [f.code for f in findings]
         self.assertNotIn("YRL-ICC-003", codes)
         self.assertNotIn("YRL-ICC-004", codes)
+
+    def test_swapped_header_is_named_as_ef_order(self) -> None:
+        findings = self._lint(self._SWAPPED_ICCID)
+        hit = next(f for f in findings if f.code == "YRL-ICC-004")
+        self.assertIn("EF.ICCID order", hit.message)
+        self.assertEqual(hit.evidence["swapped_digits"], self._GOOD_ICCID)
+        self.assertEqual(hit.evidence["natural_digits"], self._SWAPPED_ICCID)
+
+    def test_bad_check_digit_has_no_swap_hint(self) -> None:
+        hit = next(f for f in self._lint(self._BAD_ICCID) if f.code == "YRL-ICC-004")
+        self.assertNotIn("swapped_digits", hit.evidence)
+        self.assertNotIn("EF.ICCID order", hit.message)
+
+    def test_non_decimal_nibble_raises_icc004(self) -> None:
+        hit = next(
+            f for f in self._lint("8988201234567890123A") if f.code == "YRL-ICC-004"
+        )
+        self.assertEqual(hit.evidence["invalid_chars"], ["A"])
+        self.assertNotIn("Luhn", hit.message)
+
+    def test_filler_inside_the_digits_raises_icc004(self) -> None:
+        # 'F' is trailing filler only; one inside the digit string is not a digit.
+        hit = next(
+            f for f in self._lint("8988F012345678901232") if f.code == "YRL-ICC-004"
+        )
+        self.assertEqual(hit.evidence["invalid_chars"], ["F"])
 
 
 if __name__ == "__main__":

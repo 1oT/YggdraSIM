@@ -17,14 +17,16 @@ subsystems.
 | `getting-started.md` | `README.md`, `guides/INSTALL_*.md` |
 | `architecture.md` | `guides/ARCHITECTURE.md` |
 | `operator-surfaces.md` | `guides/CAPABILITIES.md`, `guides/CLI_AND_PIPING_GUIDE.md` |
-| `subsystems/scp03.md` | `SCP03/README.md` |
-| `subsystems/scp80.md` | `SCP80/README.md` |
+| `subsystems/scp03.md` | `SCP03/` sources |
+| `subsystems/scp80.md` | `SCP80/` sources |
 | `subsystems/scp11-live.md` | `SCP11/README.md`, `SCP11/live/README.md` |
 | `subsystems/scp11-test.md` | `SCP11/README.md`, `SCP11/test/README.md` |
 | `subsystems/scp11-local-access.md` | `SCP11/local_access/README.md` |
 | `subsystems/scp11-eim-local.md` | `SCP11/eim_local/README.md`, `SCP11/eim_local/GUIDE.md` |
 | `subsystems/profile-package.md` | `Tools/ProfilePackage/` sources |
 | `subsystems/hil-bridge.md` | `guides/HIL_BRIDGE_GUIDE.md`, `guides/SIMTRACE2_CARDEM_GUIDE.md` |
+| `subsystems/card-bridge.md` | `Tools/CardBridge/` sources, `guides/CARD_BRIDGE_GUIDE.md` |
+| `subsystems/remote-lab.md` | `yggdrasim_common/remote_lab/` sources, `guides/CARD_BRIDGE_GUIDE.md` |
 | `subsystems/gui-command-center.md` | `gui_frontend/`, `yggdrasim_common/gui_server/`, `guides/GUI_HOST_SHELL_GUIDE.md` |
 | `subsystems/apdu-fuzzer.md` | `Tools/ApduFuzz/` sources |
 | `subsystems/eum-diagnostics.md` | `Tools/EumDiag/` sources |
@@ -41,6 +43,9 @@ subsystems.
 | Path | Purpose |
 | --- | --- |
 | `README.md` | top-level overview, install, launch, state model, and documentation map |
+| `guides/USER_MANUAL.md` | user manual: modules, install and start, shared concepts, real-card work, failures |
+| `guides/USER_MANUAL_GUI.md` | user manual, GUI chapter: the window, actions and answers, every module |
+| `guides/USER_MANUAL_CLI.md` | user manual, CLI chapter: launcher, shells, every module |
 | `guides/README.md` | index of authored operator and developer guides |
 | `guides/CAPABILITIES.md` | suite-level capability reference grouped by subsystem |
 | `guides/ARCHITECTURE.md` | system structure, dependency map, runtime state, and flow charts |

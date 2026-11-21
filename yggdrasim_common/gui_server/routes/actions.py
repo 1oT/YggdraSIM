@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
-"""``/api/actions/*`` — Command Center route layer.
+"""``/api/actions/*`` -- Command Center route layer.
 
 Exposes three endpoints:
 
-* ``GET  /api/actions``            — catalogue (grouped by subsystem)
-* ``POST /api/actions/{id}/run``   — dispatch a synchronous action
-* ``WS   /api/actions/{id}/stream``— dispatch a streaming action
+* ``GET  /api/actions``            -- catalogue (grouped by subsystem)
+* ``POST /api/actions/{id}/run``   -- dispatch a synchronous action
+* ``WS   /api/actions/{id}/stream``-- dispatch a streaming action
 
 The router intentionally has no per-action knowledge. It:
 
@@ -18,7 +17,7 @@ The router intentionally has no per-action knowledge. It:
 4. Wraps the result (or the async-generator's events) in a small JSON
    envelope so the UI always sees ``{"ok": bool, ...}``.
 
-``/api/sessions`` is also exposed here as a sibling — dispatchers that
+``/api/sessions`` is also exposed here as a sibling -- dispatchers that
 open a card session return a ``session_id`` the UI can later list or
 close through this endpoint.
 """
@@ -42,13 +41,14 @@ from yggdrasim_common.gui_server.actions.registry import (
     ensure_builtin_actions_loaded,
 )
 from yggdrasim_common.gui_server.actions.registry import ActionContext
-from yggdrasim_common.gui_server.action_security import scrub_action_result
 from yggdrasim_common.gui_server.auth import (
     compare_tokens,
     token_id,
     websocket_accept_protocol,
     websocket_bearer,
 )
+from yggdrasim_common import reader_claims
+from yggdrasim_common.gui_server import live_trace
 from yggdrasim_common.gui_server.sessions import get_manager
 
 
@@ -70,6 +70,9 @@ class ActionSummary(BaseModel):
     output_kind: str
     inputs: list[dict[str, Any]]
     requires_card: bool
+    # The page reads this to ask for authentication before it opens a gated
+    # form; a field the model lacks is dropped from the catalogue silently.
+    requires_auth: bool = False
     streams: bool
     tags: list[str]
 
@@ -102,6 +105,9 @@ def list_actions() -> CatalogueResponse:
 
 class RunRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
+    # Chosen by the page: tags the lines this run prints on the live trace
+    # socket (/api/events/trace) so the page can show them under the action.
+    trace_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_.-]*$")
 
 
 class RunResponse(BaseModel):
@@ -123,7 +129,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     if spec.streams:
         raise HTTPException(
             status_code=400,
-            detail=f"action {action_id!r} is streaming — use the WebSocket endpoint.",
+            detail=f"action {action_id!r} is streaming -- use the WebSocket endpoint.",
         )
     if spec.dispatcher is None:
         raise HTTPException(
@@ -139,6 +145,7 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     cancel_event = threading.Event()
     register_active_event(cancel_event)
     ctx = ActionContext(extras={"cancel_event": cancel_event})
+    _trace_run, trace_token = live_trace.begin_run(action_id, body.trace_id)
     try:
         result = await _invoke_dispatcher(spec, ctx, coerced)
     except HTTPException:
@@ -150,6 +157,8 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
         return RunResponse(ok=False, action_id=action_id, error=str(missing_file))
     except KeyError as missing_session:
         return RunResponse(ok=False, action_id=action_id, error=str(missing_session))
+    except reader_claims.ReaderBusyError as busy:
+        return RunResponse(ok=False, action_id=action_id, error=str(busy))
     except RuntimeError as runtime_error:
         message = str(runtime_error)
         if message.startswith("no_card:"):
@@ -160,16 +169,18 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
             action_id=action_id,
             error=f"{type(runtime_error).__name__}: {runtime_error}",
         )
-    except Exception as server_error:  # noqa: BLE001 — surface the class + message
+    except Exception as server_error:  # noqa: BLE001 -- surface the class + message
         _LOGGER.exception("action dispatch failed: %s", action_id)
         return RunResponse(
             ok=False,
             action_id=action_id,
             error=f"{type(server_error).__name__}: {server_error}",
         )
+    finally:
+        live_trace.end_run(trace_token)
 
     if isinstance(result, dict):
-        payload = scrub_action_result(action_id, result)
+        payload = dict(result)
     else:
         payload = {"value": result}
     if spec.subsystem == "SCP03":
@@ -188,15 +199,94 @@ async def run_action(action_id: str, body: RunRequest) -> RunResponse:
     return RunResponse(ok=True, action_id=action_id, data=payload)
 
 
+def _session_for_serialisation(coerced: dict[str, Any]) -> Any:
+    """Return the live card session this call targets, or None.
+
+    A session owns one physical card and one PC/SC connection, so two
+    dispatchers running against it concurrently interleave APDUs on the
+    same channel and mutate the same file-system cursor. A missing or
+    already-reaped session is not an error here -- the dispatcher itself
+    reports that far more precisely than this helper could.
+    """
+    session_id = str(coerced.get("session_id") or "").strip()
+    if len(session_id) == 0:
+        return None
+    try:
+        return get_manager().get(session_id)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _action_reader(spec: ActionSpec, coerced: dict[str, Any], session: Any) -> str | None:
+    """The reader a call drives, as the claims key it, or None for no card.
+
+    A session-bound call drives its session's reader (a SAIP authoring
+    session holds none); any other call names it in its reader field, unless
+    its spec says this call does not use it (``ActionSpec.uses_reader``).
+    """
+    if session is not None:
+        name = str((getattr(session, "metadata", None) or {}).get("reader_name") or "").strip()
+        return reader_claims.reader_key(name) if len(name) > 0 else None
+    for field in spec.inputs:
+        if getattr(field, "kind", "") == "reader":
+            uses_reader = getattr(spec, "uses_reader", None)
+            if uses_reader is not None and not uses_reader(coerced):
+                return None
+            return reader_claims.reader_key(coerced.get(field.name))
+    return None
+
+
+def _claim_reader(
+    spec: ActionSpec, coerced: dict[str, Any], session: Any, *, long_running: bool
+) -> tuple[str, object] | None:
+    """Claim the call's reader (yggdrasim_common.reader_claims) on the calling thread.
+
+    Called off the event loop: the claim may wait for another operation, and
+    naming the default reader enumerates PC/SC.
+    """
+    reader = _action_reader(spec, coerced, session)
+    if reader is None:
+        return None
+    return reader, reader_claims.claim(reader, spec.title, long_running=long_running)
+
+
+def _release_reader(claimed: tuple[str, object] | None) -> None:
+    if claimed is not None:
+        reader_claims.release(*claimed)
+
+
+def _call_dispatcher_claimed(
+    dispatcher: Any, spec: ActionSpec, session: Any, ctx: ActionContext, coerced: dict[str, Any]
+) -> Any:
+    # On the worker thread, never on the event loop, so a slow card operation
+    # or a wait for its reader blocks only its own thread. The reader is
+    # claimed before the session lock and given back after it.
+    claimed = _claim_reader(spec, coerced, session, long_running=False)
+    try:
+        if session is None:
+            return dispatcher(ctx, **coerced)
+        with session._lock:
+            return dispatcher(ctx, **coerced)
+    finally:
+        _release_reader(claimed)
+
+
 async def _invoke_dispatcher(spec: ActionSpec, ctx: ActionContext, coerced: dict[str, Any]) -> Any:
     dispatcher = spec.dispatcher
     if dispatcher is None:
         raise HTTPException(status_code=501, detail=f"no dispatcher for {spec.id!r}")
 
+    session = _session_for_serialisation(coerced)
     if inspect.iscoroutinefunction(dispatcher):
-        return await dispatcher(ctx, **coerced)
-    # Sync dispatcher → push off the event loop thread.
-    return await asyncio.to_thread(dispatcher, ctx, **coerced)
+        claimed = await asyncio.to_thread(_claim_reader, spec, coerced, session, long_running=False)
+        try:
+            return await dispatcher(ctx, **coerced)
+        finally:
+            _release_reader(claimed)
+    # Sync dispatcher → push off the event loop thread: one operation at a
+    # time per reader, and per session within it, so concurrent requests
+    # cannot interleave APDUs on one card.
+    return await asyncio.to_thread(_call_dispatcher_claimed, dispatcher, spec, session, ctx, coerced)
 
 
 # ----------------------------------------------------------------------
@@ -233,9 +323,8 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="not-streaming")
         return
     if spec.dispatcher is None:
-        # Some streaming actions delegate to an existing WS endpoint
-        # (e.g. scp11.download_profile → /api/flows/download-profile).
-        # Tell the client where to go.
+        # A streaming action without a dispatcher is served by another WS
+        # endpoint; this route has nothing to run for it.
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="external-endpoint")
         return
 
@@ -267,6 +356,24 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         await websocket.close()
         return
 
+    # A stream holds its reader until it ends; one already held by another
+    # stream is refused at once, one held by a short action is waited for.
+    try:
+        claimed = await asyncio.to_thread(
+            _claim_reader, spec, coerced, _session_for_serialisation(coerced), long_running=True
+        )
+    except reader_claims.ReaderBusyError as busy:
+        await websocket.send_text(json.dumps({"level": "error", "message": str(busy)}))
+        await websocket.close()
+        return
+    try:
+        await _run_stream(websocket, spec, action_id, coerced)
+    finally:
+        _release_reader(claimed)
+
+
+async def _run_stream(websocket: WebSocket, spec: ActionSpec, action_id: str, coerced: dict[str, Any]) -> None:
+    """Run a streaming dispatcher and forward its events until it ends."""
     cancel_event = threading.Event()
     register_active_event(cancel_event)
     ctx = ActionContext(extras={"cancel_event": cancel_event})
@@ -320,8 +427,6 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
     try:
         async for event in async_iter:
             try:
-                if isinstance(event, dict):
-                    event = scrub_action_result(action_id, event)
                 await websocket.send_text(json.dumps(event))
             except Exception:
                 break
@@ -353,7 +458,7 @@ async def stream_action(websocket: WebSocket, action_id: str) -> None:
         if inspect.isasyncgen(async_iter):
             try:
                 await async_iter.aclose()
-            except Exception:  # noqa: BLE001 — best-effort cleanup
+            except Exception:  # noqa: BLE001 -- best-effort cleanup
                 pass
         try:
             await websocket.close()

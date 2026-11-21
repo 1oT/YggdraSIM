@@ -5,8 +5,8 @@
 
 Before this change the dispatcher simply captured ``get_sgp32_all_data``'s
 ``print(...)`` output into a single ``trace`` string. The GUI then dumped
-that blob into a green-on-black ``<pre>``, which — per the user's feedback
-— still "only outputs in terminal".
+that blob into a green-on-black ``<pre>``, which -- per the user's feedback
+-- still "only outputs in terminal".
 
 The dispatcher now emits a **structured** ``sections`` array (one entry
 per ES10 retrieval: scan / RAT / notifications / eIM config / certs) so
@@ -14,7 +14,7 @@ the GUI can render each step as its own titled card with KV rows, a raw
 hex viewer and a collapsible trace. These tests pin the contract.
 
 The tests are dependency-free on purpose: no PC/SC, no pySim, no
-``TlvParser`` internals — they exercise the pure helpers that shape the
+``TlvParser`` internals -- they exercise the pure helpers that shape the
 dispatcher response.
 """
 
@@ -34,7 +34,7 @@ def _load_helpers():
 
 
 # ----------------------------------------------------------------------
-# _sgp32_bulk_trace_lines — stdout -> clean line list normaliser
+# _sgp32_bulk_trace_lines -- stdout -> clean line list normaliser
 # ----------------------------------------------------------------------
 
 
@@ -60,7 +60,7 @@ def test_trace_line_normaliser_handles_empty_and_none():
 
 
 # ----------------------------------------------------------------------
-# _sgp32_run_section — per-section runner
+# _sgp32_run_section -- per-section runner
 # ----------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ def test_section_runner_printer_exception_keeps_hex_and_records_note():
         parser_mode="parsed",
     )
 
-    # Retrieval itself succeeded — operators still need the raw hex
+    # Retrieval itself succeeded -- operators still need the raw hex
     # and the status must reflect "we got data, but rendering failed".
     assert section["status"] == "ok"
     assert section["hex"] == "BF2B020100"
@@ -211,7 +211,7 @@ def test_section_runner_rejects_unknown_parser_mode():
         parser_mode="nonsense",
     )
 
-    # Unknown parser_mode raises inside the printer capture block —
+    # Unknown parser_mode raises inside the printer capture block --
     # handled as a printer-note while preserving the hex body.
     assert section["status"] == "ok"
     assert section["hex"] == "BF430401020304"

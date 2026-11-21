@@ -8,6 +8,7 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +46,10 @@ class LabSession:
     bytes_in: int = 0
     bytes_out: int = 0
     error: str = ""
+    # Lease token for the card behind this rig's upstream relay. Empty
+    # when the upstream grants no lease, which is the case for a relay
+    # running without a bearer token.
+    card_lease_token: str = ""
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def to_dict(self, *, include_token: bool = False) -> dict[str, Any]:
@@ -83,6 +88,11 @@ class LabSessionManager:
         self._sessions: dict[str, LabSession] = {}
         self._locks: dict[str, LockRecord] = {}
         self._lock = threading.RLock()
+        # Sessions reaped by whichever read path noticed first, waiting for
+        # the cleanup loop to run their teardown. Drained every tick, so
+        # the bound only matters if that loop has died, and a lab never
+        # holds anything near this many sessions at once.
+        self._pending_teardown: deque[LabSession] = deque(maxlen=256)
 
     def create_session(
         self,
@@ -148,6 +158,19 @@ class LabSessionManager:
             self.expire_stale_locked()
             return self._sessions.get(str(session_id or "").strip())
 
+    def active_session_for_rig(self, rig_id: str) -> LabSession | None:
+        """The session that currently holds a rig, if any.
+
+        Teardown that acts on the rig rather than the session needs this:
+        it runs a tick after the session was reaped, and by then another
+        operator may hold the rig.
+        """
+        with self._lock:
+            for session in self._sessions.values():
+                if session.rig_id == rig_id:
+                    return session
+            return None
+
     def status_for_rig(self, rig_id: str) -> tuple[str, LabSession | None]:
         with self._lock:
             self.expire_stale_locked()
@@ -163,10 +186,28 @@ class LabSessionManager:
                 if session.rig_id == rig_id and session.token == str(token or "").strip():
                     now = float(self._clock())
                     if now > session.expires_at or now > session.max_expires_at:
-                        self._release_locked(session.id)
+                        self._expire_locked(session.id)
                         raise PermissionError("session expired")
                     return session
             raise PermissionError("missing or invalid Remote Lab session token")
+
+    def mark_consumer_started(self, session: LabSession) -> None:
+        """Leave the reservation window once the rig is consuming a card.
+
+        A modem rig serves no APDU stream of its own, so nothing ever
+        calls :meth:`mark_stream_use` for it and the session stays
+        ``reserved``. The reservation timeout then reaps it seconds after
+        it was granted, mid-stream, while its heartbeats still succeed.
+        Starting the consumer is that rig's equivalent of first use.
+        """
+        with self._lock:
+            if session.id not in self._sessions:
+                raise PermissionError("session no longer active")
+            now = float(self._clock())
+            if session.state == "reserved":
+                session.state = "busy"
+                session.started_at = now
+            session.last_heartbeat_at = now
 
     def mark_stream_use(self, session: LabSession) -> None:
         with self._lock:
@@ -193,7 +234,7 @@ class LabSessionManager:
                 raise PermissionError("missing or invalid session token")
             now = float(self._clock())
             if now > session.expires_at or now > session.max_expires_at:
-                self._release_locked(session.id)
+                self._expire_locked(session.id)
                 raise PermissionError("session expired")
             session.last_heartbeat_at = now
             for lock_id in session.locks:
@@ -219,11 +260,20 @@ class LabSessionManager:
                     return session
             return None
 
-    def expire_stale(self) -> int:
-        with self._lock:
-            return self.expire_stale_locked()
+    def expire_stale(self) -> list[LabSession]:
+        """Reap timed-out sessions and return the ones that were dropped.
 
-    def expire_stale_locked(self) -> int:
+        The caller owns any teardown that reaches the network, such as
+        releasing the upstream card lease, and must do it outside this
+        manager's lock.
+        """
+        with self._lock:
+            self.expire_stale_locked()
+            pending = list(self._pending_teardown)
+            self._pending_teardown.clear()
+            return pending
+
+    def expire_stale_locked(self) -> list[LabSession]:
         now = float(self._clock())
         expired: list[str] = []
         for session in list(self._sessions.values()):
@@ -235,18 +285,40 @@ class LabSessionManager:
                 continue
             if now - session.last_heartbeat_at >= self._defaults.heartbeat_timeout_seconds:
                 expired.append(session.id)
+        released: list[LabSession] = []
         for session_id in expired:
-            self._release_locked(session_id)
-        return len(expired)
+            session = self._release_locked(session_id)
+            if session is not None:
+                released.append(session)
+        # Six read paths call this and throw the result away, so whichever
+        # of them notices an expiry first would otherwise be the only one
+        # that could have torn the session down -- leaving a consumer's
+        # supervisor running, or an upstream card lease held, with no
+        # session behind it. Queue them for the cleanup loop instead.
+        self._pending_teardown.extend(released)
+        return released
 
-    def _release_locked(self, session_id: str) -> None:
+    def _expire_locked(self, session_id: str) -> LabSession | None:
+        """Release a session that timed out, and queue its teardown.
+
+        The explicit release paths have a caller that owns teardown; these
+        implicit ones do not, so without the queue the consumer they
+        started keeps running with no session behind it.
+        """
+        session = self._release_locked(session_id)
+        if session is not None:
+            self._pending_teardown.append(session)
+        return session
+
+    def _release_locked(self, session_id: str) -> LabSession | None:
         session = self._sessions.pop(session_id, None)
         if session is None:
-            return
+            return None
         for lock_id in session.locks:
             record = self._locks.get(lock_id)
             if record is not None and record.held_by_session == session.id:
                 self._locks.pop(lock_id, None)
+        return session
 
     def sessions(self) -> list[LabSession]:
         with self._lock:

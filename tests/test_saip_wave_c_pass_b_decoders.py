@@ -2,7 +2,7 @@
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
 """
-Wave C Pass B — semantic decoder coverage for ADF.USIM optional /
+Wave C Pass B -- semantic decoder coverage for ADF.USIM optional /
 ISIM-USIM shared EFs.
 
 For every EF promoted from the generic opaque pass-through catalog we
@@ -27,7 +27,7 @@ Spec references (TS 31.102 unless noted):
   ef-muk                       §4.2.81   (MBMS User Key)
   ef-ufc                       §4.2.88   (UE Functionality Config)
   ef-pws                       §4.2.96   (Public Warning System)
-  ef-umpc                      TS 102 221 §13.1
+  ef-umpc                      TS 102 221 §13.6
   ef-eaka                      §4.2.114  (Enhanced AKA Support)
   ef-frompreferred             §4.2.106  (From Preferred)
   ef-3gpppsdataoff             §4.2.92   (3GPP PS Data Off)
@@ -203,12 +203,26 @@ class TestUmpc:
         decoded = _roundtrip("ef-umpc", "320A")
         assert decoded["format"] == "UICC Max Power Consumption"
         assert decoded["maxCurrentMilliAmps"] == 0x32
-        assert decoded["tOpMilliseconds"] == 20
+        assert decoded["tOpSeconds"] == 10
 
     def test_undefined_max_current(self) -> None:
         decoded = _roundtrip("ef-umpc", "FF05")
         assert decoded["maxCurrentMilliAmps"] is None
-        assert decoded["tOpMilliseconds"] == 10
+        assert decoded["tOpSeconds"] == 5
+
+    def test_additional_information_byte(self) -> None:
+        # pySim ts_102_221.EF_UMPC test vector: 60 mA, t_op 255 s, SUSPEND.
+        decoded = _roundtrip("ef-umpc", "3CFF02")
+        assert decoded["maxCurrentMilliAmps"] == 60
+        assert decoded["tOpSeconds"] == 255
+        assert decoded["supportsUiccSuspend"] is True
+        assert decoded["requiresIncreasedIdleCurrent"] is False
+
+    def test_full_five_byte_file(self) -> None:
+        decoded = _roundtrip("ef-umpc", "1414000000")
+        assert decoded["length"] == 5
+        assert decoded["tOpSeconds"] == 20
+        assert decoded["rfuHex"] == "0000"
 
 
 class TestSingleBitFlagEfs:

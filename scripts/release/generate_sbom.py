@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Generate a deterministic CycloneDX SBOM from ``uv.lock``."""
 
 from __future__ import annotations

@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """Regression tests for ``saip.gfm_add_file_element``.
 
 The TCA SAIP profile element family for filesystem creation
 (genericFileManagement, §6.6.7) defines two affordances inside a
 PE-GFM editor: *Add select element* and *Add file element*. Template
-PEs (USIM / ISIM / OPT-USIM / MF / …)
+PEs (USIM / ISIM / OPT-USIM / MF / ...)
 are served by ``saip.add_template_file`` /
 ``saip.add_template_subtree``; PE-GFM is the free-form fallback and
 needed its own dispatcher.
@@ -137,7 +136,7 @@ class GfmAddFileElementEndToEndTests(unittest.TestCase):
 
     def test_strips_leading_3f00_from_parent_path(self) -> None:
         # ``3F00/7F10`` and ``7F10`` must resolve to the same logical
-        # location — pySim's ``filePath`` SELECT encoding already
+        # location -- pySim's ``filePath`` SELECT encoding already
         # implies MF as the base.
         self.saip._dispatch_gfm_add_file_element(
             self.ctx,
@@ -152,7 +151,7 @@ class GfmAddFileElementEndToEndTests(unittest.TestCase):
         self.assertEqual(target[0]["parent_path"], "3F00/7F10")
 
     def test_descriptor_drives_file_kind(self) -> None:
-        # 0x4221 — record-fixed working EF (mask 0x07 == 0x02).
+        # 0x4221 -- record-fixed working EF (mask 0x07 == 0x02).
         self.saip._dispatch_gfm_add_file_element(
             self.ctx,
             session_id=self.session_id,
@@ -170,7 +169,7 @@ class GfmAddFileElementEndToEndTests(unittest.TestCase):
 
 
 class GfmAddFileElementValidationTests(unittest.TestCase):
-    """Argument validation — should never reach the mutation path."""
+    """Argument validation -- should never reach the mutation path."""
 
     def setUp(self) -> None:
         self.saip = importlib.import_module(

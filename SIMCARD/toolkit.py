@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 
-# Copyright (c) 2026 1oT OÜ. Authored by Hampus Hellsberg.
 """SIM Application Toolkit logic: proactive command encoding, BIP bearer setup, timer management (ETSI TS 102 223)."""
 from __future__ import annotations
 
@@ -185,10 +184,11 @@ class ToolkitLogic:
         GET_CHANNEL_STATUS_COMMAND: "GET CHANNEL STATUS",
     }
 
-    def __init__(self, state: SimCardState) -> None:
+    def __init__(self, state: SimCardState, *, extend_with_plugins: bool = True) -> None:
         self.state = state
         self._extensions: list[Any] = []
-        extend_target_with_plugins(self)
+        if extend_with_plugins:
+            extend_target_with_plugins(self)
 
     def register_extension(self, extension: Any) -> None:
         if extension in self._extensions:
@@ -303,7 +303,7 @@ class ToolkitLogic:
         return self._pending_status()
 
     def handle_terminal_profile(self, payload: bytes) -> tuple[bytes, int, int]:
-        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE — stores the terminal capability bitmap.
+        """ETSI TS 102 221 §11.1.14 TERMINAL PROFILE -- stores the terminal capability bitmap.
 
         Kicks off the bootstrap proactive-command sequence when bootstrap is
         enabled and not yet initialised.
@@ -327,7 +327,7 @@ class ToolkitLogic:
         return active, 0x90, 0x00
 
     def handle_terminal_response(self, payload: bytes) -> tuple[bytes, int, int]:
-        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE — processes the terminal's reply to a proactive command.
+        """ETSI TS 102 221 §11.1.15 TERMINAL RESPONSE -- processes the terminal's reply to a proactive command.
 
         Clears the active command slot and advances terminal-side state.
         """
@@ -437,11 +437,11 @@ class ToolkitLogic:
             return response, 0x90, 0x00
 
         if envelope_tag == b"\xD9":
-            # 3GPP TS 31.111 §7.3.3 USSD Download. The tag is 'D9', not
-            # 'D8': clause 9.1 assigns USSD download to 'D9' and 'D8' is
-            # reserved for intra-UICC communication (ETSI TS 101 220
-            # §7.2). A 'D8' envelope therefore falls through to the OTA
-            # handler below rather than being answered as USSD -- a
+            # 3GPP TS 31.111 v19.4 §7.6.2 USSD Data Download. The tag is
+            # 'D9', not 'D8': clause 9.1 assigns USSD download to 'D9' and
+            # 'D8' is reserved for intra-UICC communication (ETSI TS 101 220
+            # v19 §7.2, Table 7.17). A 'D8' envelope therefore falls
+            # through to the OTA handler below rather than being answered as USSD -- a
             # conformance simulator must not accept a tag no conformant
             # terminal sends. Body carries the network-side USSD String
             # (TLV 8A = DCS + text), decoded into ``state.toolkit``; the
@@ -467,7 +467,7 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """Queue a REFRESH proactive command (ETSI TS 102 223 §6.4.7).
 
-        Coalesces identical *qualifier* values — a second call for the same
+        Coalesces identical *qualifier* values -- a second call for the same
         mode returns the existing command rather than queuing a duplicate.
         Returns a status dict indicating whether the command was queued or coalesced.
         """
@@ -717,9 +717,12 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.15 PROVIDE LOCAL INFORMATION.
 
-        Common qualifiers per §6.6.15:
-        ``0x00`` location-info, ``0x01`` IMEI, ``0x03`` date/time/zone,
-        ``0x04`` language, ``0x06`` access-technology.
+        Qualifiers from the command-details table of TS 102 223 v18.3
+        §8.6: ``'00'`` location information, ``'01'`` IMEI, ``'02'``
+        network measurement results, ``'03'`` date/time/zone, ``'04'``
+        language, ``'06'`` access technology, ``'07'`` ESN, ``'08'``
+        IMEISV, ``'09'`` search mode, ``'0A'`` charge state of the
+        battery, ``'0B'`` MEID, ``'0D'`` broadcast network information.
         """
         return self._enqueue_named(PROVIDE_LOCAL_INFORMATION_COMMAND, qualifier, b"")
 
@@ -878,15 +881,16 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.34 DECLARE SERVICE.
 
-        ``service_record`` is the raw service-record TLV (TS 102 223
-        §8.66) and is appended to ``state.toolkit.declared_services``
+        ``service_record`` is the raw service-record value (TS 102 223
+        v18.3 §8.63, tag '41'/'C1' per TS 101 220 v19 table 7.23) and is
+        appended to ``state.toolkit.declared_services``
         on enqueue so subsequent SERVICE SEARCH / GET SERVICE
         INFORMATION commands can advertise the registration.
         """
         record = bytes(service_record or b"")
         if len(record) > 0:
-            self.state.toolkit.declared_services.append(record)
-        extra = tlv("61", record) if len(record) > 0 else b""
+            append_bounded(self.state.toolkit.declared_services, record)
+        extra = tlv("41", record) if len(record) > 0 else b""
         return self._enqueue_named(DECLARE_SERVICE_COMMAND, int(qualifier) & 0xFF, extra)
 
     def queue_service_search(
@@ -898,18 +902,18 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.32 SERVICE SEARCH.
 
-        ``service_record`` (TLV ``61``) is the pattern the terminal
-        compares against the previously declared services.
-        ``device_filter`` (TLV ``63``) optionally restricts the search
-        to a specific device class (handset, USB, etc.). Successful
-        SERVICE SEARCH replies carry a Service Record TLV in the
-        terminal response; ``_apply_service_search_response`` latches
-        the matching blob into ``state.toolkit.last_service_search_result``.
+        ``service_record`` is the Service search parameter (§8.65, tag
+        '43'/'C3') the terminal matches against the services in range;
+        ``device_filter`` (§8.64, tag '42'/'C2') optionally restricts the
+        search to a device class. §6.8.23 makes a successful TERMINAL
+        RESPONSE carry the Service availability object (§8.67, tag
+        '45'/'C5'), which ``_apply_service_search_response`` latches into
+        ``state.toolkit.last_service_search_result``.
         """
         record = bytes(service_record or b"")
-        extra = tlv("61", record)
+        extra = tlv("43", record)
         if len(device_filter) > 0:
-            extra += tlv("63", bytes(device_filter))
+            extra += tlv("42", bytes(device_filter))
         return self._enqueue_named(SERVICE_SEARCH_COMMAND, int(qualifier) & 0xFF, extra)
 
     def queue_get_service_information(
@@ -920,14 +924,14 @@ class ToolkitLogic:
     ) -> dict[str, str | int | list[str]]:
         """ETSI TS 102 223 §6.4.33 GET SERVICE INFORMATION.
 
-        ``service_record`` is the service identifier whose detailed
-        information should be retrieved. The terminal replies with a
-        Service Information TLV (``62`` / ``E2`` -- TS 102 223 §8.66);
-        the simulator latches the blob into
+        ``service_record`` is the Attribute information parameter (§8.66,
+        tag '44'/'C4') naming the detail the UICC wants. §6.8.24 makes the
+        successful TERMINAL RESPONSE carry the Service record object
+        (§8.63, tag '41'/'C1'), which the simulator latches into
         ``state.toolkit.last_service_information``.
         """
         record = bytes(service_record or b"")
-        extra = tlv("61", record)
+        extra = tlv("44", record)
         return self._enqueue_named(
             GET_SERVICE_INFORMATION_COMMAND,
             int(qualifier) & 0xFF,
@@ -1898,19 +1902,27 @@ class ToolkitLogic:
     ) -> None:
         """Latch PROVIDE LOCAL INFORMATION TR data into toolkit state.
 
-        Per TS 102 223 §6.4.15 / §6.6.15 the terminal response carries
-        the requested datum keyed off the proactive qualifier:
+        The command qualifier of TS 102 223 v18.3 §8.6 selects the
+        datum the terminal returns; the tags come from TS 101 220 v19
+        Table 7.23:
 
-        - 0x00 location info (TLV 0x13)
-        - 0x01 IMEI (TLV 0x14)
-        - 0x03 date / time / timezone (TLV 0x26)
-        - 0x04 language (TLV 0x2D)
-        - 0x06 access technology (qualifier byte echoed; no TLV)
-        - 0x08 IMEISV (TLV 0x62)
-        - 0x0D battery state (TLV 0x5C)
+        - '00' location information (TLV '13', §8.19)
+        - '01' IMEI (TLV '14', §8.20)
+        - '02' network measurement results (TLV '16')
+        - '03' date, time and time zone (TLV '26', §8.39)
+        - '04' language setting (TLV '2D', §8.45)
+        - '06' access technology (TLV '3F', §8.61)
+        - '08' IMEISV (TLV '62', §8.74)
+        - '09' search mode (TLV '65')
+        - '0A' charge state of the battery (TLV '63', §8.76)
+        - '0D' broadcast network information (TLV '7A', §8.90)
 
-        On a non-zero result code we skip the latch so partial /
-        terminal-busy responses don't clobber a previously known good
+        Of those the simulator latches location information, IMEI,
+        date/time, language, IMEISV, access technology and battery
+        state; the remaining objects are accepted and discarded.
+
+        A non-zero result code skips the latch so partial or
+        terminal-busy responses do not clobber a previously known good
         value -- the caller's hook still fires.
         """
         if succeeded is False:
@@ -1941,13 +1953,13 @@ class ToolkitLogic:
         battery_state_value = response_fields.get("battery_state", None)
         if battery_state_value is not None:
             toolkit.battery_state = int(battery_state_value) & 0xFF
-        if qualifier == 0x06:
-            # §6.6.15 access-technology variant: terminals reply with
-            # an additional Result TLV that we don't parse but the
-            # qualifier itself disambiguates the request, so cache the
-            # qualifier as the technology hint when the TR carries no
-            # explicit access-tech TLV.
-            toolkit.access_technology = qualifier
+        access_technology_value = bytes(response_fields.get("access_technology", b"") or b"")
+        if qualifier == 0x06 and len(access_technology_value) > 0:
+            # TS 102 223 v18.3 §6.8.7: a qualifier '06' request is
+            # answered with the §8.61 Access Technology object, whose
+            # single byte is the technology the terminal is on. The
+            # qualifier itself is not a technology value.
+            toolkit.access_technology = int(access_technology_value[0]) & 0xFF
         self._dispatch_hook(
             "on_provide_local_information_response",
             command_fields,
@@ -2022,7 +2034,7 @@ class ToolkitLogic:
     ) -> None:
         toolkit = self.state.toolkit
         if succeeded:
-            blob = bytes(response_fields.get("service_record", b"") or b"")
+            blob = bytes(response_fields.get("service_availability", b"") or b"")
             toolkit.last_service_search_result = blob
         else:
             toolkit.last_service_search_result = b""
@@ -2041,7 +2053,7 @@ class ToolkitLogic:
     ) -> None:
         toolkit = self.state.toolkit
         if succeeded:
-            blob = bytes(response_fields.get("service_information", b"") or b"")
+            blob = bytes(response_fields.get("service_record", b"") or b"")
             toolkit.last_service_information = blob
         self._dispatch_hook(
             "on_get_service_information_response",
@@ -2423,11 +2435,12 @@ class ToolkitLogic:
         response_fields: dict[str, object],
         succeeded: bool,
     ) -> None:
-        """ETSI TS 102 223 §6.4.37 GET FRAMES STATUS TR latch.
+        """ETSI TS 102 223 v18.3 §6.4.36 GET FRAME STATUS TR latch.
 
-        Successful TRs cache the Frames Information TLV (§8.81)
-        verbatim into ``state.toolkit.last_frames_information``; a
-        failed TR leaves the previous value untouched.
+        Successful TRs cache the Frames Information TLV (§8.79, which
+        §6.4.36 has the terminal return in the TR) verbatim into
+        ``state.toolkit.last_frames_information``; a failed TR leaves the
+        previous value untouched.
         """
         toolkit = self.state.toolkit
         if succeeded:
@@ -2726,30 +2739,31 @@ class ToolkitLogic:
                 if len(cause_blob) > 0:
                     toolkit.last_network_rejection_cause = cause_blob
             elif code_int == 0x0D:
-                # ETSI TS 102 223 §7.5.14 Local Connection event
-                # download. The status byte (TLV 0x40 channel-status
-                # high nibble) tells whether the connection was
-                # established (0x8X) or terminated (0x0X).
+                # ETSI TS 102 223 v18.3 §7.5.14 Local Connection event
+                # download. §7.5.14.2 carries no state byte; the
+                # simulator reads one from TLV 0x40 (the Display
+                # parameters tag, not Channel status, which is §8.56
+                # tag '38') as established (0x8X) or terminated (0x0X).
                 status_value = int(
                     event_fields.get("local_connection_status", 0) or 0
                 )
                 toolkit.local_connection_active = (status_value & 0x80) != 0
             elif code_int == 0x13:
-                # ETSI TS 102 223 §7.5.18 HCI
-                # Connectivity Event. Reuses TLV 0x40 to carry the
-                # connection state (0x80 = gate connected, 0x00 =
-                # gate disconnected).
+                # ETSI TS 102 223 v18.3 §7.5.18 HCI connectivity event.
+                # §7.5.18.2 carries no state; the simulator reads one
+                # from TLV 0x40 (0x80 = gate connected, 0x00 = gate
+                # disconnected).
                 status_value = int(
                     event_fields.get("hci_connectivity_status", 0) or 0
                 )
                 toolkit.hci_connectivity_active = (status_value & 0x80) != 0
             elif code_int == 0x16:
-                # ETSI TS 102 223 §7.5.19 Contactless state request.
-                # The contactless front-end signals activation /
-                # deactivation via the same TLV 0x40 status byte
-                # used for Local Connection / HCI Connectivity. The
-                # high nibble distinguishes activated (0x80) from
-                # deactivated (0x00).
+                # ETSI TS 102 223 v18.3 §7.5.19 Contactless state request.
+                # §7.5.19.2 carries the request as a §8.91 Contactless
+                # state request DO (tag '53'); the simulator instead
+                # reads the same TLV 0x40 byte it uses for Local
+                # Connection / HCI connectivity, 0x80 = activated,
+                # 0x00 = deactivated.
                 status_value = int(
                     event_fields.get("contactless_status", 0) or 0
                 )
@@ -2998,7 +3012,7 @@ class ToolkitLogic:
         toolkit = self.state.toolkit
         if item_id > 0:
             toolkit.last_menu_item_id = item_id
-            toolkit.menu_selections.append(item_id)
+            append_bounded(toolkit.menu_selections, item_id)
         toolkit.last_menu_help_request = help_request
         self._dispatch_hook("on_menu_selection", item_id, help_request)
 
@@ -3167,7 +3181,7 @@ class ToolkitLogic:
         )
 
     def _apply_ussd_download_envelope(self, payload: bytes) -> None:
-        """3GPP TS 31.111 §7.3.3 USSD Download envelope decoder.
+        """3GPP TS 31.111 v19.4 §7.6.2 USSD Data Download envelope decoder.
 
         Walks the ``D9`` envelope and extracts the USSD String
         TLV (``8A`` / ``0A``). Byte 0 is the GSM-7 / UCS-2 DCS
@@ -3297,7 +3311,7 @@ class ToolkitLogic:
         *,
         device_pair: bytes | None = None,
     ) -> bytes:
-        # ETSI TS 102 223 §8.7 — Device Identities (TLV 0x82) carries
+        # ETSI TS 102 223 §8.7 -- Device Identities (TLV 0x82) carries
         # [source, destination]. Default is UICC->Terminal (0x81 0x82);
         # BIP follow-ups override this to UICC->channel-id where the
         # destination device is encoded as 0x20 + channel_id (channel 1
@@ -3588,23 +3602,30 @@ class ToolkitLogic:
                 fields["buffer_size"] = int.from_bytes(value_bytes, "big", signed=False)
                 continue
             if tag_bytes == b"\x47":
-                # Tag 0x47 is multiplexed in TS 102 223: §8.70
-                # Network Access Name (label-encoded, multi-byte) and
-                # §8.79 Frame Identifier (single byte). Both fields
-                # are stashed so the apply layer can disambiguate by
-                # command type (OPEN CHANNEL vs. SET FRAMES).
+                # TS 102 223 v18.3 §8.70 Network Access Name
+                # (label-encoded, multi-byte). The simulator also reads a
+                # one-byte value as the §8.80 Frame identifier and stashes
+                # both, so the apply layer can disambiguate by command
+                # type (OPEN CHANNEL vs. SET FRAMES); TS 101 220 v19
+                # Table 7.23 gives '47' to Network Access Name only and
+                # '68' to Frame identifier.
                 fields["network_access_name"] = self._decode_network_access_name(value_bytes)
                 if len(value_bytes) == 1:
                     fields["frame_identifier"] = int(value_bytes[0])
                 continue
             if tag_bytes == b"\x48":
-                # TS 102 223 §8.80 Frame Layout. Carried in SET FRAMES.
+                # TS 102 223 v18.3 §8.78 Frame Layout, carried in SET
+                # FRAMES (§6.6.35). TS 101 220 v19 Table 7.23 gives it
+                # tag '66'; '48' is reserved for 3GPP2.
                 fields["frame_layout"] = value_bytes
                 continue
             if tag_bytes == b"\x49":
-                # TS 102 223 §8.81 Frames Information. In a proactive
-                # body it doubles as the Default Frame Identifier
-                # carrier (1 byte) per §6.6.36.
+                # Read as TS 102 223 v18.3 §8.79 Frames Information, and a
+                # one-byte value as the Default Frame Identifier, which
+                # SET FRAMES (§6.6.35) carries as a §8.80 Frame identifier
+                # data object. TS 101 220 v19 Table 7.23 gives Frames
+                # Information tag '67' and Frame identifier '68'; '49' is
+                # the Remote Entity Address tag.
                 if len(value_bytes) == 1:
                     fields["default_frame_identifier"] = int(value_bytes[0])
                 else:
@@ -3717,8 +3738,10 @@ class ToolkitLogic:
                 fields["timer_value_seconds"] = _decode_timer_value_bcd(value_bytes[:3])
                 fields["timer_value_raw"] = value_bytes[:3]
                 continue
-            if tag_bytes == b"\x61":
-                # TS 102 223 §8.66 Service Record TLV (DECLARE SERVICE).
+            if tag_bytes in (b"\x41", b"\xC1"):
+                # TS 102 223 v18.3 §8.63 Service record, tag '41'/'C1'
+                # (TS 101 220 v19 table 7.23): the object DECLARE SERVICE
+                # registers and GET SERVICE INFORMATION returns.
                 fields["service_record"] = value_bytes
         return fields
 
@@ -3758,11 +3781,12 @@ class ToolkitLogic:
                 fields["duration_value"] = int(value_bytes[1]) & 0xFF
                 fields["duration_raw"] = bytes(value_bytes[:2])
                 continue
-            # PROVIDE LOCAL INFORMATION terminal-response items.
-            # Tags below cover TS 102 223 §8.19 (Location Info),
-            # §8.20 (IMEI), §8.39 (Date-Time-Timezone), §8.45
-            # (Language), §8.66 (IMEISV) and §8.108 (Battery State).
-            # Both the comprehension-required (bit 8 set) and
+            # PROVIDE LOCAL INFORMATION terminal-response items, with
+            # the tag values of TS 101 220 v19 Table 7.23: Location
+            # Information '13' (TS 102 223 v18.3 §8.19), IMEI '14'
+            # (§8.20), Date-Time and Time zone '26' (§8.39), Language
+            # '2D' (§8.45), IMEISV '62' (§8.74) and Battery State '63'
+            # (§8.76). Both the comprehension-required (bit 8 set) and
             # comprehension-clear forms are accepted because some
             # terminals strip the CR bit.
             if tag_bytes in (b"\x13", b"\x93"):
@@ -3778,15 +3802,22 @@ class ToolkitLogic:
                 fields["language"] = value_bytes.decode("ascii", "ignore")
                 continue
             if tag_bytes in (b"\x62", b"\xE2"):
-                # 0x62/0xE2 multiplexes IMEISV (PROVIDE LOCAL
-                # INFORMATION qualifier 0x08) and Service
-                # Information (GET SERVICE INFORMATION). Stash both
-                # interpretations; the apply layer picks the right
-                # field based on the originating command.
+                # TS 101 220 v19 table 7.23: '62'/'E2' is the IMEISV tag
+                # (PROVIDE LOCAL INFORMATION qualifier '08'). The service
+                # objects have tags of their own and are read below.
                 fields["imeisv"] = value_bytes
-                fields["service_information"] = value_bytes
                 continue
-            if tag_bytes in (b"\x5C", b"\xDC") and len(value_bytes) > 0:
+            if tag_bytes in (b"\x41", b"\xC1"):
+                # TS 102 223 v18.3 §6.8.24: a successful GET SERVICE
+                # INFORMATION response carries the Service record (§8.63).
+                fields["service_record"] = value_bytes
+                continue
+            if tag_bytes in (b"\x45", b"\xC5"):
+                # §6.8.23: a successful SERVICE SEARCH response carries the
+                # Service availability object (§8.67).
+                fields["service_availability"] = value_bytes
+                continue
+            if tag_bytes in (b"\x63", b"\xE3") and len(value_bytes) > 0:
                 fields["battery_state"] = int(value_bytes[0])
                 continue
             if tag_bytes in (b"\x24", b"\xA4") and len(value_bytes) >= 1:
@@ -3805,10 +3836,6 @@ class ToolkitLogic:
                 # TS 102 223 §8.65 Service Record TLV (echoed in
                 # SERVICE SEARCH terminal responses).
                 fields["service_record"] = value_bytes
-                continue
-            if tag_bytes in (b"\x63", b"\xE3") and len(value_bytes) >= 1:
-                # TS 102 223 §8.67 Device Filter (search-side hint).
-                fields["device_filter"] = value_bytes
                 continue
             if tag_bytes in (b"\x29", b"\xA9"):
                 # TS 102 223 §8.46 AT Response (TR side of RUN AT
@@ -3852,9 +3879,11 @@ class ToolkitLogic:
                 fields["additional_information"] = value_bytes
                 continue
             if tag_bytes in (b"\x49", b"\xC9"):
-                # TS 102 223 §8.81 Frames Information (TR side of
-                # GET FRAMES STATUS / SET FRAMES). Carries the
-                # frames-count + active-frame descriptor.
+                # TS 102 223 v18.3 §8.79 Frames Information (TR side of
+                # SET FRAMES, §6.8.26, and GET FRAME STATUS, §6.4.36):
+                # the Default Frame ID, then two bytes (characters down /
+                # across) per frame. TS 101 220 v19 Table 7.23 gives it
+                # tag '67'; '49' is the Remote Entity Address tag.
                 fields["frames_information"] = value_bytes
                 continue
             if tag_bytes in (b"\x0D", b"\x8D") and len(value_bytes) >= 1:
@@ -3879,6 +3908,22 @@ class ToolkitLogic:
                 # apply layer can disambiguate.
                 fields["item_identifier"] = int(value_bytes[0]) & 0xFF
                 continue
+
+        # TS 102 223 v18.3 §8.61 Access Technology carries tag '3F' /
+        # 'BF' (TS 101 220 v19 Table 7.23), whose bottom five bits hit
+        # the BER multi-byte-tag encoding, so the walker above cannot
+        # match it. Lift it out with the simple COMPREHENSION-TLV
+        # scanner, and only for the one request that can carry it, to
+        # keep the naive scan off every other terminal response.
+        details = bytes(fields.get("command_details_tlv", b"") or b"")
+        if (
+            len(details) == 5
+            and details[3] == PROVIDE_LOCAL_INFORMATION_COMMAND
+            and details[4] == 0x06
+        ):
+            access_technology_value = self._extract_simple_tlv(data, (0x3F, 0xBF))
+            if access_technology_value is not None and len(access_technology_value) >= 1:
+                fields["access_technology"] = bytes(access_technology_value)
         return fields
 
     def _parse_event_download(self, payload: bytes) -> dict[str, object] | None:
@@ -3920,8 +3965,8 @@ class ToolkitLogic:
                 fields["location_status"] = value_bytes[0]
                 continue
             if tag_bytes in (b"\x34", b"\xB4") and len(value_bytes) > 0:
-                # TS 102 223 §8.55 Browser Termination Cause. 0x00 =
-                # user, 0x01 = error.
+                # TS 102 223 v18.3 §8.51 Browser termination cause.
+                # 0x00 = user, 0x01 = error.
                 fields["browser_termination_cause"] = int(value_bytes[0])
                 continue
             if tag_bytes in (b"\x4A", b"\xCA"):
@@ -3930,13 +3975,18 @@ class ToolkitLogic:
                 fields["network_rejection_cause"] = value_bytes
                 continue
             if tag_bytes == b"\x40" and len(value_bytes) >= 1:
-                # TS 102 223 §8.56 Local Connection status doubles
-                # as the HCI Connectivity / Contactless State byte
-                # for events 0x13 and 0x16. All three
-                # interpretations are stashed so the apply layer
-                # can pick the right one based on the event code;
-                # the high nibble of byte 0 is 0x80 when the
-                # connection / gate is up, 0x00 when down.
+                # Tag '40' is the Display parameters / DNS server address
+                # tag (TS 101 220 v19 Table 7.23; Display parameters is
+                # TS 102 223 v18.3 §8.62). The simulator reads
+                # it as a one-byte state for the Local Connection,
+                # HCI connectivity and Contactless state request events
+                # ('0D', '13', '16'), which TS 102 223 v18.3 does not
+                # define: §7.5.14.2 carries a Service Record, §7.5.18.2
+                # only Event list and Device identities, and §7.5.19.2 a
+                # §8.91 Contactless state request (tag '53'). All three
+                # interpretations are stashed so the apply layer can pick
+                # one by event code; 0x80 in byte 0 is read as "connection
+                # / gate up", 0x00 as down.
                 fields["local_connection_status"] = int(value_bytes[0])
                 fields["hci_connectivity_status"] = int(value_bytes[0])
                 fields["contactless_status"] = int(value_bytes[0])
@@ -3956,14 +4006,14 @@ class ToolkitLogic:
                 fields["ims_incoming_data"] = value_bytes
                 continue
             if tag_bytes in (b"\x1C", b"\x9C") and len(value_bytes) >= 1:
-                # ETSI TS 102 223 §8.50 Transaction Identifier
+                # ETSI TS 102 223 v18.3 §8.28 Transaction identifier
                 # carried by MT Call / Call Connected / Call
                 # Disconnected events. The first byte is sufficient
                 # for the simulator to correlate phases.
                 fields["transaction_identifier"] = int(value_bytes[0])
                 continue
             if tag_bytes in (b"\x06", b"\x86") and len(value_bytes) >= 1:
-                # TS 102 223 §8.4 Address TLV: byte 0 is TON/NPI,
+                # TS 102 223 v18.3 §8.1 Address TLV: byte 0 is TON/NPI,
                 # bytes 1.. are BCD digits. The CR-set form 0x86 is
                 # what ME-> card uses for MT Call notifications.
                 fields["call_address_ton_npi"] = int(value_bytes[0])
@@ -3972,46 +4022,55 @@ class ToolkitLogic:
                 )
                 continue
             if tag_bytes in (b"\x08", b"\x88"):
-                # TS 102 223 §8.6 Sub Address. Some MT-Call
+                # TS 102 223 v18.3 §8.3 Subaddress. Some MT-Call
                 # notifications carry the calling sub-address even
                 # when the MS does not display it.
                 fields["call_subaddress"] = value_bytes
                 continue
             if tag_bytes in (b"\x1A", b"\x9A"):
-                # 3GPP TS 24.008 Annex H / TS 102 223 §8.18 Cause
-                # TLV. Call Disconnected (event 0x02) carries the
-                # network-side disconnect cause as a multi-byte
-                # blob; the simulator stashes it verbatim so an
+                # TS 102 223 v18.3 §8.26 Cause TLV (the value is defined
+                # by the access technology specification; call control
+                # causes in 3GPP TS 24.008 v19.5 Annex H). Call
+                # Disconnected (event 0x02) carries the network-side
+                # disconnect cause as a multi-byte blob; the
+                # simulator stashes it verbatim so an
                 # applet can correlate the tear-down without
                 # parsing the cause sub-fields.
                 fields["call_disconnect_cause"] = value_bytes
                 continue
             if tag_bytes in (b"\x46", b"\xC6"):
-                # TS 102 223 §8.86 Display Parameters. Carried by
-                # the §7.5.13 Display parameters changed event; the
+                # TS 102 223 v18.3 §8.62 Display parameters. Carried by
+                # the §7.5.13 Display parameters changed event (TS 101 220
+                # v19 Table 7.23 gives it tag '40'; '46' is reserved for
+                # 3GPP2); the
                 # simulator stashes the raw TLV value because the
                 # internal structure (rows / columns / chars) varies
                 # across vendors.
                 fields["display_parameters"] = value_bytes
                 continue
             if tag_bytes in (b"\x49", b"\xC9"):
-                # TS 102 223 §8.81 Frames Information carried by the
-                # §7.5.17 Frames Information changed event. The TLV
-                # body lays out the new frame partitioning chosen by
-                # the user; we keep the raw bytes because vendors
-                # encode the layout differently and the apply layer
-                # only needs the blob plus a transition counter.
+                # TS 102 223 v18.3 §8.79 Frames Information carried by the
+                # §7.5.17 Frames Information changed event (TS 101 220 v19
+                # Table 7.23 gives it tag '67'; '49' is the Remote Entity
+                # Address tag, which a §7.5.14.2 Local Connection event
+                # carries). The TLV body describes the frames after the
+                # resize; we keep the raw bytes and the apply layer only
+                # needs the blob plus a transition counter.
                 fields["frames_information"] = value_bytes
                 continue
             if tag_bytes in (b"\xA0", b"\x20") and len(value_bytes) >= 1:
-                # TS 102 223 §8.34 Card Reader Status TLV (carried
+                # TS 102 223 v18.3 §8.33 Card reader status TLV (carried
                 # by the §7.5.7 Card reader status event for multi
                 # card terminals). Byte 0 packs:
-                #   bits 7..6  card present / powered flags
-                #   bits 3..0  reader identifier (1..7; 0 = the ME)
-                # The simulator latches the raw byte plus the
-                # decoded reader id so an STK applet can decide
-                # whether to re-issue PERFORM CARD APDU.
+                #   b1-b3  identity of the additional card reader (0-7)
+                #   b4     card reader removable
+                #   b5     card reader present
+                #   b6     card reader present is ID-1 size
+                #   b7     card present in reader
+                #   b8     card in reader powered
+                # The simulator latches the raw byte plus a reader id
+                # (masked with 0x0F, so b4 is included) so an STK applet
+                # can decide whether to re-issue PERFORM CARD APDU.
                 fields["card_reader_status"] = int(value_bytes[0]) & 0xFF
                 fields["card_reader_id"] = int(value_bytes[0]) & 0x0F
                 continue
@@ -4047,6 +4106,11 @@ class ToolkitLogic:
             if offset + 1 >= len(data):
                 return None
             length = data[offset + 1]
+            if length >= 0x80:
+                # TS 101 220 §7.1.2 codes a length above 127 on three
+                # bytes ('81' xx). The one-byte assumption no longer
+                # holds, so fail closed rather than walk out of step.
+                return None
             value_start = offset + 2
             value_end = value_start + length
             if value_end > len(data):

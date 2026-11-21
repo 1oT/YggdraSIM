@@ -37,7 +37,9 @@ class BatchEntryReaderTests(unittest.TestCase):
             with mock.patch("sys.stdin", io.StringIO("AUTH-SD\n# skip\nLIST\n")):
                 scp03_main.entry_stdin(yaml_out="report.yaml")
 
-        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out="report.yaml")
+        mocked_entry_cmd.assert_called_once_with(
+            "AUTH-SD; LIST", yaml_out="report.yaml", reader_name="",
+        )
 
     def test_profile_package_entry_stdin_batches_commands(self) -> None:
         with mock.patch.object(profile_package_main, "entry_cmd") as mocked_entry_cmd:
@@ -58,7 +60,9 @@ class BatchEntryReaderTests(unittest.TestCase):
             with mock.patch("sys.stdin", io.StringIO("STATUS\n# skip\nHELP\n")):
                 scp11_local_access_main.entry_stdin()
 
-        mocked_entry_cmd.assert_called_once_with("STATUS; HELP")
+        # The shells pass the --reader choice through since ba780ba2; no
+        # choice means the empty name, which selects the reader interactively.
+        mocked_entry_cmd.assert_called_once_with("STATUS; HELP", reader_name="")
 
     def test_eim_local_entry_stdin_batches_commands(self) -> None:
         with mock.patch.object(scp11_eim_local_main, "entry_cmd") as mocked_entry_cmd:
@@ -74,7 +78,9 @@ class StandaloneRouteTests(unittest.TestCase):
             with mock.patch("sys.argv", ["prog", "--cmd", "AUTH-SD; LIST", "--out", "report.yaml"]):
                 scp03_main.run_standalone()
 
-        mocked_entry_cmd.assert_called_once_with("AUTH-SD; LIST", yaml_out="report.yaml")
+        mocked_entry_cmd.assert_called_once_with(
+            "AUTH-SD; LIST", yaml_out="report.yaml", reader_name="",
+        )
 
     def test_scp80_standalone_routes_stdin_to_batch_mode(self) -> None:
         with mock.patch("SCP80.cli.OtaShell.run_commands", autospec=True) as mocked_batch:
@@ -376,6 +382,21 @@ class MainWrapperGuideTests(unittest.TestCase):
                     main_wrapper.show_guides()
 
         mocked_show_doc.assert_called_once_with("YggdraSIM README", "README.md")
+
+    def test_show_guides_routes_user_manual_chapters(self) -> None:
+        with mock.patch.object(main_wrapper, "clear_screen"):
+            with mock.patch.object(main_wrapper, "_show_text_document") as mocked_show_doc:
+                with mock.patch("builtins.input", side_effect=["U", "UG", "uc", "Q"]):
+                    main_wrapper.show_guides()
+
+        shown = [call.args[1] for call in mocked_show_doc.call_args_list]
+        self.assertEqual(
+            shown,
+            ["guides/USER_MANUAL.md", "guides/USER_MANUAL_GUI.md", "guides/USER_MANUAL_CLI.md"],
+        )
+        repo = Path(__file__).resolve().parents[1]
+        for relative in shown:
+            self.assertTrue((repo / relative).is_file(), relative)
 
     def test_show_guides_invalid_choice_reprompts_until_quit(self) -> None:
         with mock.patch.object(main_wrapper, "clear_screen"):

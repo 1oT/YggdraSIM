@@ -123,9 +123,13 @@ def test_dynamic_navigation_is_semantic_and_mobile_overlay_closes() -> None:
     assert 'var li = document.createElement("button")' in command
     assert "li.type = \"button\"" in command
     assert "window.YggdraSimSidebar.closeOverlayAfterNavigation()" in command
-    assert "if (value === null) return null" in trailing
+    # An unreadable or unknown stored value must resolve to "no
+    # preference" so the viewport width decides the default.
+    assert "function panelModeFromStored(value)" in trailing
+    assert 'if (value === "auto") return "auto";\n    return null;' in trailing
     assert 'window.matchMedia("(max-width: 760px)")' in trailing
-    assert "storedPreference === null ? _isNarrow() : storedPreference" in trailing
+    assert "if (storedMode !== null) return storedMode;" in trailing
+    assert 'return _isNarrow() ? "hidden" : "shown";' in trailing
     assert "closeOverlayAfterNavigation: function ()" in trailing
     assert 'aria-controls="module-navigation"' in html
     assert 'id="module-navigation"' in html
