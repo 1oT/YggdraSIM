@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="concepts/rsp-architecture.html" data-ygg-open-sections="concepts">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -217,6 +217,17 @@ ProfileDownloadTriggerResult, goes to the <abbr title="eSIM IoT Manager (GSMA SG
 instead (§3.2.3.1 step 13). That function has no response, so the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
 acknowledges nothing; the ProfileInstallationResult inside it leaves the card
 once the SM-DP+ has taken it through <code>ES9+.HandleNotification</code> (§3.7).</p>
+<p>In an indirect download (§3.2.3.2) the IPA never reaches the SM-DP+: it runs
+the same <abbr title="Embedded UICC">eUICC</abbr> steps and sends <code>ESipa.InitiateAuthentication</code>,
+<code>AuthenticateClient</code>, <code>GetBoundProfilePackage</code>, <code>CancelSession</code> and the
+ProfileInstallationResult in <code>HandleNotification</code> to the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>, which runs each
+as the <code>ES9+'</code> function against the SM-DP+. A ProfileDownloadTriggerRequest
+without profileDownloadData starts it; <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §2.11.1.3 gives one only to
+an IPA declaring <code>eimDownloadDataHandling</code>, and the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> then holds the
+Activation Code and returns its Matching ID in the InitiateAuthentication
+answer. The eSIM Management IPA declares that capability and takes such a
+trigger as an indirect download; with <code>YGGDRASIM_IPA_INDIRECT_DOWNLOAD</code> set it
+also routes an Activation Code trigger through the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>.</p>
 <h2 id="eim-identity-and-bf55"><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity and BF55</h2>
 <p>The BF55 row in <code>EUICCInfo2</code> advertises the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity set an <abbr title="Embedded UICC">eUICC</abbr>
 recognizes. It defines:</p>
@@ -268,13 +279,13 @@ the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> endpoint side 
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

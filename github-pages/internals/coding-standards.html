@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/coding-standards.html" data-ygg-open-sections="internals">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -53,6 +53,7 @@ predictable.</p>
             <a href="#shell-command-lines" class="toc-link">Shell command lines</a>
             <a href="#apdu-and-crypto-handling" class="toc-link">APDU and crypto handling</a>
             <a href="#reuse-before-building" class="toc-link">Reuse before building</a>
+            <a href="#specification-tables" class="toc-link">Specification tables</a>
             <a href="#python-conventions" class="toc-link">Python conventions</a>
             <a href="#security-and-boundary" class="toc-link">Security and boundary</a>
             <a href="#decode-boundaries" class="toc-link">Decode boundaries</a>
@@ -106,6 +107,16 @@ path navigable and the wizard maintainable as the spec evolves.</p>
   a web request would be written on the server host.</li>
 <li>Swap <code>sys.stdout</code> / <code>sys.stderr</code> around one command, never across a
   prompt, so every swap stays nested and readline keeps the terminal.</li>
+<li>Mark each line by what it reports: <code>[+]</code> a result, <code>[*]</code> a note, <code>[-]</code> a
+  failed step, <code>[!]</code> a refusal or an error, and <code>[!] Warning:</code> a caveat the
+  command carries on past. A batch loop runs each command under
+  <code>yggdrasim_common.batch_outcome.BatchOutcome.command</code>, which counts a
+  <code>[-]</code> line or a <code>[!]</code> line that is not a warning as a failure, and the
+  entry point exits 1 when <code>outcome.ok</code> is false. An empty answer, a state
+  that needs no action (no session to close) or a step the command recovers
+  from is <code>[*]</code> or a warning, never a bare <code>[!]</code>, or a batch that did its job
+  exits 1. A command that runs until it is stopped passes
+  <code>rule=RULE_STREAM</code>; one with a verdict of its own passes <code>verdict=</code>.</li>
 </ul>
 <h2 id="apdu-and-crypto-handling"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and crypto handling</h2>
 <ul>
@@ -132,6 +143,37 @@ path navigable and the wizard maintainable as the spec evolves.</p>
   its evidence under <code>upstream_patches/&lt;name&gt;/</code> (see the
   <code>upstream_patches/osmocom-*</code> folders), and a compensation in this tree
   that verifies its own effect.</li>
+<li>A patch for a reused project is tested twice before it is sent: in the
+  upstream tree on its own (its test suite as its <abbr title="Certificate Issuer">CI</abbr> runs it, and the
+  patch's repro, at every commit of a series; a <abbr title="Certificate Issuer">CI</abbr> job that needs
+  hardware is read for what the patch changes in it) and joined with this tree
+  (the patch's tip installed, the compensations it replaces removed, and
+  every test here that reaches the project). A failure in either run sends
+  the patch back for rework, and both runs are repeated until both pass.</li>
+</ul>
+<h2 id="specification-tables">Specification tables</h2>
+<ul>
+<li>When a specification defines an enumeration or a structure, read the
+  whole table or clause and implement from that list, not from the rows
+  the change needs. Examples: a code table, a tag list, a result or cause
+  list, an <abbr title="Elementary File">EF</abbr> list, service-table bits, the fields and conditions of a
+  command. A row that is not implemented is named in an explicit
+  not-supported set beside the table, never left to fall through to
+  "unknown".</li>
+<li>A test enumerates the rows, with the clause and version they came from.
+  Every row is either implemented or in the not-supported set.</li>
+<li>A code-to-name table that more than one surface reads lives in one
+  shared module: <code>yggdrasim_common/stk_tables.py</code>, <code>apdu_tables.py</code>,
+  <code>tls_tables.py</code>, <code>x509_tables.py</code>, <code>secured_packet.py</code> or <code>service_table_names.py</code>. The dissector's
+  <code>tables.lua</code> is generated from them. A surface that shows a subset
+  filters the shared table rather than copying it.</li>
+<li><abbr title="Tag-Length-Value">TLV</abbr>, BER length and BCD coding come from <code>osmocom.tlv</code>,
+  <code>osmocom.utils</code> and <code>pySim.utils</code>. For <abbr title="Card Application Toolkit (ETSI TS 102 223)">CAT</abbr> data objects, check
+  <code>pySim.cat</code> first (<em>Reuse before building</em>).</li>
+<li>A wrong or missing row found in one copy of a table is looked for in
+  every copy.</li>
+<li>The change states its coverage, such as <code>TS 102 223 v18.3 Table 9.4:
+  45/45 command types</code>, or names the rows it leaves out and why.</li>
 </ul>
 <h2 id="python-conventions">Python conventions</h2>
 <ul>
@@ -197,7 +239,7 @@ than a clean rejection is a defect.</p>
   is build output. Rebuild with <code>./scripts/build_gui_frontend.sh</code> after
   every source change; <code>tests/test_gui_source_manifests.py</code> requires the
   served bundle to be byte-identical to a fresh build.</li>
-<li>One design system, 20 themes. Colour reaches a rule through a theme
+<li>One design system, 22 themes. Colour reaches a rule through a theme
   token or not at all; the per-file literal budget in
   <code>tests/test_gui_design_system_consistency.py</code> only shrinks. New floating
   surfaces (<code>position: fixed</code>) are app chrome or transient overlays;
@@ -242,6 +284,7 @@ than a clean rejection is a defect.</p>
             <a href="#shell-command-lines" class="toc-link">Shell command lines</a>
             <a href="#apdu-and-crypto-handling" class="toc-link">APDU and crypto handling</a>
             <a href="#reuse-before-building" class="toc-link">Reuse before building</a>
+            <a href="#specification-tables" class="toc-link">Specification tables</a>
             <a href="#python-conventions" class="toc-link">Python conventions</a>
             <a href="#security-and-boundary" class="toc-link">Security and boundary</a>
             <a href="#decode-boundaries" class="toc-link">Decode boundaries</a>
@@ -263,13 +306,13 @@ than a clean rejection is a defect.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

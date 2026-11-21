@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/env-flags.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -131,13 +131,18 @@ registered flag names are read back.</p>
   <em>next launch</em> means the value is read once at startup.</li>
 <li><strong>Persistence</strong> -- the file an override lands in, per the table above.</li>
 <li><strong>(sensitive)</strong> -- the flag weakens a security posture (insecure TLS, demo
-  keys, the quirks gate, disabling plugins), so the editors ask for
-  confirmation before writing it.</li>
+  keys, the quirks gate, disabling plugins) or names a command YggdraSIM runs
+  (<code>YGGDRASIM_SUCI_TOOL</code>, <code>YGGDRASIM_SAIP_TOOL</code>), so the editors ask for
+  confirmation before writing it: the launcher menu before it takes the
+  value, the GUI page between <strong>Set</strong> and the write, with the flag's note
+  shown. Clearing a flag is not asked about, and neither is a request sent
+  to <code>/api/env_flags/{name}/set</code> directly: the bearer token is the gate
+  there.</li>
 </ul>
 <h2 id="the-flags">The flags</h2>
 
 
-<p>64 flags in 13 categories, generated from <code>yggdrasim_common/env_flags.py</code>.</p>
+<p>83 flags in 13 categories, generated from <code>yggdrasim_common/env_flags.py</code>.</p>
 <h3 id="build-runtime">Build / runtime</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -166,6 +171,14 @@ registered flag names are read back.</p>
 <td>next launch</td>
 <td>home</td>
 <td>Force the writable runtime root</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_IPA_INDIRECT_DOWNLOAD</code></td>
+<td><code>1</code> / unset</td>
+<td>unset -&gt; an Activation Code or contactSmds trigger is run directly</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>IPA: run an Activation Code or contactSmds trigger through the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></td>
 </tr>
 </tbody>
 </table></div>
@@ -197,6 +210,14 @@ registered flag names are read back.</p>
 <td>immediately</td>
 <td>runtime root</td>
 <td>Remote <abbr title="Hardware-In-The-Loop">HIL</abbr> card-relay URL</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_CARD_RELAY_TOKEN_FILE</code></td>
+<td>path</td>
+<td>unset -&gt; the relay marker's token, else no token</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Path to the remote card relay's bearer-token file</td>
 </tr>
 <tr>
 <td><code>YGGDRASIM_SIM_QUIRKS</code></td>
@@ -520,6 +541,38 @@ registered flag names are read back.</p>
 <td>How the supervisor clears the SIMtrace2 board before a session</td>
 </tr>
 <tr>
+<td><code>YGGDRASIM_HIL_MODEM_DIAG</code></td>
+<td>text</td>
+<td>off</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Mirror the modem's own <abbr title="Subscriber Identity Module">SIM</abbr> log into the <abbr title="Hardware-In-The-Loop">HIL</abbr> GSMTAP stream</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_WIRESHARK_PROFILE</code></td>
+<td>text</td>
+<td>YggdraSIM-<abbr title="Hardware-In-The-Loop">HIL</abbr></td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Wireshark profile the <abbr title="Hardware-In-The-Loop">HIL</abbr> session opens with</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT</code></td>
+<td>text</td>
+<td>u</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Time column format of the Wireshark a <abbr title="Hardware-In-The-Loop">HIL</abbr> session opens</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_HIL_APDU_TIMEOUT_MS</code></td>
+<td>integer</td>
+<td>30000</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Longest wait for the card to answer one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></td>
+</tr>
+<tr>
 <td><code>YGGDRASIM_HIL_UHUBCTL_LOCATION</code></td>
 <td>text</td>
 <td>unset (port-power reset disabled)</td>
@@ -572,7 +625,7 @@ registered flag names are read back.</p>
 <td>shutil.which('saip-tool')</td>
 <td>immediately</td>
 <td>runtime root</td>
-<td>Explicit saip-tool binary or command</td>
+<td>(sensitive) Explicit saip-tool binary or command</td>
 </tr>
 <tr>
 <td><code>YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS</code></td>
@@ -615,6 +668,30 @@ registered flag names are read back.</p>
 <td>Library of saved profile elements for the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> workbench</td>
 </tr>
 <tr>
+<td><code>YGGDRASIM_EIM_BUILDER_STORE</code></td>
+<td>path</td>
+<td>~/.yggdrasim/eim_builder/</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Store of the AddInitialEim builder: certificates and typed values</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_LOCAL_EIM_STORE</code></td>
+<td>path</td>
+<td>~/.yggdrasim/local_eim/</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Store of the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>: identity, keys, <abbr title="Embedded UICC">eUICC</abbr> records and the operation queue</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_LOCAL_EIM_HISTORY_CAP</code></td>
+<td>integer</td>
+<td>10000</td>
+<td>immediately</td>
+<td>runtime root</td>
+<td>Finished Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> operations kept before the oldest are pruned</td>
+</tr>
+<tr>
 <td><code>YGGDRASIM_SAIP_UNIVERSAL_DEFAULTS</code></td>
 <td><code>1</code> / unset</td>
 <td>unset → templates are seeded from the list</td>
@@ -625,10 +702,10 @@ registered flag names are read back.</p>
 <tr>
 <td><code>YGGDRASIM_SUCI_TOOL</code></td>
 <td>text</td>
-<td>shutil.which('suci-keytool')</td>
+<td>suci-keytool.py or suci-keytool on PATH</td>
 <td>immediately</td>
 <td>runtime root</td>
-<td>Explicit suci-keytool binary or command</td>
+<td>(sensitive) Explicit suci-keytool binary or command</td>
 </tr>
 <tr>
 <td><code>YGGDRASIM_SUCI_TIMEOUT</code></td>
@@ -645,6 +722,86 @@ registered flag names are read back.</p>
 <td>immediately</td>
 <td>runtime root</td>
 <td>Path to the EUM session keys JSON repository</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_ACCESS</code></td>
+<td><code>read</code>, <code>write</code></td>
+<td>read</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) MCP server access level: read or write</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_ALLOW_CARD</code></td>
+<td><code>1</code> / unset</td>
+<td>unset -&gt; card tools refuse</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) Let MCP tools reach a card or a card relay</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_ALLOW_SCRIPT_FILES</code></td>
+<td><code>1</code> / unset</td>
+<td>unset -&gt; script-file verbs refuse</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) Let MCP shell batches run command files</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_MCP_UPSTREAM_LOG_LEVEL</code></td>
+<td><code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, <code>CRITICAL</code></td>
+<td>WARNING</td>
+<td>next launch</td>
+<td>session only</td>
+<td>Log level of pySim, osmocom and construct in the MCP server</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_MODE</code></td>
+<td><code>off</code>, <code>stub</code></td>
+<td>off</td>
+<td>next launch</td>
+<td>session only</td>
+<td>YggdraCore stub AUSF: off or stub</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_HOST</code></td>
+<td>text</td>
+<td>127.0.0.1</td>
+<td>next launch</td>
+<td>session only</td>
+<td>Bind address of the YggdraCore HTTP launcher</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_PORT</code></td>
+<td>integer</td>
+<td>8089</td>
+<td>next launch</td>
+<td>session only</td>
+<td>Port of the YggdraCore HTTP launcher</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_ALLOW_NONLOOPBACK</code></td>
+<td><code>1</code> / unset</td>
+<td>unset -&gt; loopback addresses only</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) Let the YggdraCore launcher bind beyond loopback</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_TOKEN_FILE</code></td>
+<td>path</td>
+<td>unset -&gt; a generated token</td>
+<td>next launch</td>
+<td>session only</td>
+<td>Bearer-token file of the YggdraCore HTTP launcher</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_5GCORE_NO_TOKEN</code></td>
+<td><code>1</code> / unset</td>
+<td>unset -&gt; bearer token required</td>
+<td>next launch</td>
+<td>session only</td>
+<td>(sensitive) Run the YggdraCore launcher without bearer tokens</td>
 </tr>
 </tbody>
 </table></div>
@@ -686,7 +843,7 @@ registered flag names are read back.</p>
 <tbody>
 <tr>
 <td><code>YGGDRASIM_CLI_THEME</code></td>
-<td><code>nord</code>, <code>catppuccin-frappe</code>, <code>catppuccin-latte</code>, <code>catppuccin-macchiato</code>, <code>catppuccin-mocha</code>, <code>dracula</code>, <code>github-dark</code>, <code>github-light</code>, <code>graphite-light</code>, <code>gruv-dark</code>, <code>ink-light</code>, <code>islands-light</code>, <code>matrix</code>, <code>mono</code>, <code>nord-light</code>, <code>ocean-dark</code>, <code>oneot-dark</code>, <code>oneot-light</code>, <code>solarized-dark</code>, <code>solarized-light</code>, <code>tokyo-night</code></td>
+<td><code>nord</code>, <code>bench-dark</code>, <code>bench-light</code>, <code>catppuccin-frappe</code>, <code>catppuccin-latte</code>, <code>catppuccin-macchiato</code>, <code>catppuccin-mocha</code>, <code>dracula</code>, <code>github-dark</code>, <code>github-light</code>, <code>graphite-light</code>, <code>gruv-dark</code>, <code>ink-light</code>, <code>islands-light</code>, <code>matrix</code>, <code>mono</code>, <code>nord-light</code>, <code>ocean-dark</code>, <code>oneot-dark</code>, <code>oneot-light</code>, <code>solarized-dark</code>, <code>solarized-light</code>, <code>tokyo-night</code></td>
 <td>nord (the canonical YggdraSIM palette)</td>
 <td>next launch</td>
 <td>runtime root</td>
@@ -891,13 +1048,13 @@ registered flag names are read back.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

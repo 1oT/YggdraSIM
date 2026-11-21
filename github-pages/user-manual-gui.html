@@ -1,0 +1,933 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>User Manual — GUI — YggdraSIM</title>
+  <link rel="icon" href="assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="tailwind.css?v=4">
+  <link rel="stylesheet" href="ygg.css?v=4">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="user-manual-gui.html">
+
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="ygg-layout.js?v=4"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">User Manual — GUI</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">User Manual — GUI</h1>
+        <p class="page-lead mb-8">This chapter covers the Command Center, the graphical surface of
+YggdraSIM, in a desktop window or a browser. Section 4 follows the sidebar
+from top to bottom. The concepts both surfaces share -- the card backend,
+readers and reader locks, where data is kept, configuration flags -- are in
+<code>USER_MANUAL.md</code> section 3, and the same modules on the command line are in
+<code>USER_MANUAL_CLI.md</code>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#1-start-the-gui" class="toc-link">1. Start the GUI</a>
+            <a href="#11-desktop-window" class="toc-link toc-link-sub">1.1 Desktop window</a>
+            <a href="#12-in-a-browser" class="toc-link toc-link-sub">1.2 In a browser</a>
+            <a href="#2-the-window" class="toc-link">2. The window</a>
+            <a href="#21-top-bar" class="toc-link toc-link-sub">2.1 Top bar</a>
+            <a href="#22-sidebar" class="toc-link toc-link-sub">2.2 Sidebar</a>
+            <a href="#23-a-modules-panes-the-dock-and-the-status-bar" class="toc-link toc-link-sub">2.3 A module&#x27;s panes, the dock and the status bar</a>
+            <a href="#24-the-reader-gate" class="toc-link toc-link-sub">2.4 The reader gate</a>
+            <a href="#3-run-an-action-and-read-the-answer" class="toc-link">3. Run an action and read the answer</a>
+            <a href="#31-run" class="toc-link toc-link-sub">3.1 Run</a>
+            <a href="#32-streams" class="toc-link toc-link-sub">3.2 Streams</a>
+            <a href="#33-read-the-answer" class="toc-link toc-link-sub">3.3 Read the answer</a>
+            <a href="#4-modules" class="toc-link">4. Modules</a>
+            <a href="#41-file-system" class="toc-link toc-link-sub">4.1 File system</a>
+            <a href="#42-applications" class="toc-link toc-link-sub">4.2 Applications</a>
+            <a href="#43-over-the-air" class="toc-link toc-link-sub">4.3 Over-the-Air</a>
+            <a href="#44-esim-management" class="toc-link toc-link-sub">4.4 eSIM Management</a>
+            <a href="#45-local-sm-dp" class="toc-link toc-link-sub">4.5 Local SM-DP+</a>
+            <a href="#46-local-eim" class="toc-link toc-link-sub">4.6 Local eIM</a>
+            <a href="#47-saip-tool" class="toc-link toc-link-sub">4.7 SAIP Tool</a>
+            <a href="#48-offline-tools" class="toc-link toc-link-sub">4.8 Offline Tools</a>
+            <a href="#49-apdu-streaming-remote-lab-and-remote-bridge" class="toc-link toc-link-sub">4.9 APDU Streaming: Remote Lab and Remote Bridge</a>
+            <a href="#410-hil-bridge" class="toc-link toc-link-sub">4.10 HIL Bridge</a>
+            <a href="#411-sim-card-helpers" class="toc-link toc-link-sub">4.11 SIM card helpers</a>
+            <a href="#412-yggdracore" class="toc-link toc-link-sub">4.12 YggdraCore</a>
+            <a href="#413-shell-and-host-shell" class="toc-link toc-link-sub">4.13 Shell and Host shell</a>
+            <a href="#414-registry-browser-configuration-about" class="toc-link toc-link-sub">4.14 Registry browser, Configuration, About</a>
+            <a href="#5-keyboard" class="toc-link">5. Keyboard</a>
+            <a href="#6-not-on-the-page" class="toc-link">6. Not on the page</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="1-start-the-gui">1. Start the GUI</h2>
+<h3 id="11-desktop-window">1.1 Desktop window</h3>
+<div class="code-block"><pre><code>yggdrasim-gui                       # from a terminal
+yggdrasim-desktop                   # the same, without a console window
+yggdrasim-gui &lt;profile package&gt;     # opens the file in the SAIP Tool
+yggdrasim-gui --card-backend sim --sim-quirks none   # on the simulated card, for this run
+</code></pre></div>
+<p><code>--card-backend</code>, the <code>--sim-*</code> options and <code>--debug</code> apply to the GUI run
+they are given to. Without them the GUI runs on the backend saved in the
+launcher menu <code>[C]</code>, or the one the environment names
+(<code>USER_MANUAL.md</code> section 2.3).</p>
+<p>The desktop GUI listens on <code>127.0.0.1:27853</code> (on another free port when
+that one is taken), makes its own access token and opens the window on it;
+there is nothing to configure. The window zooms
+with Ctrl+plus, Ctrl+minus and Ctrl+0 (or Ctrl and the mouse wheel), and the
+chosen factor is kept for the next start. Closing the window, or the <code>×</code> at
+the right end of the top bar, stops the server and the helpers it started.</p>
+<p>The desktop GUI needs the <code>[gui]</code> extra (<code>USER_MANUAL.md</code> section 2.1).</p>
+<h3 id="12-in-a-browser">1.2 In a browser</h3>
+<p>The same page can be served to a browser. The server refuses to start
+without a token file:</p>
+<div class="code-block"><pre><code>mkdir -p ~/.config/yggdrasim
+install -m 600 /dev/null ~/.config/yggdrasim/gui.token
+python -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot; &gt; ~/.config/yggdrasim/gui.token
+yggdrasim-web-server --host 127.0.0.1 --port 27854 --token-file ~/.config/yggdrasim/gui.token
+</code></pre></div>
+<p>Open <code>http://127.0.0.1:27854/?t=&lt;token&gt;</code> with the content of the token
+file. The page keeps the token for that browser tab and removes it from the
+address bar. Wrong tokens are counted: after several in a row the server
+answers every call with a refusal for a while, and the page reports
+"Rate-limited by auth backoff. Wait and retry."</p>
+<p>Keep the server on the loopback address. To use it from another machine,
+forward the port over SSH instead of binding it to the network:</p>
+<div class="code-block"><pre><code>ssh -fN -L 27854:127.0.0.1:27854 &lt;user&gt;@&lt;lab host&gt;
+</code></pre></div>
+<p><code>site-docs/subsystems/gui-command-center.md</code> covers TLS and the other
+server options. The browser server needs the <code>[gui-server]</code> extra.</p>
+<h2 id="2-the-window">2. The window</h2>
+<h3 id="21-top-bar">2.1 Top bar</h3>
+<p>From left to right:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Element</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sidebar button (left arrow)</td>
+<td>Hides the sidebar; click again to bring it back. Shift+click or right-click sets it to hide by itself.</td>
+</tr>
+<tr>
+<td>Title and breadcrumb</td>
+<td>Where you are, for example <code>Command Center · File system</code></td>
+</tr>
+<tr>
+<td>Version</td>
+<td>The YggdraSIM version</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> BRIDGE, REMOTE</td>
+<td>State of the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge and of the remote rig; <code>stopped</code> while neither runs</td>
+</tr>
+<tr>
+<td>BACKEND Reader / <abbr title="Subscriber Identity Module">SIM</abbr></td>
+<td>Switches between the reader and the simulated card for this GUI session (<code>USER_MANUAL.md</code> section 2.3)</td>
+</tr>
+<tr>
+<td>Reader pill</td>
+<td>The reader the modules work on; the Refresh readers button beside it reads the reader list again</td>
+</tr>
+<tr>
+<td><code>online</code></td>
+<td>The page reaches its server</td>
+</tr>
+<tr>
+<td>Skin and theme</td>
+<td>Two skins (Bench, Classic) and 22 colour themes, light and dark</td>
+</tr>
+<tr>
+<td>Up arrow, <code>×</code></td>
+<td>Collapses the top bar; closes YggdraSIM</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="22-sidebar">2.2 Sidebar</h3>
+<p>The sidebar lists the modules in groups. The number beside a module is the
+number of actions it offers.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Group</th>
+<th>Modules</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Card Administration</td>
+<td>File system, Applications, Over-the-Air</td>
+</tr>
+<tr>
+<td>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>)</td>
+<td>Management, Local SM-DP+, Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></td>
+</tr>
+<tr>
+<td>Tools</td>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool, Offline Tools (with an entry per tool)</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</td>
+<td>Remote Lab, Remote Bridge</td>
+</tr>
+<tr>
+<td>Advanced</td>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge, <abbr title="Subscriber Identity Module">SIM</abbr> card helpers, Shell, Host shell, Registry browser</td>
+</tr>
+<tr>
+<td>Environment</td>
+<td>Configuration</td>
+</tr>
+<tr>
+<td>Meta</td>
+<td>Overview, About</td>
+</tr>
+</tbody>
+</table></div>
+<p>Overview shows the same modules as cards, with the card backend in use
+below them.</p>
+<h3 id="23-a-modules-panes-the-dock-and-the-status-bar">2.3 A module's panes, the dock and the status bar</h3>
+<p>Most modules have three panes: the actions on the left, the form and its
+answer in the middle, and an inspector on the right that shows the state
+of the card or the module (the card overview, the <abbr title="Over-The-Air">OTA</abbr> settings, the
+certificate inventory).</p>
+<p>Below the panes, the dock has five tabs:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tab</th>
+<th>Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Messages</td>
+<td>One line per action run and per notable event</td>
+</tr>
+<tr>
+<td>Warnings, Errors</td>
+<td>What went wrong, kept apart</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></td>
+<td>Every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> exchange of the server process, from every module</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>The findings of the last <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> lint</td>
+</tr>
+</tbody>
+</table></div>
+<p>Copy copies the open tab and Clear all empties the dock. With the focus in
+the dock and no text selected, Ctrl+C copies the open tab too.</p>
+<p>The status bar at the very bottom names the view, the readers and sessions,
+the last activity and the <abbr title="eUICC Identifier">EID</abbr> and <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> of the card in use. Its four keys
+open and close the panes; Alt+1 to Alt+4 do the same:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>Pane</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Alt+1</td>
+<td>Sidebar</td>
+</tr>
+<tr>
+<td>Alt+2</td>
+<td>Actions (named Files in File system, Packages in <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool)</td>
+</tr>
+<tr>
+<td>Alt+3</td>
+<td>Inspector</td>
+</tr>
+<tr>
+<td>Alt+4</td>
+<td>The dock</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="24-the-reader-gate">2.4 The reader gate</h3>
+<p>A module that needs a card shows a reader list first ("Select a reader
+before running this reader-backed surface."). Pick the reader there or with
+the reader pill; the module then opens on it. File system and Applications
+then show <code>Open '&lt;reader name&gt;'</code>, which starts the session and scans the
+card.</p>
+<p>The eSIM Management module reads a card overview when it is entered. It
+skips that read, and says why, while another session holds the reader --
+for example a File system session on the same reader ("card overview not
+loaded: a File system session holds this reader"); Load card overview
+reads it on request.</p>
+<h2 id="3-run-an-action-and-read-the-answer">3. Run an action and read the answer</h2>
+<h3 id="31-run">3.1 Run</h3>
+<ol>
+<li>Open the module and the tab the action is in, and click the action. Its
+   form opens in the middle pane with a line on what the action does.</li>
+<li>Fill the fields. A required field is marked <code>*</code>; the line under a field
+   says what it takes. A form uses the reader the module is open on.</li>
+<li>An action that changes the card may show "Persistent or disruptive
+   action" and a checkbox to tick before it runs. Not every card-changing
+   action asks; <code>USER_MANUAL.md</code> section 4.1 lists which do.</li>
+<li>Press Run, or Start for an action that streams. The status line beside
+   the button follows the run, from Ready to Completed or Failed.</li>
+</ol>
+<h3 id="32-streams">3.2 Streams</h3>
+<p>An action that runs for a while (a download, a listener, a supervisor
+watch) streams its lines under the form as they arrive and shows a Cancel
+button. It keeps running when you open another module; its form, its
+output and Cancel come back when you return to it. Closing or reloading the
+page ends it.</p>
+<h3 id="33-read-the-answer">3.3 Read the answer</h3>
+<p>The answer renders under the form:</p>
+<ul>
+<li>summary rows (Reader, Target, Status, Note, and what the action
+  returns);</li>
+<li>RESULT TREE, the returned data field by field;</li>
+<li>CONSOLE TRACE, the lines the action printed, with the same markers as
+  the CLI (<code>USER_MANUAL.md</code> section 3.6);</li>
+<li>for some actions SHOW JSON and COPY JSON.</li>
+</ul>
+<p>Read the Status row together with the trace. For the profile actions of
+eSIM Management, Status reads <code>failed</code> when the trace has a <code>[-]</code> line or a
+<code>[!]</code> line other than a warning, and the module's status line then reads
+<code>&lt;operation&gt; failed</code>. The Notification sync that follows a profile state
+change is reported on its own: when it does not complete, Status stays <code>ok</code>
+and the Note says so, because the card has made the change. A profile
+disable on the simulated card, whose Notification names an SM-DP+ that
+cannot be reached, shows it:</p>
+<div class="code-block"><pre><code>[+] DisableProfile: success.
+[*] Notification sync: routing queued notification seq=1 to SM-DP+ rsp.example.com ...
+[*] Notification sync: handleNotification failed for queued notification seq=1 (...)
+[*] Notification sync: 1 notification(s) could not be forwarded to SM-DP+; leaving the unforwarded entries on-card for the next attempt.
+</code></pre></div>
+<p>The answer reads <code>ok</code>, <code>notification_sync</code> <code>incomplete</code>, and the Note
+"Notification sync did not complete; the Notifications it did not deliver
+stay on the <abbr title="Embedded UICC">eUICC</abbr> (see the trace)". The card overview's profile list and its
+Notifications count show the outcome.</p>
+<h2 id="4-modules">4. Modules</h2>
+<h3 id="41-file-system">4.1 File system</h3>
+<p>Card Administration, File system walks the card's file system: the <abbr title="Master File">MF</abbr>, the
+DFs, the ADFs of the applications (<abbr title="Universal Subscriber Identity Module">USIM</abbr>, <abbr title="IP Multimedia Services Identity Module">ISIM</abbr>) and their EFs.</p>
+<p>After the reader gate and Open, the module shows:</p>
+<ul>
+<li>a row of chips: the scope, the <abbr title="Answer To Reset">ATR</abbr>, the <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, <code>eUICC</code> when the card has
+  an <abbr title="Issuer Security Domain - Root">ISD-R</abbr>, the session, and the authentication state (<code>AUTH: NOT
+  AUTHENTICATED</code> until Applications authenticates, section 4.2);</li>
+<li>a ribbon with four tabs (HIDE TOOLS folds it):</li>
+</ul>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tab</th>
+<th>Groups and buttons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HOME</td>
+<td>Navigate: Rescan, Clear selection, Reset card. Inspect: Read selected, SELECT..., List apps, READ, RECORD..., ARR</td>
+</tr>
+<tr>
+<td>DIAGNOSTICS</td>
+<td><abbr title="Answer To Reset">ATR</abbr>, Card info, Decode..., Dump FS...; Validate, Cert info</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr></td>
+<td>The raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> console</td>
+</tr>
+<tr>
+<td>ADMIN</td>
+<td>Crypto: Derive OPc, Auth vector. Config: Show config, <abbr title="Application Identifier">AID</abbr> alias, Reset keys. Sub-shells: <abbr title="SIM Application Toolkit">STK</abbr> mode, <abbr title="Over-The-Air">OTA</abbr> shell. Scripts: Run script, FS report, Guides. Session: Close</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>the FILES tree, each node with its type (<abbr title="Master File">MF</abbr>, <abbr title="Dedicated File">DF</abbr>, <abbr title="Elementary File">EF</abbr>) and file identifier,
+  an ADF with its <abbr title="Application Identifier">AID</abbr>;</li>
+<li>the detail pane of the selected file.</li>
+</ul>
+<p>Click a file to select and read it. The detail pane shows its path and
+<abbr title="File Identifier">FID</abbr>, its type, the <abbr title="File Control Parameters">FCP</abbr> (size, SFI, life cycle state, the <abbr title="Elementary File">EF</abbr>.ARR record
+that sets its access rules), the body with its status word, and a decoded
+view where YggdraSIM knows the file. <abbr title="Elementary File">EF</abbr>.<abbr title="Integrated Circuit Card Identifier">ICCID</abbr> on the simulated card reads:</p>
+<div class="code-block"><pre><code>path: MF/EF_ICCID   fid: 2FE2   EF · transparent
+FCP     file size 10 B · SFI 02 · Operational state - activated · ARR 2F06 record 1
+Body    SW: 9000 · length 10
+iccid   89 88 11 11 11 11 11 11 11 12
+</code></pre></div>
+<p>The buttons of the detail pane write to the card: Update body, Create file,
+Lifecycle, and the DANGER group Delete, Resize and Suspend <abbr title="Universal Integrated Circuit Card">UICC</abbr>. A write
+needs the file's access condition met, for many files an ADM key verified
+first.</p>
+<p>The <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> tab sends any <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> on the session: pick a preset (SELECT <abbr title="Master File">MF</abbr>,
+SELECT <abbr title="Issuer Security Domain - Root">ISD-R</abbr>, GET DATA for the <abbr title="eUICC Identifier">EID</abbr>, GET STATUS, ...) or type one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> per
+line, <code>#</code> starting a comment, and press Send <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> (Ctrl+Enter). The console
+follows <code>61xx</code> with GET RESPONSE and repeats a <code>6Cxx</code> command with the
+length the card asks for; each can be turned off. The card's current <abbr title="Dedicated File">DF</abbr> is
+left where the APDUs put it; the next click in the tree selects from the <abbr title="Master File">MF</abbr>
+again.</p>
+<h3 id="42-applications">4.2 Applications</h3>
+<p>Card Administration, Applications works on the GlobalPlatform side of the
+same session: secure channels, the registry, installs, and the <abbr title="Embedded UICC">eUICC</abbr>. The
+file tree is hidden here; a handshake made here also counts for the File
+system module.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tab</th>
+<th>Groups and buttons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AUTH</td>
+<td>Auth: Auth <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, Auth <abbr title="Secure Channel Protocol 02 (GP)">SCP02</abbr>, Logout, Keys. Live AAA: <abbr title="Personal Identification Number">PIN</abbr>, Channel, Run AUTH</td>
+</tr>
+<tr>
+<td>REGISTRY</td>
+<td>Registry: Apps, Packages, Sec. domains, GET DATA..., AIDs. Mutate: Set status, Lock, Unlock, Delete, STORE DATA..., UPDATE BIN, UPDATE REC</td>
+</tr>
+<tr>
+<td>INSTALL</td>
+<td>PUT KEY, Install <abbr title="Converted Applet (Java Card)">CAP</abbr>, Install script, Install app, Make selectable, Extradition, Perso, Reg. update</td>
+</tr>
+<tr>
+<td>EUICC</td>
+<td>Profiles: Profiles, <abbr title="Embedded UICC">eUICC</abbr> scan. <abbr title="Embedded UICC">eUICC</abbr>: <abbr title="eUICC Identifier">EID</abbr>, <abbr title="Embedded UICC">eUICC</abbr> certs, Config data, <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 bulk, Enable, Disable, Delete profile. Snapshots: Set gold, Show gold, Clear gold, Diff. Export: <abbr title="Embedded UICC">eUICC</abbr> YAML, Keybag</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, ADMIN</td>
+<td>As in File system</td>
+</tr>
+</tbody>
+</table></div>
+<p>Worked example, on the simulated card:</p>
+<ol>
+<li>AUTH, Auth <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>. The form takes a target <abbr title="Application Identifier">AID</abbr> and overrides for the KVN
+   and the three keys; left empty, it uses the issuer security domain and
+   the keys of <code>Workspace/SCP03/keys.ini</code>. An override is used for the
+   session only and never stored.</li>
+<li>Authenticate. The answer reads <code>Status AUTHENTICATED</code>, <code>Protocol SCP03</code>,
+   <code>Target AID A000000151000000</code>, <code>KVN 30</code>, <code>Sec level 33</code>, and the chip
+   in the top row becomes <code>AUTH: SCP03 / AID=A000000151000000 / KVN=30</code>.</li>
+<li>REGISTRY, Apps. The answer lists every application with its life cycle
+   state and privileges:</li>
+</ol>
+<div class="code-block"><pre><code>AID                                STATE         EXTRA
+A0000005591010FFFFFFFF8900000200   PERSONALIZED  9EFE80
+A000000151000000                   SELECTABLE    800000
+A0000000871002FF86FF112233445566   SELECTABLE    000000
+</code></pre></div>
+<p>The Mutate and Install actions need an authenticated session. They change
+the card's content; see <code>USER_MANUAL.md</code> section 4.1 for the ones that ask
+before they run.</p>
+<h3 id="43-over-the-air">4.3 Over-the-Air</h3>
+<p>Card Administration, Over-the-Air builds <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> secured packets (<abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS
+102 225 and TS 102 226), sends them to the card as SMS-PP envelopes and
+decodes the answer.</p>
+<p>The inspector holds the <abbr title="Over-The-Air">OTA</abbr> profile:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Section</th>
+<th>Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Security</td>
+<td>Counter (CNTR), <abbr title="Security Parameter Indicator (OTA)">SPI</abbr> flags, KIc key set, KID key set, TAR</td>
+</tr>
+<tr>
+<td>Transport</td>
+<td>Transport mode, Print APDUs, Concatenated SMS on or off, <abbr title="Transport Protocol User Data">TP-UD</abbr> max bytes</td>
+</tr>
+<tr>
+<td>Payload</td>
+<td>Default payload (<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> hex), <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> profile; Refresh, Save config, Bind <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></td>
+</tr>
+<tr>
+<td>Send options</td>
+<td>Payload override, Script file, Verbose <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace</td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>The configuration file, the reader, the <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, the protocol, the <abbr title="Answer To Reset">ATR</abbr></td>
+</tr>
+</tbody>
+</table></div>
+<p>Its buttons are Send <abbr title="Over-The-Air">OTA</abbr>, Build plan, Smart <abbr title="Over-The-Air">OTA</abbr>, Raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, Script, Protocol
+and Reset transport. Build plan is the dry run: it shows the segments, the
+counter, the payload and the APDUs that a send would use, and sends
+nothing. Send <abbr title="Over-The-Air">OTA</abbr> sends; Smart <abbr title="Over-The-Air">OTA</abbr> builds, sends and decodes the answer in
+one step. Bind <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> keeps the settings per card, so the right keys come
+back when that card is used again.</p>
+<h3 id="44-esim-management">4.4 eSIM Management</h3>
+<p>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Management works on an <abbr title="Embedded UICC">eUICC</abbr> as the <abbr title="Local Profile Assistant">LPA</abbr> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22) or the IPA
+(<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32) would.</p>
+<p>The inspector holds the card overview, read when the module is entered:</p>
+<ul>
+<li>Card Identity: the <abbr title="eUICC Identifier">EID</abbr> and the issuer of the <abbr title="Embedded UICC">eUICC</abbr> certificate;</li>
+<li>Profiles: one block per profile with its state, name and <abbr title="Application Identifier">AID</abbr>, and its
+  Enable or Disable and Delete buttons;</li>
+<li>euiccConfigurationData: the default SM-DP+, the root SM-DS, further
+  SM-DS addresses, the allowed <abbr title="Certificate Issuer">CI</abbr> key identifiers;</li>
+<li><abbr title="Embedded UICC">eUICC</abbr> Info2: the versions, the IPA mode, the IoT details;</li>
+<li><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Configuration: the eIMs the card knows;</li>
+<li>Notifications: the number pending.</li>
+</ul>
+<p>The profile buttons ask in a dialog before they run ("Disable Lab (EU
+01)?").</p>
+<p>The actions are in two tabs. Reads such as Get <abbr title="eUICC Identifier">EID</abbr> or List profiles have no
+button: the overview shows them.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tab</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 Consumer (<abbr title="Local Profile Assistant">LPA</abbr>-d)</td>
+<td>Download profile (activation code), Full <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> flow, Set default SM-DP+, Remove notification, Clear all notifications, Reset card session, Set ES9 base URL, Set ES9 TLS verification, Set ES9 CA bundle</td>
+</tr>
+<tr>
+<td><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 IoT (IPA-d)</td>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> download (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32), <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> authenticate, Verify <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> handshake, AddInitialEim send, Listen for injected <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> packages, Get Profile Policy Rules, Set Profile Policy Rules, Get profile metadata, Get all profile metadata, Store profile metadata, Get all data (consolidated)</td>
+</tr>
+</tbody>
+</table></div>
+<p>Download a profile:</p>
+<ol>
+<li><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 Consumer (<abbr title="Local Profile Assistant">LPA</abbr>-d), Download profile (activation code).</li>
+<li>Enter the activation code (<code>LPA:1$smdp.example.com$MATCHING-ID</code>).</li>
+<li>Tick "I understand this installs a new profile on the card" and press
+   Start. The download streams its steps. When it ends, enter the module
+   again to read the card overview with the new profile.</li>
+</ol>
+<p>After a profile state change the module delivers the card's Notifications
+to the SM-DP+ each names and removes the delivered ones from the card
+(<code>USER_MANUAL.md</code> section 4.1, item 4).</p>
+<h3 id="45-local-sm-dp">4.5 Local SM-DP+</h3>
+<p>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Local SM-DP+ loads a profile package from disk straight onto
+an <abbr title="Embedded UICC">eUICC</abbr>, acting as the SM-DP+ itself, with certificates kept on this
+machine.</p>
+<p>The inspector holds:</p>
+<ul>
+<li>Profile, Certificate and Private key, each with Browse..., and a choice
+  of DPauth, DPpb or auto for an imported certificate; Import cert,
+  Inventory, Load profile;</li>
+<li>a drop zone: a profile package dropped there is loaded onto the card;</li>
+<li>the DPAUTH and DPPB rows: the certificate and key in use and how many
+  candidates exist;</li>
+<li>the card overview, as in eSIM Management.</li>
+</ul>
+<p>The card answers AuthenticateServer only for a certificate chain under a <abbr title="Certificate Issuer">CI</abbr>
+it lists, so the DPauth certificate has to match the card. Without a match
+the load stops at the start and the trace names the <abbr title="Certificate Issuer">CI</abbr> key identifiers the
+card allows. <code>SCP11/local_access/certs/README.md</code> and
+<code>CONFIGURATION_AND_CERTIFICATES.md</code> say where the certificates go.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tab</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Local SM-DP+ Provisioning</td>
+<td>Store metadata, Update metadata, Store metadata (custom tag), Store metadata (all custom tags), Lint metadata JSON</td>
+</tr>
+<tr>
+<td>Card &amp; Session Operations</td>
+<td>Enable profile, Disable profile, Delete profile, Retrieve notifications list</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="46-local-eim">4.6 Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></h3>
+<p>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> runs an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> on this machine. It has an
+identity (an eimId, an FQDN and a signing key), it is associated with
+cards, it queues operations for each card and signs them when the card's
+IPA takes them, and it keeps every result. <code>SCP11/eim_local/GUIDE.md</code> is
+its full guide.</p>
+<p>The middle pane is the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> page with two tabs, eUICCs and <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+configuration. The action list has five tabs: Operations, eUICCs, <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+configuration, Direct card commands and Package files; the page covers the
+daily work, the action list the rest.</p>
+<p>First use, on the simulated card:</p>
+<ol>
+<li>The page says "This <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> has no identity yet". Create identity opens
+   the New <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity form; Run with the fields empty makes one with
+   eimId <code>1.3.6.1.4.1.32473.999.10.124</code> and FQDN <code>eim.yggdrasim.local</code>.
+   The form back link at its top returns to the page.</li>
+<li>The eUICCs tab lists the cards the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> has seen (<abbr title="eUICC Identifier">EID</abbr>, Label, This <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>,
+   Profiles, Last polled, Operations). Read the card in the reader adds
+   the card in the reader; Register an <abbr title="eUICC Identifier">EID</abbr> adds one by hand. Open the
+   card's row.</li>
+<li>The card's page shows its pending operations, its profiles, its <abbr title="Embedded UICC">eUICC</abbr>
+   information, the eIMs linked with it, its Notifications and its event
+   log. Under eIMs linked with <abbr title="Embedded UICC">eUICC</abbr>, Link this <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> opens the Associate
+   card form. It resets the card's <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> configuration and adds this <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> as
+   the only one ("Every other <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leaves the card"); tick Confirm and Run.
+   The answer ends with the association token (first block below).</li>
+<li>Refresh eSIM profile list queues a List profiles operation. A queued
+   operation waits until the card's IPA asks for it, or until Deliver now
+   (<abbr title="IoT Profile Assistant, device-side">IPAd</abbr>) sends the queue through the card in the reader.</li>
+<li>Deliver now (<abbr title="IoT Profile Assistant, device-side">IPAd</abbr>). The delivery report lists each operation with its
+   result and the run output.</li>
+<li>Click an operation in the report or in the event log. The operation
+   view shows its state, its timeline, the package as served and the card's
+   answer, each data object by name (second and third blocks below).</li>
+</ol>
+<p>The end of the Associate card answer:</p>
+<div class="code-block"><pre><code>[+] resetEimResult: ok (0)
+[+] AddInitialEim: associationToken 1
+[+] record 89049032123451234512345678901235: associationToken 1, counterValue 0
+</code></pre></div>
+<p>The List profiles package as served:</p>
+<div class="code-block"><pre><code>BF51  EuiccPackageRequest   eimId 1.3.6.1.4.1.32473.999.10.124, EID 89049032123451234512345678901235, counter 1, ...
+BF2D  listProfileInfo       every Profile
+5F37  eimSignature          64 bytes
+</code></pre></div>
+<p>and the card's answer:</p>
+<div class="code-block"><pre><code>BF51  euiccPackageResultSigned  eimId 1.3.6.1.4.1.32473.999.10.124, counter 1, ...
+BF2D  listProfileInfoResult     ok
+E3    ProfileInfo               ICCID 89881111111111111112 enabled operational ...
+</code></pre></div>
+<p>A delivery also takes the card's pending Notifications: they are
+acknowledged, the card drops them, and the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> forwards each to the
+SM-DP+ it names (or keeps it, see <code>USER_MANUAL.md</code> section 4.1). The
+simulated card's Notifications name <code>rsp.example.com</code>; the report says they
+were not sent because no Notification Receiver answers there.</p>
+<p>The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> configuration tab shows the identity and its certificate, the TLS
+setups the card-facing listener serves, the service (Start service,
+Traffic, the ports and the log file) and the queue rules. A card's IPA
+polls the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> only while the service runs; Deliver now needs no service.</p>
+<h3 id="47-saip-tool">4.7 <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</h3>
+<p>Tools, <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool opens profile packages (<abbr title="SIMalliance Interoperable Profile">SAIP</abbr>), shows them element by
+element, lints and edits them, and builds new ones from templates.</p>
+<p>Open a package with Open on the ribbon (Ctrl+O), by dropping <code>.der</code>,
+<code>.json</code> or <code>.hex</code> files on the module, or from the command line
+(<code>yggdrasim-gui &lt;file&gt;</code>). The Open packages list on the left holds every
+open package; the tabs above the middle pane switch between the <abbr title="Profile Element (SAIP)">PE</abbr> list,
+the FS tree (every file of the profile) and the <abbr title="Application Identifier">AID</abbr> directory, each with a
+count.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Ribbon tab</th>
+<th>Buttons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PACKAGE</td>
+<td>New, Open, Recent, Close, Save, Save as..., Revert, Diff vs saved, Compare</td>
+</tr>
+<tr>
+<td>ACTIONS</td>
+<td>Trim padded content</td>
+</tr>
+<tr>
+<td>ELEMENT</td>
+<td>Add above, Add below, Delete, Move up, Move down, Import <abbr title="Profile Element (SAIP)">PE</abbr>, Export <abbr title="Profile Element (SAIP)">PE</abbr>, Save <abbr title="Profile Element (SAIP)">PE</abbr>, <abbr title="Profile Element (SAIP)">PE</abbr> library, Undo, Redo</td>
+</tr>
+<tr>
+<td>FILE SYSTEM</td>
+<td>Find, Sync ARR</td>
+</tr>
+<tr>
+<td>TOKENS</td>
+<td>Variables, Generate test profile, Batch generate</td>
+</tr>
+<tr>
+<td>LINT</td>
+<td>Validate, Batch lint, Save report</td>
+</tr>
+<tr>
+<td>ADVANCED</td>
+<td>All actions, Refresh</td>
+</tr>
+<tr>
+<td>REFERENCE</td>
+<td>Spec card, Guides</td>
+</tr>
+</tbody>
+</table></div>
+<p>Click a profile element to open it. Its Decoded view edits the element's
+fields by name, the JSON tab shows it whole. Edits stay in the open package
+until Save or Save as...; Revert drops them and Diff vs saved shows them.</p>
+<p>Validate lints the open package. The summary line goes to the dock
+(<code>SAIP.VALIDATE score 73 · FAIL 1 · WARN 5 · INFO 0</code> for the reference
+test profile) and the findings to its Validation tab: the score, the
+counts per severity, Re-validate and a STRICT switch, and a click on that
+row unfolds the findings grouped by rule, each with its severity, code,
+specification, path and message, and a jump to the profile element it
+concerns. All actions lists every <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> action by name, including those
+without a ribbon button. Templates, placeholders and test
+values are described in <code>TEMPLATE_AND_TOKENS.md</code>.</p>
+<h3 id="48-offline-tools">4.8 Offline Tools</h3>
+<p>Tools, Offline Tools works on data alone and never touches a card, except
+AddInitialEim send. Each tool has its own entry under Offline Tools in the
+sidebar:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Entry</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decoder</td>
+<td>Decodes an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, an answer, a whole exchange trace, a script of one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> per line, a bare <abbr title="Tag-Length-Value">TLV</abbr>, a status word or <abbr title="Elementary File">EF</abbr> content</td>
+</tr>
+<tr>
+<td>TERMINAL PROFILE</td>
+<td>Decode: names each facility a TERMINAL PROFILE claims, or compares two. Build: makes one facility by facility</td>
+</tr>
+<tr>
+<td>AddInitialEim</td>
+<td>Build makes an <abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr> AddInitialEim from stored certificates and shows the APDUs of the run without touching a card; Send sends it; Configurations, Certificate store and Saved values keep what the builder reuses</td>
+</tr>
+<tr>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package lint</td>
+<td>Checks an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package document (JSON) and lists errors and warnings</td>
+</tr>
+<tr>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys</td>
+<td>Use key file, Generate, Dump public key, through pySim's <code>suci-keytool</code></td>
+</tr>
+<tr>
+<td><abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> -- derive TOPc</td>
+<td>TOPc from TOP and K (3GPP TS 35.231)</td>
+</tr>
+<tr>
+<td><abbr title="GSM Association">GSMA</abbr> error-code reference</td>
+<td>The <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 and <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 result and error code tables</td>
+</tr>
+</tbody>
+</table></div>
+<p>The Decoder takes the input as it comes: hex with or without spaces, a
+trace with <code>&gt;</code> before a command and <code>&lt;</code> before its answer, AT+CSIM lines,
+PEM, base64, an <abbr title="eUICC Identifier">EID</abbr> or <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> in digits, an <abbr title="Answer To Reset">ATR</abbr>. Context picks the
+specification (Auto-detect is the default), Example loads a worked input,
+Open file reads a script file, Decode runs (Ctrl+Enter). The answer names
+every field and cites the table it comes from:</p>
+<div class="code-block"><pre><code>&gt; 80E2910003BF2D0000
+&lt; BF2D14A012E3105A0A988802214365870921F39F700101 9000
+</code></pre></div>
+<p>decodes to STORE DATA carrying a ProfileInfoListRequest, then a
+ProfileInfoListResponse with one profile: <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> <code>8988201234567890123</code>,
+profileState 1 (enabled).</p>
+<p><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys needs the <code>suci-keytool</code> command; set it with the
+<code>YGGDRASIM_SUCI_TOOL</code> flag under Configuration (section 4.14). The tool's
+status line says which command is in use.</p>
+<h3 id="49-apdu-streaming-remote-lab-and-remote-bridge">4.9 <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming: Remote Lab and Remote Bridge</h3>
+<p>These two modules move a card between machines.</p>
+<ul>
+<li>Remote Lab lists rigs other operators publish with a Remote Lab agent.
+  Import adds the rigs of a <code>.ygglab</code> invite; a rig is reserved by token
+  and its card then appears as a reader <code>Remote Lab: &lt;device&gt;</code>.</li>
+<li>Remote Bridge prepares a host over SSH and drives it yourself: the PC
+  bridge publishes the local reader, the SSH tunnel carries it, and the <abbr title="Hardware-In-The-Loop">HIL</abbr>
+  service on the remote host relays the APDUs to its modem. The default
+  port plan is card 8642, GUI 27854, <abbr title="Hardware-In-The-Loop">HIL</abbr> 9997.</li>
+</ul>
+<p><code>CARD_BRIDGE_GUIDE.md</code> and <code>site-docs/how-to/run-a-remote-lab-agent.md</code>
+are the guides.</p>
+<h3 id="410-hil-bridge">4.10 <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</h3>
+<p>Advanced, <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge puts the card in the reader in place of a modem's <abbr title="Subscriber Identity Module">SIM</abbr>
+through a SIMtrace2 board and decodes the traffic between them (Linux,
+full install). Pick the reader in the top bar, then:</p>
+<ul>
+<li>Session: Start launches the supervised session, Stop ends it; Start <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+  Stream puts this machine's card on another machine's modem.</li>
+<li>Source: Live, or Open pcap to review a saved capture without a session.</li>
+<li>View: Refresh, Auto-refresh, Pause, Context, Clear view.</li>
+</ul>
+<p>The lower tabs are the dissector (frame, decoded fields, bytes), the raw
+<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace and a modem shell. <code>HIL_BRIDGE_GUIDE.md</code> covers the hardware and
+the setup.</p>
+<h3 id="411-sim-card-helpers">4.11 <abbr title="Subscriber Identity Module">SIM</abbr> card helpers</h3>
+<p>Advanced, <abbr title="Subscriber Identity Module">SIM</abbr> card helpers has three read-only actions for the simulator:
+Profile store -- list, Quirks -- status, <abbr title="Embedded UICC">eUICC</abbr> store -- list.</p>
+<h3 id="412-yggdracore">4.12 YggdraCore</h3>
+<p>Advanced, YggdraCore is the 5G core stub: an AUSF and an AAnF that live in
+the GUI process. Its tabs:</p>
+<ul>
+<li>Subscriptions: add or update, list, delete and clear the subscribers
+  (<abbr title="Subscription Permanent Identifier (3GPP)">SUPI</abbr>, K, OPc, AMF, SQN, the home network) the stub authenticates.</li>
+<li>AKMA: Derive AKMA keys from a KAUSF and a <abbr title="Subscription Permanent Identifier (3GPP)">SUPI</abbr>, and the AAnF stub
+  (register an A-KID, list, clear, establish an AF session through it).
+  The AUSF registers the A-KID and KAKMA of every 5G AKA it completes in
+  the same AAnF.</li>
+<li>Open5GS: detect an Open5GS installation and read, provision or remove
+  subscribers in its database, the one <code>YGGDRASIM_OPEN5GS_MONGO_URI</code> names
+  (default <code>mongodb://127.0.0.1:27017</code>). Remove subscriber and Purge
+  YggdraSIM-managed docs ask first.</li>
+<li>Diagnostics: Status (the mode, the counts and the HTTP endpoints) and
+  Clear in-flight auth contexts.</li>
+</ul>
+<p>The actions run whatever <code>YGGDRASIM_5GCORE_MODE</code> says; the mode only
+decides whether <code>yggdrasim-yggdracore</code> serves the stub over HTTP (CLI
+chapter, section 5).</p>
+<h3 id="413-shell-and-host-shell">4.13 Shell and Host shell</h3>
+<p>Shell runs one of the CLI shells inside the page, in a terminal tab:
+choose the module (<abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr>, <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>, <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>.live, <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>.relay,
+<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>.local_access, <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>.eim_local, Tools.CardBridge,
+Tools.ProfilePackage, Tools.SuciTool) and Open tab. Paste works, Ctrl+C
+interrupts the shell, and several tabs can run side by side. Only these
+modules can be started; the page runs no other command. It is the way to
+reach a verb that has no form.</p>
+<p>Host shell is a terminal on the GUI host itself, for modem tools such as
+<code>minicom</code> or <code>socat</code>. It is off unless <code>YGGDRASIM_GUI_HOST_SHELL=1</code> is set
+before the GUI starts; <code>GUI_HOST_SHELL_GUIDE.md</code> explains the risk and the
+setup.</p>
+<h3 id="414-registry-browser-configuration-about">4.14 Registry browser, Configuration, About</h3>
+<ul>
+<li>Registry browser lists the engine's entry points (key, module,
+  attribute), the functions the commands call into.</li>
+<li>Configuration lists the <code>YGGDRASIM_*</code> flags by group, each with its
+  current value and its scope. Set a value, tick persist to keep it, and
+  confirm the extra line a sensitive flag shows; Clear removes it; Reset
+  persisted overrides removes every kept value. The loaded plugins are
+  listed at the end. <code>USER_MANUAL.md</code> section 3.5 explains the flags.</li>
+<li>About lists the guides, this manual among them. A click opens one in a
+  reader window with a Copy button; a guide the running build does not
+  include is shown disabled.</li>
+</ul>
+<h2 id="5-keyboard">5. Keyboard</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Keys</th>
+<th>Where</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Alt+1 to Alt+4</td>
+<td>Anywhere</td>
+<td>Open or close the sidebar, the actions pane, the inspector, the dock</td>
+</tr>
+<tr>
+<td>Ctrl+O</td>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</td>
+<td>Open a package</td>
+</tr>
+<tr>
+<td>Ctrl+Enter</td>
+<td>Decoder, <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> console</td>
+<td>Decode; send</td>
+</tr>
+<tr>
+<td>Escape</td>
+<td>A dialog or panel</td>
+<td>Close it</td>
+</tr>
+<tr>
+<td>Ctrl+C</td>
+<td>The dock, with no text selected</td>
+<td>Copy the open tab</td>
+</tr>
+<tr>
+<td>Ctrl+plus, Ctrl+minus, Ctrl+0</td>
+<td>Desktop window</td>
+<td>Zoom in, out, back to the native size</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="6-not-on-the-page">6. Not on the page</h2>
+<ul>
+<li><code>yggdrasim-yggdracore</code> serves the 5G core stub over HTTP; the page has
+  its actions (section 4.12) but no control that starts the server
+  (<code>site-docs/reference/command-suite.md</code> section 12.8).</li>
+<li>A shell verb without a form runs in Shell (section 4.13).</li>
+</ul>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#1-start-the-gui" class="toc-link">1. Start the GUI</a>
+            <a href="#11-desktop-window" class="toc-link toc-link-sub">1.1 Desktop window</a>
+            <a href="#12-in-a-browser" class="toc-link toc-link-sub">1.2 In a browser</a>
+            <a href="#2-the-window" class="toc-link">2. The window</a>
+            <a href="#21-top-bar" class="toc-link toc-link-sub">2.1 Top bar</a>
+            <a href="#22-sidebar" class="toc-link toc-link-sub">2.2 Sidebar</a>
+            <a href="#23-a-modules-panes-the-dock-and-the-status-bar" class="toc-link toc-link-sub">2.3 A module&#x27;s panes, the dock and the status bar</a>
+            <a href="#24-the-reader-gate" class="toc-link toc-link-sub">2.4 The reader gate</a>
+            <a href="#3-run-an-action-and-read-the-answer" class="toc-link">3. Run an action and read the answer</a>
+            <a href="#31-run" class="toc-link toc-link-sub">3.1 Run</a>
+            <a href="#32-streams" class="toc-link toc-link-sub">3.2 Streams</a>
+            <a href="#33-read-the-answer" class="toc-link toc-link-sub">3.3 Read the answer</a>
+            <a href="#4-modules" class="toc-link">4. Modules</a>
+            <a href="#41-file-system" class="toc-link toc-link-sub">4.1 File system</a>
+            <a href="#42-applications" class="toc-link toc-link-sub">4.2 Applications</a>
+            <a href="#43-over-the-air" class="toc-link toc-link-sub">4.3 Over-the-Air</a>
+            <a href="#44-esim-management" class="toc-link toc-link-sub">4.4 eSIM Management</a>
+            <a href="#45-local-sm-dp" class="toc-link toc-link-sub">4.5 Local SM-DP+</a>
+            <a href="#46-local-eim" class="toc-link toc-link-sub">4.6 Local eIM</a>
+            <a href="#47-saip-tool" class="toc-link toc-link-sub">4.7 SAIP Tool</a>
+            <a href="#48-offline-tools" class="toc-link toc-link-sub">4.8 Offline Tools</a>
+            <a href="#49-apdu-streaming-remote-lab-and-remote-bridge" class="toc-link toc-link-sub">4.9 APDU Streaming: Remote Lab and Remote Bridge</a>
+            <a href="#410-hil-bridge" class="toc-link toc-link-sub">4.10 HIL Bridge</a>
+            <a href="#411-sim-card-helpers" class="toc-link toc-link-sub">4.11 SIM card helpers</a>
+            <a href="#412-yggdracore" class="toc-link toc-link-sub">4.12 YggdraCore</a>
+            <a href="#413-shell-and-host-shell" class="toc-link toc-link-sub">4.13 Shell and Host shell</a>
+            <a href="#414-registry-browser-configuration-about" class="toc-link toc-link-sub">4.14 Registry browser, Configuration, About</a>
+            <a href="#5-keyboard" class="toc-link">5. Keyboard</a>
+            <a href="#6-not-on-the-page" class="toc-link">6. Not on the page</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="ygg.js?v=4"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

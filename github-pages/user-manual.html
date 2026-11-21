@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>User Manual — YggdraSIM</title>
+  <link rel="icon" href="assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="tailwind.css?v=4">
+  <link rel="stylesheet" href="ygg.css?v=4">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="user-manual.html">
+
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="ygg-layout.js?v=4"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">User Manual</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">YggdraSIM User Manual</h1>
+        <p class="page-lead mb-8">YggdraSIM drives <abbr title="Subscriber Identity Module">SIM</abbr> cards, UICCs and eUICCs from a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader, or a
+simulated card in their place. It runs from two surfaces: a graphical
+Command Center in a desktop window or a browser, and a set of command-line
+shells. Both reach the same engine, so a task done in one can be done in the
+other.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#1-modules" class="toc-link">1. Modules</a>
+            <a href="#2-install-and-first-start" class="toc-link">2. Install and first start</a>
+            <a href="#21-install" class="toc-link toc-link-sub">2.1 Install</a>
+            <a href="#22-check-the-environment" class="toc-link toc-link-sub">2.2 Check the environment</a>
+            <a href="#23-first-start-without-a-card" class="toc-link toc-link-sub">2.3 First start without a card</a>
+            <a href="#3-concepts-both-surfaces-share" class="toc-link">3. Concepts both surfaces share</a>
+            <a href="#31-readers" class="toc-link toc-link-sub">3.1 Readers</a>
+            <a href="#32-one-user-per-reader" class="toc-link toc-link-sub">3.2 One user per reader</a>
+            <a href="#33-what-the-card-backend-changes" class="toc-link toc-link-sub">3.3 What the card backend changes</a>
+            <a href="#34-where-data-is-kept" class="toc-link toc-link-sub">3.4 Where data is kept</a>
+            <a href="#35-configuration-flags" class="toc-link toc-link-sub">3.5 Configuration flags</a>
+            <a href="#36-reading-the-output" class="toc-link toc-link-sub">3.6 Reading the output</a>
+            <a href="#37-plugins" class="toc-link toc-link-sub">3.7 Plugins</a>
+            <a href="#4-work-on-a-real-card" class="toc-link">4. Work on a real card</a>
+            <a href="#41-before-a-command-reaches-a-real-card" class="toc-link toc-link-sub">4.1 Before a command reaches a real card</a>
+            <a href="#42-a-simulator-run-that-touches-nothing-real" class="toc-link toc-link-sub">4.2 A simulator run that touches nothing real</a>
+            <a href="#5-when-something-fails" class="toc-link">5. When something fails</a>
+            <a href="#6-further-reading" class="toc-link">6. Further reading</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<p>The manual has three files:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>File</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>USER_MANUAL.md</code> (this file)</td>
+<td>What each module is for, installing and starting, the concepts both surfaces share, work on a real card, what to do when something fails</td>
+</tr>
+<tr>
+<td><code>USER_MANUAL_GUI.md</code></td>
+<td>The Command Center: the window, running an action and reading its answer, every module in sidebar order</td>
+</tr>
+<tr>
+<td><code>USER_MANUAL_CLI.md</code></td>
+<td>The shells: the launcher, how every shell works, every module in the same order as the GUI chapter</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>RUNBOOK.md</code> is the one-page version: one row per task with the CLI command
+and the GUI place side by side. The full verb reference of every shell is
+<code>site-docs/reference/command-suite.md</code>. Examples in this manual use the
+reserved test values of the project (<code>8988...</code> ICCIDs, <code>89049032...</code> EIDs,
+<code>*.example.test</code> host names) and the answers of the simulated card.</p>
+<h2 id="1-modules">1. Modules</h2>
+<p>Each module has a place in the GUI sidebar and a command on the CLI. The
+section columns name where each chapter describes it.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Module</th>
+<th>What it is for</th>
+<th>GUI place (GUI section)</th>
+<th>CLI command (CLI section)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>File system</td>
+<td>Walk and read the <abbr title="Universal Integrated Circuit Card">UICC</abbr> file system, send raw APDUs</td>
+<td>Card Administration, File system (4.1)</td>
+<td><code>yggdrasim-scp03</code> (4.1)</td>
+</tr>
+<tr>
+<td>Applications</td>
+<td>GlobalPlatform secure channel (<abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, <abbr title="Secure Channel Protocol 02 (GP)">SCP02</abbr>), the card registry, applet installs, <abbr title="Embedded UICC">eUICC</abbr> reads</td>
+<td>Card Administration, Applications (4.2)</td>
+<td><code>yggdrasim-scp03</code> (4.1)</td>
+</tr>
+<tr>
+<td>Over-the-Air</td>
+<td>Build, send and decode <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> packets</td>
+<td>Card Administration, Over-the-Air (4.3)</td>
+<td><code>yggdrasim-scp80</code> (4.2)</td>
+</tr>
+<tr>
+<td>eSIM Management</td>
+<td>Read an <abbr title="Embedded UICC">eUICC</abbr>, download a profile with an activation code, enable, disable and delete profiles, Notifications, the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> functions</td>
+<td>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Management (4.4)</td>
+<td><code>yggdrasim-scp11-live</code> (4.3)</td>
+</tr>
+<tr>
+<td>Local SM-DP+</td>
+<td>Load a profile package from disk onto an <abbr title="Embedded UICC">eUICC</abbr> with local SM-DP+ certificates, profile metadata</td>
+<td>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Local SM-DP+ (4.5)</td>
+<td><code>yggdrasim-scp11-local-access</code> (4.4)</td>
+</tr>
+<tr>
+<td>Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></td>
+<td>An <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> run on this machine: identity, association with a card, an operation queue, delivery to the card, a service IPAs poll</td>
+<td>eSIM (<abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr>), Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> (4.6)</td>
+<td><code>yggdrasim-scp11-eim-local</code> (4.5)</td>
+</tr>
+<tr>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</td>
+<td>Inspect, lint, edit and generate profile packages (<abbr title="SIMalliance Interoperable Profile">SAIP</abbr>)</td>
+<td>Tools, <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool (4.7)</td>
+<td><code>yggdrasim-profile-package</code> (4.6)</td>
+</tr>
+<tr>
+<td>Offline Tools</td>
+<td>Decoder, TERMINAL PROFILE, AddInitialEim builder, <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package lint, <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys, <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr>, <abbr title="GSM Association">GSMA</abbr> error codes</td>
+<td>Tools, Offline Tools (4.8)</td>
+<td><code>yggdrasim-asn1</code>, <code>yggdrasim-suci-tool</code> and others (4.7)</td>
+</tr>
+<tr>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</td>
+<td>Use a card that sits in a reader on another machine, or share rigs between operators</td>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming (4.9)</td>
+<td><code>yggdrasim-card-bridge</code>, <code>yggdrasim-lab-agent</code>, <code>yggdrasim-lab</code> (4.8)</td>
+</tr>
+<tr>
+<td><abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge</td>
+<td>Bridge a card in a reader to a modem through a SIMtrace2 board and capture the traffic (Linux)</td>
+<td>Advanced, <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge (4.10)</td>
+<td><code>yggdrasim-hil-supervisor</code>, <code>yggdrasim-hil-bridge</code> (4.9)</td>
+</tr>
+<tr>
+<td>Simulator</td>
+<td>A simulated <abbr title="Universal Integrated Circuit Card">UICC</abbr> and <abbr title="Embedded UICC">eUICC</abbr> in place of a reader</td>
+<td>top bar BACKEND switch; Advanced, <abbr title="Subscriber Identity Module">SIM</abbr> card helpers (4.11)</td>
+<td>launcher menu <code>[C]</code> (4.10); section 2.3 of this file</td>
+</tr>
+<tr>
+<td>YggdraCore</td>
+<td>A 5G core stub (an AUSF and an AAnF) for authentication and AKMA tests, its subscriber store, and a bridge to an Open5GS database</td>
+<td>Advanced, YggdraCore (4.12)</td>
+<td><code>yggdrasim-yggdracore</code> (5)</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="2-install-and-first-start">2. Install and first start</h2>
+<h3 id="21-install">2.1 Install</h3>
+<p>Pick the install guide that matches the machine:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Guide</th>
+<th>For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>INSTALL_CLEAN.md</code></td>
+<td>The release executables without the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge (Windows, macOS, Linux, Raspberry Pi)</td>
+</tr>
+<tr>
+<td><code>INSTALL_FULL.md</code></td>
+<td>The release executable with the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge (Linux)</td>
+</tr>
+<tr>
+<td><code>INSTALL_FROM_SOURCE.md</code></td>
+<td>A source checkout, with the extras matrix</td>
+</tr>
+<tr>
+<td><code>INSTALL_RASPBERRYPI.md</code></td>
+<td>Raspberry Pi specifics</td>
+</tr>
+</tbody>
+</table></div>
+<p>From a source checkout, the base install and the GUI are:</p>
+<div class="code-block"><pre><code>python -m pip install -e &#39;.[saip]&#39;
+python -m pip install -e &#39;.[gui]&#39;          # desktop window
+python -m pip install -e &#39;.[gui-server]&#39;   # browser access, no desktop window
+</code></pre></div>
+<p>The editable install puts the commands of section 1 on the <code>PATH</code> of that
+environment (<code>yggdrasim</code>, <code>yggdrasim-gui</code>, <code>yggdrasim-scp03</code>, ...).</p>
+<h3 id="22-check-the-environment">2.2 Check the environment</h3>
+<div class="code-block"><pre><code>yggdrasim --doctor
+</code></pre></div>
+<p>The check is read-only. It lists Python and the libraries, the pySim in use,
+the runtime root (section 3.4), the readers, the optional tools (<code>gpg</code>,
+<code>tshark</code>, <code>dfu-util</code>) and whether the GUI can start:</p>
+<div class="code-block"><pre><code>[+] Python runtime: OK -- 3.13.7 (&gt;= 3.10)
+[+] pySim SAIP runtime: OK -- pySim.esim.saip
+[+] Workspace root: OK -- /home/&lt;user&gt;/YggdraSIM
+[*] Remote card bridge: INFO -- Not configured -- set YGGDRASIM_CARD_RELAY_URL or ...
+[+] GUI desktop default port: OK -- 127.0.0.1:27853 is free
+</code></pre></div>
+<p><code>[+]</code> is a check that passed and <code>[*]</code> a warning or a note. The command ends
+with exit code 1 when any check warns, so it can gate a script.</p>
+<h3 id="23-first-start-without-a-card">2.3 First start without a card</h3>
+<p>The simulator answers like a <abbr title="Universal Integrated Circuit Card">UICC</abbr> with an <abbr title="Embedded UICC">eUICC</abbr>: a file system with a <abbr title="Universal Subscriber Identity Module">USIM</abbr>,
+a GlobalPlatform registry, an <abbr title="Issuer Security Domain - Root">ISD-R</abbr> with two test profiles and an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+configuration. It is the place to learn the tool and to rehearse a procedure
+before it runs on a real card.</p>
+<p>There are three ways to select it:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Way</th>
+<th>Lasts</th>
+<th>Reaches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Launcher menu <code>[C]</code>: <code>[2]</code> Use simulated <abbr title="Subscriber Identity Module">SIM</abbr> card, then <code>[D]</code> Disable simulator quirks</td>
+<td>Until changed there (<code>[1]</code> returns to the reader)</td>
+<td>Every later command and the GUI</td>
+</tr>
+<tr>
+<td><code>yggdrasim --card-backend sim --sim-quirks none</code></td>
+<td>That launcher run</td>
+<td>The modules started from it; the GUI takes the same options (<code>yggdrasim-gui --card-backend sim --sim-quirks none</code>)</td>
+</tr>
+<tr>
+<td><code>YGGDRASIM_CARD_BACKEND=sim</code> and <code>YGGDRASIM_SIM_QUIRKS=none</code> in the environment</td>
+<td>One process</td>
+<td>Any command, the GUI included (<code>YGGDRASIM_CARD_BACKEND=sim YGGDRASIM_SIM_QUIRKS=none yggdrasim-gui</code>)</td>
+</tr>
+</tbody>
+</table></div>
+<p>The environment wins over the saved choice, and a launcher option wins over
+both for its run: <code>yggdrasim-gui</code> and <code>yggdrasim-web-server</code> take
+<code>--card-backend</code>, the <code>--sim-*</code> options and <code>--debug</code> like any other launcher
+run. The GUI's BACKEND switch in the top bar changes the backend for that GUI
+session only.</p>
+<p>The quirks file is Python the simulator would run from the runtime root
+(<code>Workspace/SIMCARD/sim_quirks.py</code>). As first seeded it is the shipped
+template, which defines nothing, and the simulator starts without asking.
+Once it is edited, loading it is refused until it is allowed
+(<code>YGGDRASIM_ALLOW_QUIRKS=1</code>, for a file you trust) or switched off as above,
+and a simulator started with neither stops at once:</p>
+<div class="code-block"><pre><code>[!] Connection failed: Simulator quirk loading is disabled by default because it executes arbitrary Python from disk. ...
+</code></pre></div>
+<p>The simulated card keeps its state between runs in
+<code>Workspace/SIMCARD/euicc_store</code> under the runtime root, so a profile
+disabled today is still disabled tomorrow.</p>
+<h2 id="3-concepts-both-surfaces-share">3. Concepts both surfaces share</h2>
+<h3 id="31-readers">3.1 Readers</h3>
+<p>A command works on one reader at a time.</p>
+<ul>
+<li>On the CLI, <code>yggdrasim-scp03</code>, <code>yggdrasim-scp11-live</code> and
+  <code>yggdrasim-scp11-local-access</code> take <code>--reader "&lt;reader name&gt;"</code> with the
+  exact <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader name. Without it they open the first reader the system
+  lists. <code>yggdrasim-scp11-eim-local</code> has no reader option and always uses
+  the first reader; <code>yggdrasim-scp80</code> uses the reader of its configuration
+  (<code>show</code> lists <code>reader_idx</code> and <code>reader_name</code>).</li>
+<li>In the GUI, the reader pill in the top bar binds the reader the modules
+  work on. Binding a reader starts nothing; a module that needs a reader
+  asks for one first (GUI section 2.4).</li>
+<li>A reader of another machine reached through the Remote Lab appears as
+  <code>Remote Lab: &lt;device&gt;</code> and is named the same way.</li>
+</ul>
+<p>Name the reader whenever more than one is attached. Reader order can change
+when a reader is plugged in or out.</p>
+<h3 id="32-one-user-per-reader">3.2 One user per reader</h3>
+<p>Two programs sending APDUs to one card at the same time break each other's
+sessions, so YggdraSIM keeps a lock per reader across processes. A command
+that finds the reader held is refused with the holder named:</p>
+<div class="code-block"><pre><code>reader busy: GET-EID in the eSIM Management console (pid 4242) has held &#39;&lt;reader name&gt;&#39; since 10:15:02
+</code></pre></div>
+<ul>
+<li>A short holder (one command) is waited for; a long one (a stream, the <abbr title="Hardware-In-The-Loop">HIL</abbr>
+  bridge, a listener) is refused at once.</li>
+<li>Taking part: GUI card actions, the card commands of the eSIM Management
+  shell, the card verbs of the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shell, the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge and the MCP
+  card tools.</li>
+<li>Not taking part: the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>, <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> and Local SM-DP+ shells, the Card
+  Bridge and programs that are not YggdraSIM. They are neither refused nor
+  seen, so do not run them against a reader another session is using.</li>
+</ul>
+<p>Wait for the holder to finish or stop it. Do not unplug the reader under a
+running session.</p>
+<h3 id="33-what-the-card-backend-changes">3.3 What the card backend changes</h3>
+<p>With the simulator selected, every card-facing module talks to the
+simulated card and no reader is opened. Everything else -- the stores, the
+Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>, the SM-DP+ and SM-DS addresses a flow contacts -- is the same as
+with a reader. A download that names a real SM-DP+ reaches it from the
+simulator too. For a run that must touch nothing real, follow section 4.2.</p>
+<h3 id="34-where-data-is-kept">3.4 Where data is kept</h3>
+<p>The <strong>runtime root</strong> holds the writable state of the tool:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Install</th>
+<th>Runtime root</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source checkout (editable install)</td>
+<td>The repository root</td>
+</tr>
+<tr>
+<td>Installed wheel</td>
+<td>The per-user data directory of the platform</td>
+</tr>
+<tr>
+<td>Release executable</td>
+<td><code>YggdraSIM-data/</code> next to the executable, else <code>~/YggdraSIM-data/</code></td>
+</tr>
+<tr>
+<td>Any of the above with <code>YGGDRASIM_RUNTIME_ROOT</code> set</td>
+<td>That directory</td>
+</tr>
+</tbody>
+</table></div>
+<p>Under it:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Path</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Workspace/SCP03/</code></td>
+<td><code>keys.ini</code> (the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> and <abbr title="Secure Channel Protocol 02 (GP)">SCP02</abbr> keys the Applications module uses), <code>aid.txt</code> (<abbr title="Application Identifier">AID</abbr> aliases), <code>binds.json</code> (shell macros)</td>
+</tr>
+<tr>
+<td><code>Workspace/LocalSMDPP/</code></td>
+<td>The default profile and metadata of the Local SM-DP+, and its certificate drop folder <code>certs/</code></td>
+</tr>
+<tr>
+<td><code>Workspace/LocalEIM/</code></td>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package templates, the hotfolder, <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> certificates</td>
+</tr>
+<tr>
+<td><code>Workspace/SAIP/</code></td>
+<td>The default profile and output folders of the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</td>
+</tr>
+<tr>
+<td><code>Workspace/SIMCARD/</code></td>
+<td>The simulated card's configuration and its stored state</td>
+</tr>
+<tr>
+<td><code>state/</code></td>
+<td>The device inventory database and the persisted flag values</td>
+</tr>
+</tbody>
+</table></div>
+<p>Outside the runtime root, per user:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Path</th>
+<th>Holds</th>
+<th>Flag that moves it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>~/.yggdrasim/local_eim/</code></td>
+<td>The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> store: identity, <abbr title="Embedded UICC">eUICC</abbr> records, operations, Notifications</td>
+<td><code>YGGDRASIM_LOCAL_EIM_STORE</code></td>
+</tr>
+<tr>
+<td><code>~/.yggdrasim/eim_builder/</code></td>
+<td>Certificates, saved values and configurations of the AddInitialEim builder</td>
+<td><code>YGGDRASIM_EIM_BUILDER_STORE</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><code>site-docs/reference/runtime-root.md</code> has the resolution order;
+<code>CONFIGURATION_AND_CERTIFICATES.md</code> says where each certificate and key goes.</p>
+<h3 id="35-configuration-flags">3.5 Configuration flags</h3>
+<p>Runtime behaviour is set by <code>YGGDRASIM_*</code> flags. There are three ways to set
+one:</p>
+<ul>
+<li>as an environment variable, for one process;</li>
+<li>in the launcher menu, entry <code>[E]</code>;</li>
+<li>in the GUI, Environment, Configuration.</li>
+</ul>
+<p>A value set from the menu or the GUI can be persisted. It is written to
+<code>state/env_overrides.json</code> under the runtime root (or, for
+<code>YGGDRASIM_RUNTIME_ROOT</code> itself, to <code>~/.yggdrasim/env_overrides.json</code>) and
+applied at the next start. A flag marked sensitive -- one that weakens a
+check or names a command the process runs -- asks for confirmation before it
+is written, in the menu and in the GUI alike.
+<code>site-docs/reference/env-flags.md</code> lists the flags the menu and the GUI
+edit, with their defaults.</p>
+<h3 id="36-reading-the-output">3.6 Reading the output</h3>
+<p>Both surfaces print the same marked lines:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Marker</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[*]</code></td>
+<td>Progress or information</td>
+</tr>
+<tr>
+<td><code>[+]</code></td>
+<td>A step that succeeded</td>
+</tr>
+<tr>
+<td><code>[-]</code></td>
+<td>A step that failed</td>
+</tr>
+<tr>
+<td><code>[!]</code></td>
+<td>A refusal or an error the command stopped on</td>
+</tr>
+</tbody>
+</table></div>
+<p>A status word in an answer (<code>6985</code>, <code>6A82</code>) is named by the decoder:</p>
+<div class="code-block"><pre><code>yggdrasim-asn1 --context --domain sw 6985
+</code></pre></div>
+<div class="code-block"><pre><code>SW 6985: Conditions of use not satisfied
+</code></pre></div>
+<p>More detail, from least to most:</p>
+<ul>
+<li><code>--debug</code> on a shell command line, or on the launcher for every module it
+  starts, prints the raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> exchanges.</li>
+<li><code>--log &lt;file&gt;</code> after any shell command line runs that one command with
+  debug output and appends everything it prints to <code>&lt;file&gt;</code> (CLI section
+  2.4).</li>
+<li>The GUI shows every <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> of its process in the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> tab of the bottom
+  dock, and the lines of a running action under its form (GUI section 3).</li>
+</ul>
+<h3 id="37-plugins">3.7 Plugins</h3>
+<p>Plugins add operator-supplied capabilities. Loading them is off by default:
+<code>YGGDRASIM_ALLOW_PLUGINS=1</code> allows it, <code>YGGDRASIM_DISALLOW_PLUGINS=1</code> locks
+it off. Loaded plugins are listed in the GUI under Environment,
+Configuration. This manual covers the tool without plugins.</p>
+<h2 id="4-work-on-a-real-card">4. Work on a real card</h2>
+<h3 id="41-before-a-command-reaches-a-real-card">4.1 Before a command reaches a real card</h3>
+<ol>
+<li>Rehearse the procedure on the simulator first (section 2.3).</li>
+<li>Name the reader (section 3.1) and check that nothing else uses it
+   (section 3.2).</li>
+<li>Read before writing: <abbr title="eUICC Identifier">EID</abbr>, profile list and pending Notifications before
+   any state change (<code>GET-EID; LIST; GET-NOTIFICATIONS</code> in
+   <code>yggdrasim-scp11-live</code>, or the card overview of the eSIM Management
+   module).</li>
+<li>Decide what happens to the card's pending Notifications before a
+   profile state change. They are signed records of enable, disable, delete
+   and install events that the <abbr title="Embedded UICC">eUICC</abbr> keeps until they are delivered:</li>
+<li>the eSIM Management shell and module post them to the SM-DP+ each one
+     names after a profile state change, and remove the delivered ones from
+     the card (a Notification that cannot be delivered stays on the card);</li>
+<li>a Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> delivery (<code>DELIVER</code>, Deliver now) takes the card's
+     Notifications and acknowledges them, so the card drops them; the Local
+     <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> then forwards each to the SM-DP+ it names and holds none back;</li>
+<li><code>EIM-LISTEN notifications=keep</code> leaves them on the card.</li>
+<li>Know which actions write and how each asks.</li>
+<li>In the GUI, every action that changes a card asks first. Its form
+     carries a checkbox, "I have reviewed the target and understand the
+     impact.", that has to be ticked before Run (under the heading
+     "Persistent or disruptive action" outside the File system and
+     Applications workbench). The buttons that run without a form put a question line
+     with Confirm and Cancel under themselves: Send <abbr title="Over-The-Air">OTA</abbr> packet, Smart <abbr title="Over-The-Air">OTA</abbr>
+     and Run script file in Over-the-Air, Create file in File system, and
+     Deliver now on the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> page. The Enable, Disable and Delete
+     buttons of a card overview ask in a dialog. Not asked: the raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+     consoles (Send <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, Send raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>), where every command is typed by
+     hand, and the card and transport resets, which change nothing the card
+     stores.</li>
+<li>On the CLI, <code>ASSOCIATE</code> asks for the last eight digits of the <abbr title="eUICC Identifier">EID</abbr>
+     (<code>--yes</code> skips the question) and <code>ADD-INITIAL-EIM</code> asks before it
+     sends. The <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> verbs <code>UPDATE</code>, <code>DELETE</code>, <code>LOCK</code>, <code>UNLOCK</code>,
+     <code>STORE-DATA</code> and the install verbs act at once; the wizards
+     (<code>PUT-KEY</code>, <code>SET-STATUS</code>, <code>FS-ADMIN</code>) ask for their values first.</li>
+<li>Two writes need particular care:</li>
+<li>associating a card with the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> (<code>ASSOCIATE</code>, Link this <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>)
+     and <code>ADD-INITIAL-EIM</code> reset the card's <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> configuration first: every
+     other <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leaves the card;</li>
+<li><code>DELETE-PROFILE</code> removes the profile and its data from the <abbr title="Embedded UICC">eUICC</abbr>.</li>
+<li>After each step, read the result before the next one. A run that ends
+   without a <code>[-]</code> line is not by itself a success: read the answer.</li>
+</ol>
+<h3 id="42-a-simulator-run-that-touches-nothing-real">4.2 A simulator run that touches nothing real</h3>
+<p>Give the run its own runtime root and stores and cut it off from <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr>
+(Linux), so it keeps its state apart from the operator's:</p>
+<div class="code-block"><pre><code>export YGGDRASIM_CARD_BACKEND=sim
+export YGGDRASIM_SIM_QUIRKS=none
+export YGGDRASIM_RUNTIME_ROOT=&lt;scratch&gt;/runtime
+export YGGDRASIM_LOCAL_EIM_STORE=&lt;scratch&gt;/local_eim
+export YGGDRASIM_EIM_BUILDER_STORE=&lt;scratch&gt;/eim_builder
+export PCSCLITE_CSOCK_NAME=/nonexistent/pcscd.comm
+</code></pre></div>
+<p>The simulated card's state then lands under <code>&lt;scratch&gt;/runtime</code> as well.
+The last line is the hard stop: with the <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> socket out of reach the
+process cannot open a local reader whatever backend it believes it is on.
+It does not cover a remote card, so give such a run no remote-card URL. A
+flow that names a server on the network still reaches it; the simulated
+card's own Notifications name <code>rsp.example.com</code>, which no server answers.</p>
+<h2 id="5-when-something-fails">5. When something fails</h2>
+<ol>
+<li>Read the last lines of the answer. A refusal names its cause, and a
+   status word can be decoded (section 3.6).</li>
+<li>"reader busy: ..." names the action and process that hold the reader
+   (section 3.2).</li>
+<li>Run the one command again with <code>--log &lt;file&gt;</code> and read the file.</li>
+<li>A batch (<code>--cmd</code>, <code>--stdin</code>) ends with exit code 1 when a command in it
+   failed (CLI chapter, section 2.5, says how each shell decides); the lines
+   that say which start with <code>[-]</code> or <code>[!]</code> (a <code>[!] Warning:</code> line is a
+   caveat, not a failure).</li>
+<li>In the GUI, an action whose Status reads <code>failed</code> has its reason in the
+   console trace under the result (GUI section 3.3).</li>
+<li><code>site-docs/reference/troubleshooting.md</code> is sorted by subsystem;
+   <code>SCP11/eim_local/GUIDE.md</code> section 13 covers the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>.</li>
+</ol>
+<h2 id="6-further-reading">6. Further reading</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Document</th>
+<th>Read it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RUNBOOK.md</code></td>
+<td>Every task with its CLI command and GUI place, one row each</td>
+</tr>
+<tr>
+<td><code>site-docs/reference/command-suite.md</code></td>
+<td>Every verb of every shell, every launcher flag</td>
+</tr>
+<tr>
+<td><code>CLI_AND_PIPING_GUIDE.md</code></td>
+<td>Batch runs, pipes and <abbr title="Certificate Issuer">CI</abbr> jobs</td>
+</tr>
+<tr>
+<td><code>PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code></td>
+<td>Ready-to-paste profile lifecycle recipes</td>
+</tr>
+<tr>
+<td><code>CONFIGURATION_AND_CERTIFICATES.md</code></td>
+<td>Every certificate, key set and configuration drop-in</td>
+</tr>
+<tr>
+<td><code>SCP11/eim_local/GUIDE.md</code></td>
+<td>The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> in depth</td>
+</tr>
+<tr>
+<td><code>TEMPLATE_AND_TOKENS.md</code></td>
+<td>Profile templates, placeholders and test values</td>
+</tr>
+<tr>
+<td><code>HIL_BRIDGE_GUIDE.md</code>, <code>SIMTRACE2_CARDEM_GUIDE.md</code></td>
+<td>The <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge and the SIMtrace2 board</td>
+</tr>
+<tr>
+<td><code>CARD_BRIDGE_GUIDE.md</code></td>
+<td>A reader on another machine</td>
+</tr>
+<tr>
+<td><code>GUI_HOST_SHELL_GUIDE.md</code></td>
+<td>The GUI's host shell</td>
+</tr>
+<tr>
+<td><code>site-docs/reference/glossary.md</code></td>
+<td>The terms used here</td>
+</tr>
+</tbody>
+</table></div>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#1-modules" class="toc-link">1. Modules</a>
+            <a href="#2-install-and-first-start" class="toc-link">2. Install and first start</a>
+            <a href="#21-install" class="toc-link toc-link-sub">2.1 Install</a>
+            <a href="#22-check-the-environment" class="toc-link toc-link-sub">2.2 Check the environment</a>
+            <a href="#23-first-start-without-a-card" class="toc-link toc-link-sub">2.3 First start without a card</a>
+            <a href="#3-concepts-both-surfaces-share" class="toc-link">3. Concepts both surfaces share</a>
+            <a href="#31-readers" class="toc-link toc-link-sub">3.1 Readers</a>
+            <a href="#32-one-user-per-reader" class="toc-link toc-link-sub">3.2 One user per reader</a>
+            <a href="#33-what-the-card-backend-changes" class="toc-link toc-link-sub">3.3 What the card backend changes</a>
+            <a href="#34-where-data-is-kept" class="toc-link toc-link-sub">3.4 Where data is kept</a>
+            <a href="#35-configuration-flags" class="toc-link toc-link-sub">3.5 Configuration flags</a>
+            <a href="#36-reading-the-output" class="toc-link toc-link-sub">3.6 Reading the output</a>
+            <a href="#37-plugins" class="toc-link toc-link-sub">3.7 Plugins</a>
+            <a href="#4-work-on-a-real-card" class="toc-link">4. Work on a real card</a>
+            <a href="#41-before-a-command-reaches-a-real-card" class="toc-link toc-link-sub">4.1 Before a command reaches a real card</a>
+            <a href="#42-a-simulator-run-that-touches-nothing-real" class="toc-link toc-link-sub">4.2 A simulator run that touches nothing real</a>
+            <a href="#5-when-something-fails" class="toc-link">5. When something fails</a>
+            <a href="#6-further-reading" class="toc-link">6. Further reading</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="ygg.js?v=4"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

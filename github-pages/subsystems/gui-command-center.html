@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/gui-command-center.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -263,8 +263,22 @@ and the format as <code>#</code> comments, one <abbr title="Application Protocol
 in the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell with <code>script &lt;file&gt;</code>, an ISO-formatted one in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr>
 shell with <code>RUN &lt;file&gt;</code>.</p>
 <h3 id="offline-tools">Offline Tools</h3>
-<p>Offline Tools opens on a context-aware decoder (<code>tool.decoder.context</code>). One
-paste box takes an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, a response, a bare <abbr title="Tag-Length-Value">TLV</abbr> or a whole exchange trace;
+<p>Offline Tools lists seven entries under the Offline Tools leaf of the
+navigation, shown while Offline Tools is open, and one entry fills the page
+at a time, with no card grid. Tools that share an input or a store are one
+entry with a tab per tool: Decoder (the Decoder and the ASN.1/<abbr title="Tag-Length-Value">TLV</abbr> decode),
+TERMINAL PROFILE (Decode, Build), AddInitialEim (Build, Send, Configurations,
+Certificate store, Saved values) and <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys (Use key file, Generate, Dump
+public key, under a line with the key file and the <code>suci-keytool</code> command in
+use; that command is set with <code>YGGDRASIM_SUCI_TOOL</code> under Environment &gt;
+Configuration). <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package
+lint, <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> -- derive TOPc and the <abbr title="GSM Association">GSMA</abbr> error-code reference stand alone, and
+any other tool (a plugin's, for example) follows by title. A tab keeps what
+was typed into it while another tab is open, and reads the saved names and
+values again when it is shown.</p>
+<p>The Offline Tools
+leaf opens the Decoder, a context-aware decoder (<code>tool.decoder.context</code>). One
+paste box takes an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>, a response, a bare <abbr title="Tag-Length-Value">TLV</abbr>, a status word or a whole exchange trace;
 each command is classified by its CLA/INS pair and the payload decoded
 against the specification that governs it -- TS 102 221 SELECT parameters and
 <abbr title="File Control Parameters">FCP</abbr> templates, TS 102 223 / TS 101 220 proactive commands, envelopes and
@@ -272,10 +286,120 @@ terminal responses, GPC v2.3.1 GET STATUS entries, INSTALL, DELETE, STORE
 DATA and GET DATA, <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> INITIALIZE UPDATE, ES10 requests and responses named
 from their BF tag, and TS 31.102 AUTHENTICATE. A trace carries state: the
 selected file names READ BINARY content, and a <code>61 xx</code> word chains GET
-RESPONSE onto its command.</p>
+RESPONSE onto its command. A ProfileInstallationResult, or the EUICCResponse
+inside it pasted on its own, is headed by its outcome: every <abbr title="Profile Element (SAIP)">PE</abbr> ok, or the
+failing <abbr title="Profile Element (SAIP)">PE</abbr> with its status and offset (TCA <abbr title="Embedded UICC">eUICC</abbr> Profile Package V3.4.1
+section 8.11). The EUICCInfo2 of an IoT <abbr title="Embedded UICC">eUICC</abbr> carries the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 check as a
+note (<abbr title="GSM Association">GSMA</abbr> <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §5.9.2). The Decoder stands in for the separate <abbr title="Tag-Length-Value">TLV</abbr>
+parse, status-word lookup, EUICCInfo2 decode and SIMa response decode
+actions, which are gone.</p>
+<p>Several commands go in at once, one per row: paste them, or use <strong>Open file</strong>
+(or drop the file on the box) to read a script file into it. The file is read
+in the page and reaches the decoder as text, like a paste; the server is given
+no path. A script file is what the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell's <code>RUN</code> and the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell's
+<code>script</code> read: a row that starts with <code>#</code> is a comment, a row of hex is one
+command (the decoder and the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <code>script</code> also drop a <code>#</code> comment after the
+hex; <code>RUN</code> in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell does not take one). Each row is decoded as its
+own command with the trace state carried along, and its card shows the row it
+stands on when comments make the two counts part. The panel decodes the first
+1000 exchanges of an input and says how many it holds; Open file takes up to 1
+MiB. Rows may also be exchanges, a command with its answer on the row below or
+on the same row after <code>|</code>, <code>;</code> or a tab. A marker (<code>&gt;</code>, <code>&lt;</code>, <code>C:</code>, <code>R:</code>,
+<code>sw=XXXX</code>) says what a row is; without one, a row that is a well-formed
+command of a known instruction starts a new exchange, and any other row
+answers the command above it. The Command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> context takes every row as a
+command and the Response context every row as an answer, whatever the row
+looks like. A row that holds no hex, such as a shell verb, is left unread and
+counted by row number in a note under the banner; it is never mined for hex
+and never quoted.</p>
+<p>Hex is the form the Decoder reads first, and apart from those rows nothing it
+already reads into a domain is read differently. Around it:</p>
+<ul>
+<li><code>AT+CSIM</code>, <code>AT+CRSM</code>, <code>AT+CGLA</code> and <code>AT+CRLA</code> lines with their answers
+  (3GPP TS 27.007 V19.6 §8.17, §8.18, §8.43, §8.44) are read as exchanges; a
+  restricted-access line names its file, so the content it returns is decoded
+  without a SELECT in the trace.</li>
+<li>A paste that is not hex is tried as PEM (certificates are read, a key block
+  is left unread), a JSON body whose base64 members are <abbr title="Remote SIM Provisioning">RSP</abbr> objects, base64,
+  an <abbr title="eUICC Identifier">EID</abbr>, <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> or IMSI in digits with its check digits, an <abbr title="Answer To Reset">ATR</abbr> and TLS
+  records. Four bytes that are a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> return code are named, with a note on
+  what the same bytes say as an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</li>
+<li>A plain BER tree is replaced by the certificate or the profile package it
+  is; the Raw BER-<abbr title="Tag-Length-Value">TLV</abbr> context keeps the tree.</li>
+<li>The <abbr title="Elementary File">EF</abbr> content context reads one file's content: the file identifier on the
+  first line (<code>ADF_USIM/6F07</code>), the content below.</li>
+</ul>
+<p>Inside a trace it reads further than the object's name: the SMS <abbr title="Transport Protocol Data Unit">TPDU</abbr> of an
+SMS-PP download or a SEND SHORT MESSAGE with the secured command or response
+packet in it (<abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 225 V19.0.0 §5.1 and §5.2), the channel data of SEND
+DATA and RECEIVE DATA followed across the trace as one stream per channel (TLS
+records and handshake messages, a record cut across data blocks read once it
+is whole, DNS messages, HTTP request and status lines), the PUT KEY data field and the Key
+Information Template (GlobalPlatform Card Specification v2.4 §11.8.2.3 and
+§11.3.3.1), TERMINAL CAPABILITY with the <abbr title="Local Profile Assistant, device-side">LPAd</abbr> and <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> bits, the <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> that GET
+IDENTITY returns (3GPP TS 31.102 V19.5 §7.5.2.1), and the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> commands
+PERFORM SECURITY OPERATION, MUTUAL AUTHENTICATE and INTERNAL AUTHENTICATE
+(GlobalPlatform Amendment F v1.2 §6.4 to §6.6). An ES10 data field under
+secure messaging is shown as the protected block it is. Not read: CPLC (its
+layout is in none of the documents the decoder is built from), a certificate
+of PERFORM SECURITY OPERATION that is split over chained commands, and a <abbr title="Converted Applet (Java Card)">CAP</abbr>
+file.</p>
 <p>The same engine backs <code>python -m Tools.Asn1TlvDecode --context</code> and the
 <code>context_decode</code> MCP tool, so a decode reads the same from the GUI, a
-terminal and an agent.</p>
+terminal and an agent. The ASN.1/<abbr title="Tag-Length-Value">TLV</abbr> decode action (<code>tool.asn1_tlv.decode</code>)
+shows the same schema reading of a <abbr title="GSM Association">GSMA</abbr> <abbr title="Remote SIM Provisioning">RSP</abbr> object as its notation; the BER
+structure stays in its decoded <abbr title="Tag-Length-Value">TLV</abbr> tree.</p>
+<p>The two tabs of the TERMINAL PROFILE entry decode and build a profile against
+<abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 V18.3.0 clause 5.2 and the 3GPP bits of TS 31.111 V19.4.0 clause 5.2.
+TERMINAL PROFILE decode (<code>tool.tp.decode</code>) lists every bit and count field
+by byte, adds the TS 31.111 reading where the two specifications word a bit
+differently, and reports the bits the coding keeps 0; given a second profile
+it lists only the facilities that differ. TERMINAL PROFILE build
+(<code>tool.tp.build</code>) starts from the maximal profile every YggdraSIM shell sends,
+from an empty one or from a pasted one, and takes facilities by <code>byte.bit</code>
+(<code>5.5</code>), count fields by their bit range (<code>13.6-8=1</code>) or a facility by a
+piece of its name. The context decoder names the facilities of a TERMINAL
+PROFILE <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> from the same table, and
+<code>python -m yggdrasim_common.terminal_profile</code> decodes, compares, builds and
+lists in a terminal.</p>
+<p>AddInitialEim build (<code>tool.eim_builder.add_initial_eim</code>) composes the
+<abbr title="ES10b interface between LPAd/IPAd and ISD-R">ES10b</abbr>.AddInitialEimRequest of <abbr title="GSM Association">GSMA</abbr> <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §5.9.4. The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> and TLS
+certificates come from the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> certificate store
+(<code>tool.eim_builder.certificates</code>: import a PEM, <abbr title="Distinguished Encoding Rules">DER</abbr>, base64 or hex
+certificate, list, remove; a private key block in the source is dropped,
+never stored);
+eimId, eimFqdn and euiccCiPKId are typed, and every build saves them so
+the next form offers them as suggestions (<code>tool.eim_builder.saved_values</code>
+lists, edits or forgets one; a certificate renames in place and the saved
+values and configurations follow it). Every build or send also keeps its
+whole form, settings and ticks included, as the last build
+(<code>last_configuration.json</code> in the store): the build and send forms open with
+it, and a field changed before the store answers keeps what was typed. A
+configuration is a named copy of the whole form: tick Save with a
+Configuration name and a request that builds is stored under it; picking a
+configuration fills every field, so testing another set of values is a pick
+rather than a retype (<code>tool.eim_builder.configurations</code> lists, renames or
+deletes them). The result is
+the request, read back member by member before it is shown, and the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>
+script of the run: TERMINAL CAPABILITY declaring the <abbr title="IoT Profile Assistant, device-side">IPAd</abbr>, MANAGE CHANNEL,
+SELECT <abbr title="Issuer Security Domain - Root">ISD-R</abbr>, eUICCMemoryReset with resetEimConfigData and
+resetImmediateEnableConfig (§5.9.5; AddInitialEim is refused while any <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+Configuration Data is stored), then AddInitialEim in 255-byte STORE DATA
+blocks. Copy takes the commands alone, one per line, for the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell's
+<code>RUN</code>. AddInitialEim as one <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> shows the same request in a single STORE DATA,
+with an extended Lc past 255 bytes, for a reader and card that take one or a
+console that chains it into the blocks above. The store lives outside the checkout
+(<code>YGGDRASIM_EIM_BUILDER_STORE</code>, default <code>~/.yggdrasim/eim_builder/</code>) and
+is never tracked. The build touches no card. AddInitialEim send, the tab next
+to it (<code>tool.eim_builder.send</code>) and again in the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 IoT (IPA-d) tab of
+eSIM Management (<code>scp11_live.add_initial_eim</code>), takes the same form plus a
+reader and the confirm checkbox, builds the request before it touches the
+card, then runs the connect phase, the reset and the request and streams
+both decoded answers. In a terminal, the eSIM
+Live shell's <code>ADD-INITIAL-EIM</code> asks for the same members one at a time
+and holds no card transport while it waits; once confirmed it sends the
+reset and the request and decodes both answers. <code>EIM-CERT-STORE</code> manages
+the same store.</p>
 <h2 id="live-apdu-stream">Live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> stream</h2>
 <p>Every card connection created through the shared card backend is wrapped by
 the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> recorder. The recorder stores a bounded ring buffer and streams
@@ -444,13 +568,13 @@ ssh -fN -L 8765:127.0.0.1:8765 lab-host
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

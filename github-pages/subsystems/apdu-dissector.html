@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/apdu-dissector.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -51,6 +51,7 @@ the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> payloa
             <a href="#making-it-global" class="toc-link">Making it global</a>
             <a href="#how-the-tree-reads" class="toc-link">How the tree reads</a>
             <a href="#display-filters-worth-knowing" class="toc-link">Display filters worth knowing</a>
+            <a href="#row-colours-in-a-hil-session" class="toc-link">Row colours in a HIL session</a>
             <a href="#how-it-attaches" class="toc-link">How it attaches</a>
             <a href="#command-and-response-splitting" class="toc-link">Command and response splitting</a>
             <a href="#secure-messaging" class="toc-link">Secure messaging</a>
@@ -199,9 +200,16 @@ yggdrasim-apdu-dissect uninstall           # and back out again
 </code></pre></div>
 <p>In a running Wireshark, pick up the change with <strong>Analyze &gt; Reload Lua
 Plugins</strong> (<span class="keys"><kbd class="key-control">Ctrl</kbd><span>+</span><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-l">L</kbd></span>).</p>
-<p>Installing and passing <code>-X lua_script:</code> at the same time is harmless: the
+<p>Installing and passing <code>-X lua_script:</code> at the same time raises no error: the
 entry point carries a load guard, because <code>Proto()</code> raises on a duplicate
-name and Wireshark would otherwise refuse the whole plugin.</p>
+name and Wireshark would otherwise refuse the whole plugin. The first copy
+loaded is the one that runs, and Wireshark loads the personal plugin folder
+before any <code>-X lua_script:</code> script (measured on 4.4.7). Once installed, the
+installed copy therefore also decodes in the Wireshark the <abbr title="Hardware-In-The-Loop">HIL</abbr> menu starts,
+whatever the checkout holds: re-run <code>install</code> after updating YggdraSIM, or
+<code>uninstall</code> to let the automatic paths load the checkout's copy. Where an
+AppArmor profile denies tshark every read under <code>$HOME</code>, as Ubuntu's does,
+tshark never sees the installed copy and keeps loading the <code>-X</code> one.</p>
 <div class="admonition note">
 <p class="admonition-title">Why each module bootstraps its own package.path</p>
 <p>Wireshark's plugin loader executes every <code>.lua</code> file in the plugin
@@ -222,19 +230,26 @@ normal user. The CLI prints a warning when it detects this.</p>
 instruction makes of it is on that byte's own line rather than repeated
 below it as a second field.</p>
 <ul>
-<li><strong>Bit fields are rendered as bit fields.</strong> The class and constructed bits
-  of a BER tag show their masks -- <code>..1. .... = Constructed: True</code> -- the
-  way Wireshark's own BER dissector renders them.</li>
-<li><strong>A reading hangs off the byte it decodes.</strong> <code>P1: 0x91 (last block,
-  BER-TLV format)</code>, not a <code>P1</code> line followed by three more naming the same
+<li><strong>The header carries <code>gsm_sim</code>'s labels.</strong> <code>Class</code>, <code>Instruction: READ
+  BINARY (0xb0)</code>, <code>Parameter 1</code>, <code>Parameter 2</code>, the two lengths and one
+  <code>Status Word: 9000 Success</code> line. A command is named the way the
+  specifications print it, <code>READ BINARY</code> and <code>STORE DATA</code>, in the tree, in
+  the Info column and in <code>yapdu.command_name</code>.</li>
+<li><strong>A reading hangs off the byte it decodes.</strong> <code>Parameter 1: 0x91 (last
+  block, BER-TLV format)</code>, not a line followed by three more naming the same
   byte. A COMPREHENSION-<abbr title="Tag-Length-Value">TLV</abbr>'s meaning sits under that <abbr title="Tag-Length-Value">TLV</abbr>, not in a block
   collected after the run.</li>
-<li><strong>Framing is one collapsed node.</strong> How the payload was cut into a command
-  and a response is dissector bookkeeping, so it lives under <code>Framing</code>
-  rather than above the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</li>
+<li><strong>A <abbr title="Tag-Length-Value">TLV</abbr> is one line.</strong> <code>File identifier (0x83): 7FF0 (MF / ADF.USIM)</code>
+  carries the name, the tag and the value; the tag, the length, the class
+  and the constructed bit take no rows of their own.</li>
+<li><strong>Framing follows the decode.</strong> How the payload was cut into a command
+  and a response is dissector bookkeeping, so it is one <code>Framing</code> node
+  after the response rather than above the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</li>
 <li><strong>A field that only restates the line above it is filterable but not
   printed.</strong> <code>yapdu.sw_meaning</code>, <code>yapdu.detail</code>, <code>yapdu.command_name</code>,
-  <code>yapdu.tlv.name</code>, <code>yapdu.tlv.uint</code>, <code>yapdu.frame_kind</code>, <code>yapdu.case</code>,
+  <code>yapdu.tlv.name</code>, <code>yapdu.tlv.tag</code>, <code>yapdu.tlv.length</code>, <code>yapdu.tlv.class</code>,
+  <code>yapdu.tlv.constructed</code>, <code>yapdu.tlv.uint</code>, <code>yapdu.sw1</code>, <code>yapdu.sw2</code>,
+  <code>yapdu.frame_kind</code>, <code>yapdu.case</code>,
   <code>yapdu.command_source</code>, <code>yapdu.split.command_len</code>,
   <code>yapdu.split.response_len</code>, <code>yapdu.split.method</code>, <code>yapdu.cla.type</code>,
   <code>yapdu.tlv.comprehension_required</code>, <code>yapdu.cat.type</code>,
@@ -245,7 +260,7 @@ below it as a second field.</p>
 <li><strong>A default value is not a finding.</strong> The class-byte breakdown prints
   <code>Logical channel</code>, <code>Secure messaging</code> and <code>Command chaining</code> only where
   one of them departs from channel 0, no secure messaging and no chaining
-  -- which is also where the CLA line itself names it. <code>Split confidence</code>
+  -- which is also where the <code>Class</code> line itself names it. <code>Split confidence</code>
   and <code>Cross-frame context available</code> print when they carry a warning and
   stay filter-only when they do not.</li>
 </ul>
@@ -254,14 +269,100 @@ pane: query it rather than looking for it.</p>
 <h2 id="display-filters-worth-knowing">Display filters worth knowing</h2>
 <div class="code-block"><pre><code>yapdu.risk == 3                     every irreversible command in the capture
 yapdu.sw != 0x9000                  every exchange the card did not accept
-yapdu.command_name == &quot;STORE_DATA&quot;  eUICC traffic
+yapdu.command_name == &quot;STORE DATA&quot;  eUICC traffic
 yapdu.split.ambiguous == 1          exchanges the decoder could not resolve
 yapdu.ef.iccid                      frames that revealed an ICCID
 yapdu.cla.secure_messaging &gt; 0      SCP-wrapped traffic
 yapdu.command_source contains &quot;GlobalPlatform&quot;
                                     commands the GlobalPlatform card
                                     specification defines
+yapdu.tls.alert                     TLS alerts a BIP channel carried in
+                                    the clear
 </code></pre></div>
+<p>A TLS alert also reaches the row's Detail column: the card's own in its SEND
+DATA (<code>SEND DATA: channel 1, 7 bytes, fatal TLS alert bad_certificate (42)</code>),
+the peer's in the TERMINAL RESPONSE to RECEIVE DATA, and a ciphered one as
+<code>encrypted TLS alert</code>.</p>
+<h2 id="row-colours-in-a-hil-session">Row colours in a <abbr title="Hardware-In-The-Loop">HIL</abbr> session</h2>
+<p>The Wireshark a <abbr title="Hardware-In-The-Loop">HIL</abbr> session opens gets its colouring rules from
+<code>Tools/HilBridge/wireshark_profile.py</code>. They use the Catppuccin Mocha
+palette: every GSMTAP row sits on the dark base and the text colour names
+the kind of exchange. The first rule that matches a row wins.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Row</th>
+<th>Colour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fatal or certificate TLS alert on a BIP channel</td>
+<td>dark text on red</td>
+</tr>
+<tr>
+<td>Exchange a reset cut short (modem log)</td>
+<td>red on the raised surface</td>
+</tr>
+<tr>
+<td>Modem note</td>
+<td>yellow on the mantle</td>
+</tr>
+<tr>
+<td>Error status word</td>
+<td>red</td>
+</tr>
+<tr>
+<td>Warning status word (<code>62 XX</code>, <code>63 XX</code>)</td>
+<td>peach</td>
+</tr>
+<tr>
+<td>Modem-side frame</td>
+<td>lavender on the raised surface</td>
+</tr>
+<tr>
+<td><abbr title="Answer To Reset">ATR</abbr></td>
+<td>teal</td>
+</tr>
+<tr>
+<td>Toolkit and BIP exchange, STATUS, an answer announcing a proactive command</td>
+<td>mauve</td>
+</tr>
+<tr>
+<td>SELECT, MANAGE CHANNEL, TERMINAL CAPABILITY</td>
+<td>blue</td>
+</tr>
+<tr>
+<td>Read (READ BINARY, READ RECORD, GET RESPONSE, GET DATA, ...)</td>
+<td>green</td>
+</tr>
+<tr>
+<td>Write (UPDATE BINARY, UPDATE RECORD, STORE DATA, INSTALL, ...)</td>
+<td>peach</td>
+</tr>
+<tr>
+<td><abbr title="Personal Identification Number">PIN</abbr> and authentication commands</td>
+<td>yellow</td>
+</tr>
+<tr>
+<td>Any other GSMTAP frame</td>
+<td>plain text</td>
+</tr>
+</tbody>
+</table></div>
+<p>The rules read stock <code>gsm_sim</code>, <code>tls</code> and <code>udp</code> fields, so they compile in a
+Wireshark without this dissector. A colouring rule reaches the packet list
+only, so the rest of the window keeps the desktop's own Qt palette unless
+the profile also carries the style sheet:</p>
+<div class="code-block"><pre><code>python -m Tools.HilBridge.wireshark_profile --stylesheet YggdraSIM-HIL
+</code></pre></div>
+<p>That writes <code>yggdrasim.qss</code> into the profile (menus, toolbars, the filter
+bar, the detail and bytes panes in the same palette). Wireshark has no
+setting for a style sheet, so the <abbr title="Hardware-In-The-Loop">HIL</abbr> menu passes the file as
+<code>-stylesheet=&lt;file&gt;</code> whenever it is there and keeps it current; a Wireshark
+started by hand takes the same argument, which the command prints. Empty the
+file to go back to the desktop's look. Toolbar icons are Wireshark's own and
+stay as they are.</p>
 <h2 id="how-it-attaches">How it attaches</h2>
 <p>The dissector registers against Wireshark's <code>gsmtap.type</code> dissector table for
 <code>GSMTAP_TYPE_SIM</code> (<code>0x04</code>). That table hands it the payload with the GSMTAP
@@ -509,6 +610,7 @@ implementation gets backwards:</p>
             <a href="#making-it-global" class="toc-link">Making it global</a>
             <a href="#how-the-tree-reads" class="toc-link">How the tree reads</a>
             <a href="#display-filters-worth-knowing" class="toc-link">Display filters worth knowing</a>
+            <a href="#row-colours-in-a-hil-session" class="toc-link">Row colours in a HIL session</a>
             <a href="#how-it-attaches" class="toc-link">How it attaches</a>
             <a href="#command-and-response-splitting" class="toc-link">Command and response splitting</a>
             <a href="#secure-messaging" class="toc-link">Secure messaging</a>
@@ -532,13 +634,13 @@ implementation gets backwards:</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

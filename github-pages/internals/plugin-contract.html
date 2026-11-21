@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="internals/plugin-contract.html" data-ygg-open-sections="internals">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -58,6 +58,9 @@ absent.</p>
             <a href="#top-bar-pills" class="toc-link toc-link-sub">Top bar pills</a>
             <a href="#comparison-panel" class="toc-link toc-link-sub">Comparison panel</a>
             <a href="#run-forms" class="toc-link toc-link-sub">Run forms</a>
+            <a href="#tab-of-a-command-center-action" class="toc-link">Tab of a Command Center action</a>
+            <a href="#local-eim-delivery-route" class="toc-link">Local eIM delivery route</a>
+            <a href="#terminal-output-of-a-stream-action" class="toc-link">Terminal output of a stream action</a>
             <a href="#apdu-trace-renderer" class="toc-link">APDU trace renderer</a>
             <a href="#absent-plugin-behavior" class="toc-link">Absent-plugin behavior</a>
             <a href="#runtime-root-note" class="toc-link">Runtime root note</a>
@@ -126,6 +129,15 @@ construction (the usual cause is a trailing comma inside a parenthesised run
 of string literals, which makes the field a tuple), so a malformed action
 becomes that plugin's load error while <code>GET /api/actions</code> keeps serving
 every other action.</p>
+<p>An action whose form has a reader field is given that reader for the length
+of the call: the route claims it, and a call on a reader something else
+holds until stopped is refused as "reader busy". An action that does not
+always drive the card (an <abbr title="eUICC Identifier">EID</abbr> typed in makes the read unnecessary) sets
+<code>ActionSpec.uses_reader</code>, a function of the coerced inputs that returns
+False for a call that opens no reader; the route then claims none for it.
+The function has to say what the dispatcher does, and the dispatcher of
+such a call has to be unable to open a reader by another path: nothing else
+keeps it apart from whoever holds that reader.</p>
 <h2 id="reserved-capability-names">Reserved capability names</h2>
 <p>Reserved names are private extension contracts. Public distributions should
 document only the generic loader behavior and keep undistributed capability
@@ -339,6 +351,24 @@ renders it as text only.</p>
 <code>GET .../{id}/stream?cursor=&lt;stream&gt;:&lt;n&gt;</code> (the status and every stream in
 one answer) and <code>GET .../{id}/help</code>. They sit behind the GUI's bearer token
 like every <code>/api/*</code> route.</p>
+<p>A console that drives a card claims its reader for as long as it does, the
+claim every GUI card action takes (<code>yggdrasim_common/reader_claims.py</code>): wrap
+the work in <code>held(reader_key(name), "&lt;what runs&gt;", long_running=True)</code>. An
+action on that reader is then refused with <code>reader busy: &lt;what runs&gt; has held
+'&lt;reader&gt;' since &lt;time&gt;</code> instead of interleaving its APDUs with the console's
+or powering the card down under it. The routes cannot take the claim for a
+console, because a session or a run ends inside the plugin.</p>
+<p>A claim on a local <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> reader also holds the reader's lock across
+processes (<code>yggdrasim_common/reader_locks.py</code>): a file under
+<code>~/.yggdrasim/run/reader-locks</code> held with <code>flock</code> (<code>msvcrt.locking</code> on
+Windows), which the kernel frees when the holding process ends. The eSIM
+Management console in a terminal (per card command), the <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge and the
+MCP server's card tools take the same lock,
+so a console's card work is not reset by another YggdraSIM process, and a
+holder that runs until stopped (<code>long_running=True</code>) is refused to the others
+at once, as <code>reader busy: &lt;what runs&gt; (pid &lt;n&gt;) has held '&lt;reader&gt;' since
+&lt;time&gt;</code>. Code that opens a reader outside a claim holds it with
+<code>reader_locks.held(name, "&lt;what runs&gt;")</code>; holds nest within a process.</p>
 <h3 id="layout">Layout</h3>
 <p>The view is two panes, each with a tab per part the manifest declares:
 controls (Session, the state tab, Actions, or Command line when the console
@@ -536,6 +566,35 @@ returns it. A <code>KeyError</code> from a run call answers 404.</p>
 <code>POST</code> / <code>DELETE .../{id}/credentials/{credential_id}</code> (<code>{values}</code>; a named
 credential's entry is <code>{name, values}</code> and <code>?name=</code>, and a plain credential
 refuses a name). A run start may carry <code>credential_entries</code>.</p>
+<h2 id="tab-of-a-command-center-action">Tab of a Command Center action</h2>
+<p>A subsystem's actions are grouped into tabs by the last segment of the action
+id, from a list of core actions in the page. A plugin action whose id is not
+in that list names its tab with the tag <code>tab:&lt;group id&gt;</code> (for example
+<code>tab:esim-sgp32-iot</code>). A group id the page does not have becomes a tab of its
+own, after the page's tabs, when the action also carries
+<code>tab-label:&lt;label&gt;</code>; without a label, or without a tag, the action lands in
+"Other". eSIM Management groups its actions by specification instead:
+<code>tab:esim-sgp32-iot</code> places an action under <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 IoT, and an action without
+it goes under <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 Consumer.</p>
+<h2 id="local-eim-delivery-route">Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> delivery route</h2>
+<p>The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> page delivers a queue with the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s own <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> ("Deliver now
+(<abbr title="IoT Profile Assistant, device-side">IPAd</abbr>)"). A plugin that drives the card's own IPAe offers a second route by
+giving one of its actions the tag <code>ipae-deliver</code>: the page then shows
+"Deliver (IPAe)" beside the first button and opens that action's form, with
+the bound reader filled in. The page reads the tag from the action catalogue
+and names no plugin; without such an action the button is absent.</p>
+<h2 id="terminal-output-of-a-stream-action">Terminal output of a stream action</h2>
+<p>A stream action that runs a console command passes <code>terminal=True</code> to
+<code>scp11_live._stream_console</code> to show the command as the shell prints it. The
+capture then answers as a terminal, so the command colours its output; every
+printed line goes out, blank ones too, with the plain text in <code>message</code> and
+its colour roles in <code>spans</code> (<code>gui_server/cli_spans.py</code>), and never as an error
+level the page would hide. Card channels built during the run keep the
+shell's own logging mode (<code>live_trace.shell_output</code>). The page renders such
+frames as a terminal block without time or level columns, paints each role
+with the theme token the terminal palettes are transcribed from
+(<code>css/views/cli-output.css</code>), and keeps the newest line in view until the
+reader scrolls away from it.</p>
 <h2 id="apdu-trace-renderer"><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace renderer</h2>
 <p><code>SCP11.transport.set_apdu_trace_renderer(renderer)</code> hands every raw-mode
 exchange of the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> transport (a command run with <code>--debug</code>, or the global
@@ -601,6 +660,9 @@ root only.</p>
             <a href="#top-bar-pills" class="toc-link toc-link-sub">Top bar pills</a>
             <a href="#comparison-panel" class="toc-link toc-link-sub">Comparison panel</a>
             <a href="#run-forms" class="toc-link toc-link-sub">Run forms</a>
+            <a href="#tab-of-a-command-center-action" class="toc-link">Tab of a Command Center action</a>
+            <a href="#local-eim-delivery-route" class="toc-link">Local eIM delivery route</a>
+            <a href="#terminal-output-of-a-stream-action" class="toc-link">Terminal output of a stream action</a>
             <a href="#apdu-trace-renderer" class="toc-link">APDU trace renderer</a>
             <a href="#absent-plugin-behavior" class="toc-link">Absent-plugin behavior</a>
             <a href="#runtime-root-note" class="toc-link">Runtime root note</a>
@@ -620,13 +682,13 @@ root only.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

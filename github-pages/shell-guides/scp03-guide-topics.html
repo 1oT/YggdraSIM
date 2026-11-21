@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="shell-guides/scp03-guide-topics.html" data-ygg-open-sections="shell-guides">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -385,8 +385,9 @@ the inner <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> 
 <li>chunked payload delivery for SMS-PP limits</li>
 </ul>
 <h3 id="configuration">Configuration</h3>
-<p>The shell guide points operators to <code>ota_config.ini</code> for <code>TAR</code>, <code>SPI</code>, <code>KIC</code>,
-<code>KID</code>, transport, and key material.</p>
+<p>The shell guide points operators to <code>set</code> in the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell for <code>TAR</code>, <code>SPI</code>,
+<code>KIC</code>, <code>KID</code>, transport, and key material, stored per <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> in the device
+inventory.</p>
 <h2 id="config">CONFIG</h2>
 <h3 id="runtime-root-model">Runtime-root model</h3>
 <p>The guide distinguishes source runs from frozen executables:</p>
@@ -404,7 +405,7 @@ the inner <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> 
 </ul>
 <h3 id="scp80-and-scp11-split"><abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> and <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> split</h3>
 <ul>
-<li><code>SCP80/ota_config.ini</code> holds the <abbr title="Over-The-Air">OTA</abbr> runtime configuration</li>
+<li>the device inventory holds the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> configuration per <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></li>
 <li><code>SCP11/live</code> is the live relay shell</li>
 <li><code>SCP11/test</code> is the test relay shell</li>
 <li><code>SCP11/local_access</code> is the local <code>AuthenticateServer</code> and <code>LOAD-PROFILE</code> path</li>
@@ -558,13 +559,13 @@ python3 -m Tools.ProfilePackage --cmd &quot;USE reference_test_profile.txt; INFO
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

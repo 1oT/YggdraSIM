@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="reference/command-suite.html" data-ygg-open-sections="reference">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -136,6 +136,7 @@ they branch into. Use this page to answer:</p>
             <a href="#127-yggdrasim-hil-reset" class="toc-link toc-link-sub">12.7 yggdrasim-hil-reset</a>
             <a href="#128-yggdrasim-yggdracore" class="toc-link toc-link-sub">12.8 yggdrasim-yggdracore</a>
             <a href="#129-yggdrasim-mcp" class="toc-link toc-link-sub">12.9 yggdrasim-mcp</a>
+            <a href="#1210-yggdrasim-hil-modem-diag" class="toc-link toc-link-sub">12.10 yggdrasim-hil-modem-diag</a>
             <a href="#13-plugin-injected-commands" class="toc-link">13. Plugin-injected commands</a>
             <a href="#131-discovery-contract" class="toc-link toc-link-sub">13.1 Discovery contract</a>
             <a href="#132-capability-contract-for-host-shells" class="toc-link toc-link-sub">13.2 Capability contract for host shells</a>
@@ -617,7 +618,7 @@ URL, <abbr title="Answer To Reset">ATR</abbr>) each iteration.</p>
 </table></div>
 <p>Sub-tooling spawned from <code>[B]</code>:</p>
 <ul>
-<li><strong>Wireshark live capture</strong> -- <code>wireshark -k -i &lt;iface&gt; -f "udp port 4729"</code>. <code>iface</code> defaults to <code>lo</code>/<code>lo0</code>; override via <code>YGGDRASIM_HIL_CAPTURE_INTERFACE</code>. Binary override via <code>YGGDRASIM_HIL_WIRESHARK_BIN</code>.</li>
+<li><strong>Wireshark live capture</strong> -- <code>wireshark -k -i &lt;iface&gt; -f "udp port 4729" -C &lt;profile&gt; -t u</code>, followed by the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> dissector's <code>-X lua_script:</code> pair when it is present. <code>iface</code> defaults to <code>lo</code>/<code>lo0</code>; override via <code>YGGDRASIM_HIL_CAPTURE_INTERFACE</code>. Binary override via <code>YGGDRASIM_HIL_WIRESHARK_BIN</code>, profile via <code>YGGDRASIM_HIL_WIRESHARK_PROFILE</code> (default <code>YggdraSIM-HIL</code>), Time column format via <code>YGGDRASIM_HIL_WIRESHARK_TIME_FORMAT</code> (default <code>u</code>, UTC time of day); <code>off</code> in either drops its option.</li>
 <li><strong>Decoded-<abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Textual <abbr title="Text User Interface">TUI</abbr></strong> -- <code>Tools.HilBridge.live_decode_tui.run_live_decode_tui</code> driving either the live pcap with <code>tshark -i</code> (live mode) or a saved pcap with <code>tshark -r</code> (offline review mode). Override via <code>YGGDRASIM_HIL_TERMSHARK_BIN</code>, warmup via <code>YGGDRASIM_HIL_TERMSHARK_WARMUP_SECONDS</code>. In offline mode, a keybag JSON can be layered in via the <code>[3]</code> prompt or <code>--keybag</code>.</li>
 <li><strong>Raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> stream view</strong> -- tails <code>journalctl --user -u yggdrasim-hil-supervisor.service -f -n 0 -o cat</code>, filtered to <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>-flavored lines.</li>
 <li><strong>Pcap writers</strong> -- <code>Tools/HilBridge/termshark_capture_pcap.py</code> (preferred) or <code>tshark</code>/<code>dumpcap</code>. Mirror fan-out via <code>termshark_capture_mirror.py</code> when <code>--gsmtap-capture-mirror-fifo-path</code> is set.</li>
@@ -745,6 +746,18 @@ picks delegate to <code>SCP03.interface.guides.ShellGuides</code>.</p>
 </thead>
 <tbody>
 <tr>
+<td><code>U</code></td>
+<td>User manual: start, shared concepts, real-card work -- <code>guides/USER_MANUAL.md</code></td>
+</tr>
+<tr>
+<td><code>UG</code></td>
+<td>User manual, GUI chapter -- <code>guides/USER_MANUAL_GUI.md</code></td>
+</tr>
+<tr>
+<td><code>UC</code></td>
+<td>User manual, CLI chapter -- <code>guides/USER_MANUAL_CLI.md</code></td>
+</tr>
+<tr>
 <td><code>1</code></td>
 <td>Admin Shell guide topics (<code>ShellGuides.print_guide("WIZARD")</code>)</td>
 </tr>
@@ -867,6 +880,10 @@ picks delegate to <code>SCP03.interface.guides.ShellGuides</code>.</p>
 <tr>
 <td><code>yggdrasim-hil-reset</code></td>
 <td><code>Tools.HilBridge.device_reset.run_standalone</code></td>
+</tr>
+<tr>
+<td><code>yggdrasim-hil-modem-diag</code></td>
+<td><code>Tools.HilBridge.modem_diag.entry</code></td>
 </tr>
 <tr>
 <td><code>yggdrasim-card-bridge</code></td>
@@ -1275,6 +1292,12 @@ picks delegate to <code>SCP03.interface.guides.ShellGuides</code>.</p>
 <td><code>&lt;Ki_hex&gt; &lt;OP_hex&gt;</code></td>
 <td>--</td>
 <td>Derive OPc per 3GPP TS 35.206 (32 hex chars each).</td>
+</tr>
+<tr>
+<td><code>DERIVE-TOPC</code></td>
+<td><code>&lt;TOP_hex&gt; &lt;K_hex&gt;</code></td>
+<td><code>[Keccak iterations]</code></td>
+<td>Derive TOPc per 3GPP TS 35.231 (TOP 64 hex chars, K 32 or 64; 1 to 16 iterations, default 1). The same checks as the Offline Tools <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> entry.</td>
 </tr>
 </tbody>
 </table></div>
@@ -1710,7 +1733,7 @@ answering. A reconnect ends the mode.</p>
 <h3 id="211-argument-requirement-classification">2.11 Argument-requirement classification</h3>
 <p>Enforced by <code>CommandRegistry.get_arg_requirements</code>:</p>
 <ul>
-<li><strong>Mandatory argument</strong> (dispatcher errors out if absent): <code>SET-AID-ALIAS</code>, <code>SELECT</code>, <code>UPDATE</code>, <code>LOCK</code>, <code>UNLOCK</code>, <code>DEL</code>, <code>SCRIPT</code>, <code>STORE-DATA</code>, <code>DERIVE-OPC</code>, <code>SET-GOLD-PROFILE</code>.</li>
+<li><strong>Mandatory argument</strong> (dispatcher errors out if absent): <code>SET-AID-ALIAS</code>, <code>SELECT</code>, <code>UPDATE</code>, <code>LOCK</code>, <code>UNLOCK</code>, <code>DEL</code>, <code>SCRIPT</code>, <code>STORE-DATA</code>, <code>DERIVE-OPC</code>, <code>DERIVE-TOPC</code>, <code>SET-GOLD-PROFILE</code>.</li>
 <li><strong>Optional argument</strong> (handler called with or without tail): <code>REPORT</code>, <code>KEYS</code>, <code>READ</code>, <code>RECORD</code>, <code>RUN</code>, <code>GUIDE</code>, <code>STK</code>, <code>DEBUG</code>, <code>VERBOSE</code>, <code>TRACE</code>, <code>DUMP-FS</code>, <code>MANAGE-PIN</code>, <code>EXPORT-EUICC</code>, <code>EXPORT-KEYBAG</code>, <code>ARR</code>, <code>VALIDATE</code>, <code>GOLD-PROFILE</code>, <code>CLEAR-GOLD-PROFILE</code>, <code>PROFILE-DIFF</code>.</li>
 <li>Everything else is called with no arguments; extra tokens are silently ignored.</li>
 </ul>
@@ -2123,6 +2146,18 @@ pane to the top half of the terminal (TTY only, ≥24 rows).</p>
 <td><code>EIM-DOWNLOAD</code></td>
 <td><code>DOWNLOAD</code></td>
 <td><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package request + relay flow. If the argument parses as an <abbr title="Local Profile Assistant">LPA</abbr> activation code, falls through to <code>DOWNLOAD-PROFILE</code>. Triggers notification sync.</td>
+</tr>
+<tr>
+<td><code>EIM-LISTEN</code></td>
+<td>--</td>
+<td><code>EIM-LISTEN [port=&lt;n&gt;] [calls=&lt;n&gt;] [idle=&lt;seconds&gt;] [notifications=deliver|keep] [host=&lt;address&gt; cert=&lt;pem&gt; key=&lt;pem&gt; client-ca=&lt;pem&gt;]</code></td>
+<td><abbr title="IoT Profile Assistant, device-side">IPAd</abbr> <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Package Injection (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §3.1.1.2): answers ESipa.TransferEimPackage on <code>127.0.0.1:8746</code> until Ctrl-C, <code>calls</code> calls or <code>idle</code> seconds without one. Plain HTTP on the loopback, or HTTPS on <code>host</code> with a required client certificate that verifies against <code>client-ca</code>; <code>notifications=keep</code> leaves pending Notifications on the <abbr title="Embedded UICC">eUICC</abbr>; no profile download.</td>
+</tr>
+<tr>
+<td><code>EIM-LISTEN-CERT</code></td>
+<td>--</td>
+<td><code>EIM-LISTEN-CERT &lt;host name or address&gt;... [out=&lt;directory&gt;]</code></td>
+<td>Makes the self-signed certificate and key an HTTPS <code>EIM-LISTEN</code> serves with; a file that exists is never replaced.</td>
 </tr>
 </tbody>
 </table></div>
@@ -3266,7 +3301,9 @@ Preferences persisted in <code>Workspace/SAIP/saip_tool_config.json</code>.</p>
 </table></div>
 <p><code>saip-tool</code> resolution order: <code>TOOL</code> override → <code>YGGDRASIM_SAIP_TOOL</code>
 env → <code>saip-tool.py</code> / <code>saip-tool</code> on <code>PATH</code> →
-<code>&lt;workspace|bundle|module-root&gt;/pysim/contrib/saip-tool.py</code>.
+<code>&lt;workspace|bundle|module-root&gt;/pysim/contrib/saip-tool.py</code>. With none of
+these, the bundled adapter (<code>Tools/ProfilePackage/saip_cli_adapter.py</code>) runs
+over the installed <code>pySim.esim.saip</code>; frozen builds use it directly.
 Subprocess timeout: 60 s (override via
 <code>YGGDRASIM_SAIP_TOOL_TIMEOUT_SECONDS</code>).</p>
 <h3 id="83-raw-underlying-saip-tool-subcommands">8.3 <code>RAW</code> -- underlying <code>saip-tool</code> subcommands</h3>
@@ -4033,6 +4070,13 @@ the server via an internal <code>threading.Event</code>. <code>stdin</code> is n
 <td>yes</td>
 <td>Raw forwarded args to <code>osmo-remsim-client-st2</code>.</td>
 </tr>
+<tr>
+<td><code>--modem-diag-device</code></td>
+<td>str</td>
+<td><code>""</code></td>
+<td>no</td>
+<td>DIAG tty of the modem, or <code>auto</code> for USB interface 0 of a modem the Linux <code>option</code> or <code>qcserial</code> driver serves: also run <code>yggdrasim-hil-modem-diag</code> for the supervisor's lifetime, sending to the bridge's GSMTAP host and port. A separate child on its own backoff (30 s, 600 s after exit code 2); its state is the <code>modemDiag</code> field, and it never changes the bridge, the REMSIM client or <code>status</code>. The launcher and the GUI set it from <code>YGGDRASIM_HIL_MODEM_DIAG</code>.</td>
+</tr>
 </tbody>
 </table></div>
 <h3 id="103-bridge-flags-forwarded-to-the-child">10.3 Bridge flags forwarded to the child</h3>
@@ -4192,7 +4236,7 @@ plane is the relay service in <code>Tools/HilBridge/apdu_relay.py</code>.</p>
 </tr>
 <tr>
 <td><code>--apdu-timeout-ms</code></td>
-<td><code>YGGDRASIM_CARD_RELAY_APDU_TIMEOUT_MS</code>, else the built-in default</td>
+<td><code>YGGDRASIM_HIL_APDU_TIMEOUT_MS</code>, else <code>30000</code></td>
 <td><abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> wait per <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr>.</td>
 </tr>
 <tr>
@@ -4351,6 +4395,14 @@ mirrors on UDP 4729.</p>
 <h3 id="122-yggdrasim-asn1">12.2 <code>yggdrasim-asn1</code></h3>
 <p><code>python -m Tools.Asn1TlvDecode</code>. Decodes BER/<abbr title="Distinguished Encoding Rules">DER</abbr> or a command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> from a hex
 argument, a file (<code>--file</code>), or stdin.</p>
+<p>A BF-tagged <abbr title="GSM Association">GSMA</abbr> <abbr title="Remote SIM Provisioning">RSP</abbr> object is read against the compiled <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 / <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32
+modules: the request or response type its content fits (both directions share
+a tag), field names, named bits and numbers (every one the type defines,
+the taken ones marked), versions, certificates as their subject, issuer,
+validity, key and <abbr title="Remote SIM Provisioning">RSP</abbr> role, and the members a tag list
+selects (<code>IpaEuiccDataRequest</code> per <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §2.11.1.2,
+<code>ProfileInfoListRequest</code> per <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 v3.1 §5.7.15). That reading is the output;
+<code>--ber</code> adds the BER tree, and a terminal gets it in the CLI theme's colours.</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -4369,11 +4421,23 @@ argument, a file (<code>--file</code>), or stdin.</p>
 </tr>
 <tr>
 <td><code>--context</code></td>
-<td>Classify each <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> by CLA/INS and decode the payload against that specification; accepts a whole exchange trace.</td>
+<td>Classify each <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> by CLA/INS and decode the payload against that specification; accepts several commands, one per row as in a script file (a row that starts with <code>#</code> is a comment), a whole exchange trace, <code>AT+CSIM</code> / <code>+CRSM</code> / <code>+CGLA</code> / <code>+CRLA</code> lines, and where the text is not hex a PEM certificate, a JSON body with base64 <abbr title="Remote SIM Provisioning">RSP</abbr> objects, base64, an <abbr title="eUICC Identifier">EID</abbr>, <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> or IMSI in digits, an <abbr title="Answer To Reset">ATR</abbr>, a <abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> return code and TLS records.</td>
 </tr>
 <tr>
 <td><code>--domain</code></td>
-<td>Force the decode domain instead of detecting it: <code>apdu</code>, <code>response</code>, <code>es10</code>, <code>gp</code>, <code>uicc</code>, <code>cat</code>, <code>tlv</code>, <code>sw</code>.</td>
+<td>Force the decode domain instead of detecting it: <code>apdu</code> (every row is a command), <code>response</code> (every row is an answer), <code>es10</code>, <code>gp</code>, <code>uicc</code>, <code>cat</code>, <code>tlv</code>, <code>sw</code>, or <code>ef</code> for the content of one file (the file identifier on the first line, the content below).</td>
+</tr>
+<tr>
+<td><code>--ber</code></td>
+<td>After the schema reading of an <abbr title="Remote SIM Provisioning">RSP</abbr> object, print its BER-<abbr title="Tag-Length-Value">TLV</abbr> tree as well.</td>
+</tr>
+<tr>
+<td><code>--color {auto,always,never}</code></td>
+<td>Colour from the active CLI theme; <code>auto</code> (the default) colours a terminal unless <code>NO_COLOR</code> is set.</td>
+</tr>
+<tr>
+<td><code>--each</code></td>
+<td>Decode every input line on its own, one JSON object per line. A line is hex, or a label, a tab and hex; a label naming an <abbr title="Remote SIM Provisioning">RSP</abbr> type (an ES9+ or ESipa JSON member such as <code>smdpSigned2</code>) is tried as that type first.</td>
 </tr>
 </tbody>
 </table></div>
@@ -4429,7 +4493,7 @@ the default truncates. Walkthrough:
 <p><code>python -m Tools.EumDiag</code>. Injects session keys into the bundled Lua
 dissector so a failed BF36 Bound Profile Package frame can be read.
 Sub-commands: <code>inject-keys</code> (write the repository and invoke tshark),
-<code>store-keys</code> (write only), <code>decode-bpp</code> (offline decode through pySim).
+<code>store-keys</code> (write only), <code>decode-bpp</code> (offline summary of the BF36 layout and its segments).
 Details: <a href="../subsystems/eum-diagnostics.html">EUM Diagnostics</a>.</p>
 <h3 id="126-yggdrasim-apdu-fuzzer">12.6 <code>yggdrasim-apdu-fuzzer</code></h3>
 <p><code>python -m Tools.ApduFuzz</code>. Replays a known-good corpus with mutations against
@@ -4448,12 +4512,30 @@ values.</p>
 <p><code>python -m Tools.YggdraCore.http_app</code>. Runs the stub AUSF over HTTP. Off
 unless <code>YGGDRASIM_5GCORE_MODE=stub</code>. <code>--host</code> / <code>--port</code> (<code>127.0.0.1:8089</code>),
 <code>--token-file</code>, <code>--no-token</code> (loopback only), <code>--allow-nonloopback</code> for a
-sealed lab.</p>
+sealed lab. In the GUI, Advanced &gt; YggdraCore runs the same stub in the GUI
+process (subscriptions, the AKMA actions, the Open5GS bridge, diagnostics)
+whatever the mode says; it starts no HTTP server.</p>
 <h3 id="129-yggdrasim-mcp">12.9 <code>yggdrasim-mcp</code></h3>
 <p><code>python -m Tools.YggdraMCP.server</code>. Serves the toolchain's decoders and card
 tools over MCP on stdio; needs the <code>mcp</code> extra. Card-reaching tools stay
 behind <code>YGGDRASIM_MCP_ALLOW_CARD</code> and <code>YGGDRASIM_MCP_ACCESS</code>. Setup:
 <a href="../how-to/run-the-mcp-server.html">Run the MCP Server</a>.</p>
+<h3 id="1210-yggdrasim-hil-modem-diag">12.10 <code>yggdrasim-hil-modem-diag</code></h3>
+<p><code>python -m Tools.HilBridge.modem_diag --device &lt;DIAG tty | auto&gt;</code>. Reads
+the modem's own <abbr title="Subscriber Identity Module">SIM</abbr> interface log (Qualcomm DIAG <code>LOG_UIM_DATA_C</code>, 0x1098,
+or 0x14CE on dual-<abbr title="Subscriber Identity Module">SIM</abbr> builds), rebuilds the T=0 exchanges and sends them
+into the <abbr title="Hardware-In-The-Loop">HIL</abbr> GSMTAP stream in the bridge's frame layout, on GSMTAP antenna 1
+and from <code>127.0.0.2</code>. NULL bytes, long holds, the PPS exchange and an
+exchange cut by a reset follow as libosmocore log records. <code>auto</code> takes USB
+interface 0 of a modem the Linux <code>option</code> or <code>qcserial</code> driver serves, again
+on every reconnect.
+<code>--gsmtap-host</code> / <code>--gsmtap-port</code> / <code>--gsmtap-compat</code> match the bridge,
+<code>--capture-path</code> also writes a pcap, <code>--no-notes</code> sends <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and <abbr title="Answer To Reset">ATR</abbr> frames
+only. Waits for the port and reopens it after the modem re-enumerates; exit
+code 2 means a condition a restart will not change. With
+<code>YGGDRASIM_HIL_MODEM_DIAG</code> set, the <abbr title="Hardware-In-The-Loop">HIL</abbr> supervisor runs it for the whole
+session (section 10.2). Walkthrough: the <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge guide, <em>Modem-side <abbr title="Subscriber Identity Module">SIM</abbr>
+log</em>.</p>
 <hr />
 <h2 id="13-plugin-injected-commands">13. Plugin-injected commands</h2>
 <p>Plugins live under the runtime <code>plugins/</code> directory (source tree
@@ -4493,7 +4575,7 @@ ships them.</p>
 <li>pre-defined handlers or dispatch shims for optional commands.</li>
 </ul>
 <p>Runtime dispatch is the capability's own: the plugin registers its handlers
-through the hooks above, and the host holds no plugin-specific helpers.</p>
+through the hooks above, and the host holds no capability-specific helpers.</p>
 <p>See <a href="../internals/plugin-contract.html">Plugin Contract</a> for the formal
 spec.</p>
 <hr />
@@ -4600,6 +4682,7 @@ the prompt.</p>
             <a href="#127-yggdrasim-hil-reset" class="toc-link toc-link-sub">12.7 yggdrasim-hil-reset</a>
             <a href="#128-yggdrasim-yggdracore" class="toc-link toc-link-sub">12.8 yggdrasim-yggdracore</a>
             <a href="#129-yggdrasim-mcp" class="toc-link toc-link-sub">12.9 yggdrasim-mcp</a>
+            <a href="#1210-yggdrasim-hil-modem-diag" class="toc-link toc-link-sub">12.10 yggdrasim-hil-modem-diag</a>
             <a href="#13-plugin-injected-commands" class="toc-link">13. Plugin-injected commands</a>
             <a href="#131-discovery-contract" class="toc-link toc-link-sub">13.1 Discovery contract</a>
             <a href="#132-capability-contract-for-host-shells" class="toc-link toc-link-sub">13.2 Capability contract for host shells</a>
@@ -4618,13 +4701,13 @@ the prompt.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

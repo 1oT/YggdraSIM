@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp80.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -56,6 +56,7 @@ to a reader target, decoding a received response packet, or running a scripted
             <a href="#one-shot-ota-wrap-and-send" class="toc-link toc-link-sub">One-shot OTA wrap and send</a>
             <a href="#reuse-iccid-bound-state-across-sessions" class="toc-link toc-link-sub">Reuse ICCID-bound state across sessions</a>
             <a href="#script-mode-send" class="toc-link toc-link-sub">Script-mode send</a>
+            <a href="#reading-the-answer" class="toc-link">Reading the answer</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
@@ -182,7 +183,7 @@ python -m SCP80 --cmd &quot;show; iccid 8988xxx; build A0D6...; send; EXIT&quot;
 </tr>
 <tr>
 <td><code>SCP80/ota_config.ini</code></td>
-<td>legacy import source, retained for migration</td>
+<td>legacy import source, read while the inventory holds no <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> state; not shipped</td>
 </tr>
 </tbody>
 </table></div>
@@ -209,8 +210,45 @@ and the rest of the parameter set.</p>
 <h3 id="script-mode-send">Script-mode send</h3>
 <div class="code-block"><pre><code>python -m SCP80 --cmd &quot;script ./my_ota_sequence.scp80; exit&quot;
 </code></pre></div>
+<h2 id="reading-the-answer">Reading the answer</h2>
+<p>When the <abbr title="Security Parameter Indicator (OTA)">SPI</abbr> asks for a PoR, <code>send</code> and <code>ota</code> collect it without operator
+input. A PoR sent by SMS-DELIVER-REPORT is the ENVELOPE's own response data;
+one sent by SMS-SUBMIT arrives as a SEND SHORT MESSAGE, which the shell
+FETCHes on the ENVELOPE's <code>91 xx</code> and answers with a TERMINAL RESPONSE. The
+shell then prints:</p>
+<ul>
+<li><code>[&lt;--] &lt;data&gt; &lt;SW&gt;</code> -- the response data and status word of the last
+  command the script ran (TS 102 226 v19 table 5.1). A PoR without that
+  field, an error PoR or one that does not decode prints raw, beside the
+  ENVELOPE status word.</li>
+<li><code>[POR] ...</code> -- the PoR status, TAR, CNTR, how many of the sent commands
+  ran, the carrier and the status word that led to the FETCH. A PoR OK whose
+  script ran to the end and answered <code>9000</code> prints this line only under <code>-v</code>.</li>
+<li><code>--- Decoded (...) ---</code> -- the data of an <abbr title="Elementary File">EF</abbr> read after a SELECT, or else
+  the data decoded by context: GlobalPlatform registry entries, <abbr title="File Control Parameters">FCP</abbr>
+  templates, other BER-<abbr title="Tag-Length-Value">TLV</abbr> objects.</li>
+</ul>
+<p>Under <code>-v</code> the exchanges print below an <code>[OTA] SMS-PP data download</code> line,
+each named: <code>ENVELOPE</code>, <code>FETCH</code>, <code>TERMINAL RESPONSE</code>, <code>GET RESPONSE</code>.</p>
+<div class="code-block"><pre><code>[SCP80] &gt; send 80F24002054F005C014F00C0000000
+[&lt;--] E3094F07F0010203040501E3094F07F0010203040502 9000
+--- Decoded (GlobalPlatform card content management) ---
+    GlobalPlatform registry entries  [GPC v2.3.1 tables 11-36 / 11-37]
+      E3 GlobalPlatform Registry related data
+        4F AID = &#39;F0010203040501&#39;H
+      E3 GlobalPlatform Registry related data
+        4F AID = &#39;F0010203040502&#39;H
+    SW 9000: Success
+</code></pre></div>
 <h2 id="pitfalls">Pitfalls</h2>
 <ul>
+<li>A compact command string is a list of T=0 TPDUs, so a case 4 command such
+  as GET STATUS carries no Le, and its response stays on the card unless a
+  GET RESPONSE (<code>00C0000000</code>) follows it. TS 102 226 v19 §5.1.1 allows one
+  GET RESPONSE or case 2 command per string, as the last command; the
+  <code>[POR]</code> line counts the commands that ran against those sent. A reply of
+  <code>61 xx</code> means the GET RESPONSE was missing; the shell names the one to
+  append.</li>
 <li><abbr title="Security Parameter Indicator (OTA)">SPI</abbr> must be consistent on both sides. If <code>CC</code> is required, the card will
   reject any packet missing it with <code>6988</code> or a PoR error code.</li>
 <li>Counter mode must be aligned with whatever the card has seen last. An
@@ -247,6 +285,7 @@ authored <code>guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code> for lifecycle-f
             <a href="#one-shot-ota-wrap-and-send" class="toc-link toc-link-sub">One-shot OTA wrap and send</a>
             <a href="#reuse-iccid-bound-state-across-sessions" class="toc-link toc-link-sub">Reuse ICCID-bound state across sessions</a>
             <a href="#script-mode-send" class="toc-link toc-link-sub">Script-mode send</a>
+            <a href="#reading-the-answer" class="toc-link">Reading the answer</a>
             <a href="#pitfalls" class="toc-link">Pitfalls</a>
             <a href="#in-shell-documentation" class="toc-link">In-shell documentation</a>
             <a href="#related-pages" class="toc-link">Related pages</a>
@@ -264,13 +303,13 @@ authored <code>guides/PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code> for lifecycle-f
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

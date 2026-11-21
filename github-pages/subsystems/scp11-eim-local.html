@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/scp11-eim-local.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -49,6 +49,7 @@ helpers on top of the local <abbr title="Secure Channel Protocol 11 (GP, ellipti
             <a href="#entry-points" class="toc-link">Entry points</a>
             <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
             <a href="#diagnostics-and-paths" class="toc-link toc-link-sub">Diagnostics and paths</a>
+            <a href="#operation-queue" class="toc-link toc-link-sub">Operation queue</a>
             <a href="#eim-lifecycle-direct-card" class="toc-link toc-link-sub">eIM lifecycle (direct card)</a>
             <a href="#ipad-discovery-and-handover" class="toc-link toc-link-sub">IPAd discovery and handover</a>
             <a href="#queues-and-campaigns" class="toc-link toc-link-sub">Queues and campaigns</a>
@@ -71,7 +72,9 @@ page assumes the <abbr title="SIM Group Permanent (GSMA permanent reference docu
 </div>
 <h2 id="when-to-use-it">When to use it</h2>
 <ul>
-<li><code>ADD-INITIAL-EIM</code>, <code>ADD-EIM</code>, <code>GET-EIM-CONFIG</code>, <code>DELETE-EIM</code></li>
+<li>queue PSMOs, eCOs, IPA <abbr title="Embedded UICC">eUICC</abbr> data requests and profile download triggers for a
+  test <abbr title="Embedded UICC">eUICC</abbr>, and serve them to an IPA from the background ESipa service</li>
+<li><code>ADD-INITIAL-EIM</code>, <code>GET-EIM-CONFIG</code>; <code>ADD-EIM</code> and <code>DELETE-EIM</code> queue their eCO</li>
 <li><code>LOAD-EIM-PACKAGE</code> direct to <abbr title="Issuer Security Domain - Root">ISD-R</abbr></li>
 <li>hotfolder-driven package campaigns</li>
 <li>counter and error-code inspection</li>
@@ -148,6 +151,85 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 </tr>
 </tbody>
 </table></div>
+<h3 id="operation-queue">Operation queue</h3>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IDENTITY</code></td>
+<td>show, create (<code>NEW</code>) or import the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity</td>
+</tr>
+<tr>
+<td><code>ASSOCIATE</code></td>
+<td>reset the card's <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> configuration and store the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> (AddInitialEim)</td>
+</tr>
+<tr>
+<td><code>EUICC</code></td>
+<td>list, show, add, read, edit or remove <abbr title="Embedded UICC">eUICC</abbr> records</td>
+</tr>
+<tr>
+<td><code>QUEUE</code></td>
+<td>queue an operation (<code>--plan</code> shows it without storing)</td>
+</tr>
+<tr>
+<td><code>OPS</code> / <code>OP</code></td>
+<td>list operations / show one with its timeline and result</td>
+</tr>
+<tr>
+<td><code>EDIT</code> / <code>MOVE</code> / <code>CANCEL</code> / <code>COPY</code></td>
+<td>change, reorder, cancel or copy an operation</td>
+</tr>
+<tr>
+<td><code>EXPORT</code> / <code>RESULT</code></td>
+<td>sign one operation for another IPA / close it with that IPA's result</td>
+</tr>
+<tr>
+<td><code>PACKAGE-IMPORT</code></td>
+<td>queue what a package document (template, hotfolder file) stands for</td>
+</tr>
+<tr>
+<td><code>EIM-SETTINGS</code></td>
+<td>queue rules: unknown EIDs, result recovery, retries, result verification, Notification forwarding</td>
+</tr>
+<tr>
+<td><code>SERVE</code></td>
+<td>start, stop, restart or show the background ESipa service and local SM-DP+; the service also relays indirect downloads (<code>QUEUE DOWNLOAD ... indirect=on</code>) and runs the card-facing TLS listeners a card's own IPAe reaches: the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s, and the local SM-DP+'s for a direct download (ES9+ in the ASN.1 binding)</td>
+</tr>
+<tr>
+<td><code>TLS-SETUP</code></td>
+<td>build a TLS chain for the card-facing listener and choose the trustedPublicKeyDataTls <code>ASSOCIATE</code> gives the card; <code>LEAF</code> issues further leaves under a setup's CA and puts one on its name, <code>RESULTS</code> counts the recorded handshakes per leaf served (accepted, refused with the client's alert, resumed); a leaf's subject and extensions can be written as text (<code>subject=</code>, <code>ext.&lt;extension&gt;=</code>, <code>text=&lt;file&gt;</code>) and <code>TEXT</code> decodes a leaf or any certificate into that text</td>
+</tr>
+<tr>
+<td><code>DELIVER</code></td>
+<td>act as <abbr title="IoT Profile Assistant, device-side">IPAd</abbr> on the card in the reader until its queue is empty</td>
+</tr>
+<tr>
+<td><code>INJECT</code></td>
+<td>send an <abbr title="Embedded UICC">eUICC</abbr>'s queue to an IPA that listens for it: the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> calls ESipa.TransferEimPackage (plain HTTP on the loopback, or <code>https://</code> with the certificate of <code>INJECT-CERT</code>; <code>EIM-LISTEN</code> in the eSIM Management console is that IPA)</td>
+</tr>
+<tr>
+<td><code>INJECT-CERT</code></td>
+<td>make, once, and show the client certificate this <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> presents to an IPA over HTTPS</td>
+</tr>
+<tr>
+<td><code>NOTIFICATIONS</code></td>
+<td>list the Notifications IPAs handed to the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>; <code>SEND</code> sends them to the SM-DP+ each names (ES9+'.HandleNotification), <code>HOLD</code> stops the attempts. The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> also sends them after <code>DELIVER</code> and <code>INJECT</code> and while the service runs</td>
+</tr>
+<tr>
+<td><code>SMDP-PROFILE</code></td>
+<td>which profile the local SM-DP+ serves for a Matching ID</td>
+</tr>
+<tr>
+<td><code>SMDS</code></td>
+<td>the service's own SM-DS: <code>REGISTER</code> and <code>DELETE</code> an Event Record for an <abbr title="Embedded UICC">eUICC</abbr>, <code>LIST</code> them, <code>ADDRESS</code> sets the name it answers under; a download queued with <code>contact_smds=on</code> retrieves the records over ES11 (<code>EIM-DOWNLOAD</code> in the eSIM Management shell runs it), and the service runs a card-facing TLS listener for an IPAe that retrieves them itself (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.26 test certificates only)</td>
+</tr>
+</tbody>
+</table></div>
 <h3 id="eim-lifecycle-direct-card"><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> lifecycle (direct card)</h3>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
@@ -163,7 +245,7 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 </tr>
 <tr>
 <td><code>ADD-EIM</code></td>
-<td>add or rotate <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> entries</td>
+<td>queue the addEim eCO (<code>QUEUE ADD-EIM</code>)</td>
 </tr>
 <tr>
 <td><code>GET-EIM-CONFIG</code></td>
@@ -171,7 +253,7 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 </tr>
 <tr>
 <td><code>DELETE-EIM</code></td>
-<td>remove an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> entry</td>
+<td>queue the deleteEim eCO (<code>QUEUE DELETE-EIM</code>)</td>
 </tr>
 <tr>
 <td><code>EUICC-MEMORY-RESET</code></td>
@@ -182,16 +264,8 @@ python -m SCP11.eim_local --cmd &quot;STATUS; PATHS; EXIT&quot;
 <td>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> variant of add-initial-eim</td>
 </tr>
 <tr>
-<td><code>ISDR-ADD-EIM</code></td>
-<td>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> variant of add-eim</td>
-</tr>
-<tr>
 <td><code>ISDR-GET-EIM-CONFIG</code></td>
 <td>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> variant of get-eim-config</td>
-</tr>
-<tr>
-<td><code>ISDR-DELETE-EIM</code></td>
-<td>direct-to-<abbr title="Issuer Security Domain - Root">ISD-R</abbr> variant of delete-eim</td>
 </tr>
 <tr>
 <td><code>LOAD-EIM-PACKAGE</code></td>
@@ -333,6 +407,7 @@ row. Keep them aligned on purpose.</p>
             <a href="#entry-points" class="toc-link">Entry points</a>
             <a href="#command-surface-grouped" class="toc-link">Command surface, grouped</a>
             <a href="#diagnostics-and-paths" class="toc-link toc-link-sub">Diagnostics and paths</a>
+            <a href="#operation-queue" class="toc-link toc-link-sub">Operation queue</a>
             <a href="#eim-lifecycle-direct-card" class="toc-link toc-link-sub">eIM lifecycle (direct card)</a>
             <a href="#ipad-discovery-and-handover" class="toc-link toc-link-sub">IPAd discovery and handover</a>
             <a href="#queues-and-campaigns" class="toc-link toc-link-sub">Queues and campaigns</a>
@@ -359,13 +434,13 @@ row. Keep them aligned on purpose.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

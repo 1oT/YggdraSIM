@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>User Manual — CLI — YggdraSIM</title>
+  <link rel="icon" href="assets/images/yggdrasil-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>html{font-size:100%}</style>
+  <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
+  <link rel="stylesheet" href="tailwind.css?v=4">
+  <link rel="stylesheet" href="ygg.css?v=4">
+</head>
+<body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
+      data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="user-manual-cli.html">
+
+<a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
+
+<div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
+  <div id="ygg-chrome-mount"></div>
+  <script src="ygg-layout.js?v=4"></script>
+  <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
+    <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
+      <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
+        <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <span class="font-sans font-semibold text-sm tracking-tight">YggdraSIM</span>
+    </header>
+    <main id="ygg-main" tabindex="-1" class="flex-1 px-6 py-10 sm:px-10 lg:px-14 xl:px-16">
+      <div class="ygg-content-toc">
+      <div class="ygg-toc-body">
+        <nav class="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400 mb-6" aria-label="Breadcrumb">
+          <ol class="ygg-crumbs">
+            <li><a href="index.html" class="doc-link no-underline">Home</a></li>
+            <li aria-hidden="true"><svg class="size-3 opacity-40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M6 4l4 4-4 4"/></svg></li>
+            <li><span class="text-zinc-600 dark:text-zinc-300" aria-current="page">User Manual — CLI</span></li>
+          </ol>
+        </nav>
+        <h1 class="doc-h1 font-sans font-bold text-zinc-950 dark:text-white mb-2">User Manual — CLI</h1>
+        <p class="page-lead mb-8">This chapter covers the command-line surface of YggdraSIM: the launcher
+menu, the shells, and the single-purpose commands. Section 4 describes the
+modules in the same order as section 4 of <code>USER_MANUAL_GUI.md</code>. The
+concepts both surfaces share -- the card backend, readers and reader locks,
+where data is kept, configuration flags -- are in <code>USER_MANUAL.md</code> section
+3. Every verb of every shell is listed in
+<code>site-docs/reference/command-suite.md</code>.</p>
+        <details class="toc-mobile xl:hidden mb-8">
+          <summary>On this page <svg class="toc-mobile-chevron size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4"/></svg></summary>
+          <nav>
+            <a href="#1-start" class="toc-link">1. Start</a>
+            <a href="#11-the-launcher" class="toc-link toc-link-sub">1.1 The launcher</a>
+            <a href="#12-the-commands" class="toc-link toc-link-sub">1.2 The commands</a>
+            <a href="#2-how-every-shell-works" class="toc-link">2. How every shell works</a>
+            <a href="#21-interactive-use" class="toc-link toc-link-sub">2.1 Interactive use</a>
+            <a href="#22-batch-runs" class="toc-link toc-link-sub">2.2 Batch runs</a>
+            <a href="#23-choosing-the-reader" class="toc-link toc-link-sub">2.3 Choosing the reader</a>
+            <a href="#24-more-detail-debug-log-trace-record" class="toc-link toc-link-sub">2.4 More detail: --debug, --log, TRACE, RECORD</a>
+            <a href="#25-failures-and-exit-codes" class="toc-link toc-link-sub">2.5 Failures and exit codes</a>
+            <a href="#3-automation" class="toc-link">3. Automation</a>
+            <a href="#4-modules" class="toc-link">4. Modules</a>
+            <a href="#41-scp03-admin-shell-file-system-and-applications" class="toc-link toc-link-sub">4.1 SCP03 admin shell: file system and applications</a>
+            <a href="#42-scp80-ota-shell" class="toc-link toc-link-sub">4.2 SCP80 OTA shell</a>
+            <a href="#43-esim-management-console" class="toc-link toc-link-sub">4.3 eSIM Management console</a>
+            <a href="#44-local-sm-dp-shell" class="toc-link toc-link-sub">4.4 Local SM-DP+ shell</a>
+            <a href="#45-local-eim-shell" class="toc-link toc-link-sub">4.5 Local eIM shell</a>
+            <a href="#46-saip-tool-shell" class="toc-link toc-link-sub">4.6 SAIP Tool shell</a>
+            <a href="#47-offline-tools" class="toc-link toc-link-sub">4.7 Offline tools</a>
+            <a href="#48-apdu-streaming" class="toc-link toc-link-sub">4.8 APDU Streaming</a>
+            <a href="#49-hil-bridge" class="toc-link toc-link-sub">4.9 HIL bridge</a>
+            <a href="#410-the-simulator" class="toc-link toc-link-sub">4.10 The simulator</a>
+            <a href="#5-other-commands" class="toc-link">5. Other commands</a>
+          </nav>
+        </details>
+        <div class="doc-prose text-[0.9375rem] leading-relaxed text-zinc-600 dark:text-zinc-400 space-y-4">
+<h2 id="1-start">1. Start</h2>
+<h3 id="11-the-launcher">1.1 The launcher</h3>
+<p><code>yggdrasim</code> (or <code>yggdrasim-cli</code>, or <code>python main/main.py</code> in a source
+checkout) opens a menu:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>Opens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1</code></td>
+<td>Admin Shell - Local Management (the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell, section 4.1)</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td><abbr title="Over-The-Air">OTA</abbr> Simulator - Remote Management (the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell, section 4.2)</td>
+</tr>
+<tr>
+<td><code>3A</code></td>
+<td>eSIM Management Relay (section 4.3)</td>
+</tr>
+<tr>
+<td><code>3C</code></td>
+<td>Local SMDPP (section 4.4)</td>
+</tr>
+<tr>
+<td><code>3D</code></td>
+<td>Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> (section 4.5)</td>
+</tr>
+<tr>
+<td><code>7</code></td>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool (section 4.6)</td>
+</tr>
+<tr>
+<td><code>8</code></td>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> Key Tool (section 4.7)</td>
+</tr>
+<tr>
+<td><code>9A</code>, <code>9B</code></td>
+<td>Admin Shell - Script Execution; Admin Shell - Report &amp; DUMP-FS</td>
+</tr>
+<tr>
+<td><code>9C</code></td>
+<td><abbr title="Over-The-Air">OTA</abbr> Simulator - Script Execution</td>
+</tr>
+<tr>
+<td><code>C</code></td>
+<td>Card Backend / Simulator Settings (section 4.10)</td>
+</tr>
+<tr>
+<td><code>CB</code></td>
+<td>Card Bridge / <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming (section 4.8)</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>Environment Flags (<code>USER_MANUAL.md</code> section 3.5)</td>
+</tr>
+<tr>
+<td><code>B</code></td>
+<td>Local SIMtrace2 <abbr title="Hardware-In-The-Loop">HIL</abbr> Bridge Session (Linux, full install; section 4.9)</td>
+</tr>
+<tr>
+<td><code>G</code>, <code>A</code>, <code>L</code></td>
+<td>Guides &amp; Documentation (this manual among them), About, License</td>
+</tr>
+<tr>
+<td><code>Q</code></td>
+<td>Quit</td>
+</tr>
+</tbody>
+</table></div>
+<p>The launcher also takes options that run one thing and exit; the common
+ones are:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Option</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--doctor</code></td>
+<td>Checks the environment (<code>USER_MANUAL.md</code> section 2.2)</td>
+</tr>
+<tr>
+<td><code>--card-backend reader</code> or <code>sim</code>, <code>--sim-quirks none</code></td>
+<td>Picks the card backend for this run, and runs the simulator without its quirks file; menu <code>[C]</code> saves a choice (<code>USER_MANUAL.md</code> section 2.3)</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>Debug output in every module started from the launcher, the GUI included</td>
+</tr>
+<tr>
+<td><code>--gui</code>, <code>--web-server</code></td>
+<td>Starts the GUI (<code>USER_MANUAL_GUI.md</code> section 1)</td>
+</tr>
+<tr>
+<td><code>--asn1 &lt;hex&gt;</code></td>
+<td>Decodes BER-<abbr title="Tag-Length-Value">TLV</abbr> or a command <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> and exits</td>
+</tr>
+<tr>
+<td><code>--open-pcap &lt;file&gt;</code></td>
+<td>Opens a saved <abbr title="Hardware-In-The-Loop">HIL</abbr> capture for review (section 4.9)</td>
+</tr>
+<tr>
+<td><code>--card-bridge</code></td>
+<td>Publishes a local reader (section 4.8)</td>
+</tr>
+<tr>
+<td><code>--remote-card-url &lt;url&gt;</code></td>
+<td>Works on a card published by a Card Bridge (section 4.8)</td>
+</tr>
+<tr>
+<td><code>--scp03 --cmd "&lt;commands&gt;"</code></td>
+<td>Runs <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> commands without the menu</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>yggdrasim --help</code> lists every option.</p>
+<h3 id="12-the-commands">1.2 The commands</h3>
+<p>Each module also has a command of its own, which is what scripts use:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Starts</th>
+<th>GUI counterpart</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yggdrasim-scp03</code></td>
+<td>The <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> admin shell</td>
+<td>File system, Applications</td>
+</tr>
+<tr>
+<td><code>yggdrasim-scp80</code></td>
+<td>The <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> shell</td>
+<td>Over-the-Air</td>
+</tr>
+<tr>
+<td><code>yggdrasim-scp11-live</code> (or <code>yggdrasim-scp11</code>)</td>
+<td>The eSIM Management console</td>
+<td>Management</td>
+</tr>
+<tr>
+<td><code>yggdrasim-scp11-local-access</code></td>
+<td>The Local SM-DP+ shell</td>
+<td>Local SM-DP+</td>
+</tr>
+<tr>
+<td><code>yggdrasim-scp11-eim-local</code></td>
+<td>The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shell</td>
+<td>Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr></td>
+</tr>
+<tr>
+<td><code>yggdrasim-profile-package</code></td>
+<td>The <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool shell</td>
+<td><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</td>
+</tr>
+<tr>
+<td><code>yggdrasim-suci-tool</code></td>
+<td>The <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> key shell</td>
+<td>Offline Tools, <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys</td>
+</tr>
+<tr>
+<td><code>yggdrasim-asn1</code></td>
+<td>The decoder</td>
+<td>Offline Tools, Decoder</td>
+</tr>
+</tbody>
+</table></div>
+<p>Section 5 lists the other commands.</p>
+<h2 id="2-how-every-shell-works">2. How every shell works</h2>
+<h3 id="21-interactive-use">2.1 Interactive use</h3>
+<p>A shell prints a short banner and waits for commands at its prompt.</p>
+<ul>
+<li><code>HELP</code> lists the verbs by group. <code>HELP &lt;verb&gt;</code> prints the usage and
+  examples of one verb in the Local SM-DP+ and Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shells.
+  <code>HELP EXPERT</code> in the eSIM Management console adds the reads and
+  settings the short list leaves out. The <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool has <code>HELP TOKENS</code>,
+  <code>HELP TEMPLATE</code>, <code>HELP EDIT</code> and <code>HELP LINT</code>; the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell has
+  <code>GUIDE [topic]</code>.</li>
+<li><code>EXIT</code> leaves the shell (<code>quit</code> in the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell). <code>QA</code> leaves
+  YggdraSIM altogether.</li>
+<li>The <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell takes its verbs in lower case (<code>show</code>, <code>build</code>); the
+  other shells print theirs in capitals.</li>
+</ul>
+<h3 id="22-batch-runs">2.2 Batch runs</h3>
+<p>Every shell runs a list of commands without the prompt:</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-live --cmd &quot;GET-EID; LIST; EXIT&quot;
+yggdrasim-scp11-live --stdin &lt; commands.txt
+yggdrasim-scp11-live --stdin &lt;&lt;&#39;EOF&#39;
+GET-EID
+LIST
+EXIT
+EOF
+</code></pre></div>
+<ul>
+<li><code>--cmd</code> takes the commands separated by <code>;</code>, <code>--stdin</code> one per line.</li>
+<li>The commands run in order. End the list with <code>EXIT</code>.</li>
+<li>With <code>--stdin</code>, empty lines and lines that start with <code>#</code> are skipped.
+  A <code>#</code> after a command on the same line is not a comment.</li>
+</ul>
+<p><code>CLI_AND_PIPING_GUIDE.md</code> covers pipelines and <abbr title="Certificate Issuer">CI</abbr> jobs, and
+<code>PROFILE_LIFECYCLE_CLI_CHEATSHEET.md</code> has ready-made batches for the
+profile lifecycle.</p>
+<h3 id="23-choosing-the-reader">2.3 Choosing the reader</h3>
+<p><code>yggdrasim-scp03</code>, <code>yggdrasim-scp11-live</code> and
+<code>yggdrasim-scp11-local-access</code> take <code>--reader "&lt;reader name&gt;"</code>, the exact
+<abbr title="Personal Computer/Smart Card (Workgroup)">PC/SC</abbr> name or <code>Remote Lab: &lt;device&gt;</code>. Without it, and in the other shells,
+the first reader is used (<code>USER_MANUAL.md</code> section 3.1).</p>
+<h3 id="24-more-detail-debug-log-trace-record">2.4 More detail: --debug, --log, TRACE, RECORD</h3>
+<ul>
+<li><code>--debug</code> on the command line prints the raw <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> exchanges of the whole
+  session. In the eSIM Management, Local SM-DP+ and Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shells,
+  <code>--debug</code> after a card verb does the same for that one command.</li>
+<li><code>--log &lt;file&gt;</code> after any command line runs that command with debug
+  output and appends everything it prints to <code>&lt;file&gt;</code>, as well as showing
+  it. A new file is readable by its owner only. Each command is one block,
+  with a header and a time stamp per line:</li>
+</ul>
+<div class="code-block"><pre><code>yggdrasim-scp11-live --cmd &quot;GET-EID --log eid.log; EXIT&quot;
+</code></pre></div>
+<div class="code-block"><pre><code>=== 2026-11-18 09:31:26 +0100  eSIM Management &gt; GET-EID ===
+  09:31:26.742  [INIT: TERMINAL CAPABILITY] &gt; 80AA000005A903840101
+  09:31:26.742  [INIT: TERMINAL CAPABILITY] &lt; SW: 9000 Data:
+  09:31:26.742  [INIT: SELECT ISD-R CH1] &gt; 01A4040010A0000005591010FFFFFFFF8900000100
+  ...
+  09:31:26.743  [GET: EID] &gt; 81E2910006BF3E035C015A
+</code></pre></div>
+<ul>
+<li>The <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell keeps a log open across commands: <code>TRACE START [file]</code>,
+  then every command until <code>TRACE STOP</code> (<code>TRACE STATUS</code> tells whether one
+  is open).</li>
+<li>The Local SM-DP+ and Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shells record a session for replay:
+  <code>RECORD START [path]</code> ... <code>RECORD STOP</code> writes the commands and their
+  <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> trace (<code>RECORD STATUS</code>, <code>RECORD CANCEL</code>). <code>yggdrasim-session-diff
+  &lt;left&gt; &lt;right&gt;</code> compares two recordings.</li>
+<li>Several verbs print structured output with <code>--json</code> or <code>--yaml</code>
+  (<code>CERTS</code>, <code>METADATA-LINT</code>, <code>EXPLAIN-LAST</code>, <code>OPS ... --json</code>).</li>
+</ul>
+<h3 id="25-failures-and-exit-codes">2.5 Failures and exit codes</h3>
+<p>A failed step prints a <code>[-]</code> line and a refusal or an error a <code>[!]</code> line
+(<code>USER_MANUAL.md</code> section 3.6); a <code>[!] Warning:</code> line is a caveat. The shell
+then carries on with the next command of a batch, and the batch ends with
+exit code 1 when any of its commands failed. <code>yggdrasim-scp03</code>,
+<code>yggdrasim-scp80</code>, <code>yggdrasim-scp11-live</code>, <code>yggdrasim-scp11-local-access</code>,
+<code>yggdrasim-scp11-eim-local</code>, <code>yggdrasim-suci-tool</code> and
+<code>yggdrasim --scp03 --cmd</code> count as failed a command that printed a <code>[-]</code>
+line or a <code>[!]</code> line other than a warning, an unknown verb and an error the
+shell caught. <code>yggdrasim-profile-package</code> counts the verbs that report their
+own failure (an unknown verb is one). <code>EXIT</code> ends a batch early and keeps the
+exit code of what ran before it.</p>
+<p>Two commands are judged by their own outcome rather than their lines:
+<code>EIM-LISTEN</code>, which prints a <code>[!]</code> line for each caller it refuses and fails
+only when the listener itself does, and a command that runs until it is
+stopped, which fails on a <code>[-]</code> line or a <code>[!]</code> line that says it failed. The lines still say which command failed, so keep the output
+(<code>... | tee run.log</code>).</p>
+<h2 id="3-automation">3. Automation</h2>
+<ul>
+<li>Use the module commands of section 1.2 in scripts, not the launcher
+  menu.</li>
+<li>Keep command lists in files and feed them with <code>--stdin</code>.</li>
+<li>The <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell writes the results of a <code>--cmd</code> or <code>--stdin</code> batch as
+  YAML with <code>--out &lt;file.yaml&gt;</code>.</li>
+<li>Set flags for one run in the environment
+  (<code>YGGDRASIM_CARD_BACKEND=sim yggdrasim-scp11-live --cmd "..."</code>), not in
+  the persisted overrides.</li>
+<li>A job that must not reach a reader or the operator's stores runs as in
+  <code>USER_MANUAL.md</code> section 4.2.</li>
+</ul>
+<h2 id="4-modules">4. Modules</h2>
+<h3 id="41-scp03-admin-shell-file-system-and-applications">4.1 <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> admin shell: file system and applications</h3>
+<p><code>yggdrasim-scp03 [--reader "&lt;reader name&gt;"]</code>, or launcher key <code>1</code>. The
+shell opens the card at start (<code>[*] CONNECTED</code>, with <code>(SIMULATED CARD)</code> on
+the simulator) and covers what the GUI splits into File system and
+Applications.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Group</th>
+<th>Verbs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Session and card</td>
+<td><code>INFO</code>, <code>ATR</code>, <code>RESET</code>, <code>SCP03-SD</code> (or <code>AUTH-SD</code>), <code>SCP02-SD</code>, <code>KEYS [AID]</code>, <code>LOGOUT</code>, <code>OTA</code> (switch to the <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> shell), <code>STK</code> (the <abbr title="Subscriber Identity Module">SIM</abbr> Toolkit sub-shell)</td>
+</tr>
+<tr>
+<td>GlobalPlatform</td>
+<td><code>APPS</code>, <code>PKGS</code>, <code>SD</code>, <code>GET-DATA</code>, <code>WIZARD</code>, <code>PUT-KEY</code>, <code>SET-STATUS</code>, <code>LOCK &lt;AID&gt;</code>, <code>UNLOCK &lt;AID&gt;</code>, <code>DELETE &lt;AID&gt;</code>, <code>STORE-DATA</code>, <code>MANAGE-CHANNEL</code>, <code>INSTALL</code>, <code>INSTALL-CAP</code>, <code>LOAD</code>, <code>INSTALL-APP</code>, <code>MAKE-SELECTABLE</code>, <code>EXTRADITE</code>, <code>PERSONALIZE</code>, <code>REGISTRY-UPDATE</code></td>
+</tr>
+<tr>
+<td>eSIM and authentication</td>
+<td><code>LIST</code>, <code>MANAGE-PROFILE</code>, <code>RUN-AUTH</code>, <code>RUN-AUTH-TEST</code>, <code>DERIVE-OPC &lt;Ki&gt; &lt;OP&gt;</code>, <code>DERIVE-TOPC &lt;TOP&gt; &lt;K&gt; [Keccak iterations]</code></td>
+</tr>
+<tr>
+<td><abbr title="Personal Identification Number">PIN</abbr></td>
+<td><code>MANAGE-PIN</code></td>
+</tr>
+<tr>
+<td>Configuration</td>
+<td><code>CONFIG</code>, <code>SHOW</code>, <code>AIDS</code>, <code>SET-AID-ALIAS &lt;name&gt; &lt;AID&gt;</code>, <code>SET-DEFAULT</code>, <code>BINDS</code></td>
+</tr>
+<tr>
+<td>File system</td>
+<td><code>SCAN</code>, <code>SELECT &lt;path or FID&gt;</code>, <code>READ [path]</code>, <code>RECORD &lt;n, ALL or range&gt; [path]</code>, <code>UPDATE BINARY &lt;hex&gt;</code>, <code>UPDATE RECORD &lt;n&gt; &lt;hex&gt;</code>, <code>FS-ADMIN</code>, <code>REPORT</code>, <code>VALIDATE</code>, <code>SET-GOLD-PROFILE</code>, <code>GOLD-PROFILE</code>, <code>PROFILE-DIFF</code></td>
+</tr>
+<tr>
+<td>Developer</td>
+<td><code>GUIDE [topic]</code>, <code>RUN &lt;file&gt; [out.yaml]</code>, <code>EXPORT-KEYBAG</code>, <code>DEBUG</code>, <code>TRACE</code>, <code>CLS</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Read the <abbr title="Integrated Circuit Card Identifier">ICCID</abbr>, authenticate and list the applications, on the simulated
+card:</p>
+<div class="code-block"><pre><code>yggdrasim-scp03 --cmd &quot;INFO; SELECT 2FE2; READ; SCP03-SD; APPS; EXIT&quot;
+</code></pre></div>
+<div class="code-block"><pre><code>=== CARD INFO ===
+ATR   : 3B9F96801FC78031A073BE21136743200718000001A5
+ICCID : 89881111111111111112
+eID   : 89049032123451234512345678901235
+Spec  : SGP.32 (IoT)
+[+] Selected 2FE2 (2FE2)
+--- FCP ---
+    [Type]     EF (Transparent, shareable)
+    [Size]     10 bytes
+Data [9000]: 98881111111111111121
+          | iccid: 89881111111111111112
+[*] Authenticating to Security Domain via SCP03: A000000151000000...
+[+] SCP03 Authenticated (Level 0x33, KVN 0x30)
+--- GlobalPlatform Registry (APPS) ---
+AID                                | State        | Privileges
+A0000005591010FFFFFFFF8900000200   | PERSONALIZED | 9EFE80
+A000000151000000                   | SELECTABLE   | 800000
+</code></pre></div>
+<ul>
+<li>The keys come from <code>Workspace/SCP03/keys.ini</code> under the runtime root:
+  <code>kenc</code>, <code>kmac</code>, <code>dek</code>, <code>kvn</code>, the default security domain <code>aid</code> and the
+  <code>adm</code> key for VERIFY. <code>CONFIG</code> changes them, <code>SHOW</code> prints them and
+  <code>SET-DEFAULT</code> returns to the default test keys.</li>
+<li><code>UPDATE</code>, <code>DELETE</code>, <code>LOCK</code>, <code>UNLOCK</code>, <code>STORE-DATA</code> and the install
+  verbs act at once. The wizards (<code>PUT-KEY</code>, <code>SET-STATUS</code>, <code>FS-ADMIN</code>,
+  <code>WIZARD</code>, <code>MANAGE-PROFILE</code>, <code>MANAGE-PIN</code>) ask for their values first.</li>
+<li><code>RUN &lt;file&gt;</code> sends a script of APDUs, one per line, with <code>#</code> comments on
+  lines of their own; launcher key <code>9A</code> does the same from the menu. <code>REPORT</code>
+  (launcher key <code>9B</code>) writes file system and <abbr title="Embedded UICC">eUICC</abbr> reports.</li>
+</ul>
+<h3 id="42-scp80-ota-shell">4.2 <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> <abbr title="Over-The-Air">OTA</abbr> shell</h3>
+<p><code>yggdrasim-scp80</code>, or launcher key <code>2</code>. The shell builds <abbr title="Secure Channel Protocol 80 (ETSI TS 102 225 / 226)">SCP80</abbr> secured
+packets, sends them as SMS-PP envelopes and decodes the answer.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verb</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>show</code></td>
+<td>Prints the settings: counter, <abbr title="Security Parameter Indicator (OTA)">SPI</abbr>, KIc and KID key sets, TAR, keys, transport, reader</td>
+</tr>
+<tr>
+<td><code>set &lt;key&gt; &lt;value&gt;</code></td>
+<td>Changes a setting (keys listed by <code>HELP</code>: <code>kic</code>, <code>kid</code>, <code>kic_indicator</code>, <code>kid_indicator</code>, <code>pid</code>, <code>dcs</code>, <code>sender</code>, <code>concat_sms</code>, <code>tp_ud_max</code>)</td>
+</tr>
+<tr>
+<td><code>build [-v] [hex]</code></td>
+<td>Shows the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> or APDUs a send would use; sends nothing</td>
+</tr>
+<tr>
+<td><code>send [-v] [hex]</code></td>
+<td>Sends the configured payload, or the one given</td>
+</tr>
+<tr>
+<td><code>&lt;hex&gt;</code>, <code>ota &lt;hex&gt;</code></td>
+<td>Wraps the payload and sends it</td>
+</tr>
+<tr>
+<td><code>sendraw &lt;hex&gt;</code></td>
+<td>Sends an <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> without <abbr title="Over-The-Air">OTA</abbr> wrapping</td>
+</tr>
+<tr>
+<td><code>iccid [value]</code></td>
+<td>Reads or binds the settings kept for a card's <abbr title="Integrated Circuit Card Identifier">ICCID</abbr></td>
+</tr>
+<tr>
+<td><code>script &lt;file&gt;</code></td>
+<td>Runs the commands of a file</td>
+</tr>
+<tr>
+<td><code>history</code>, <code>reset [-v]</code></td>
+<td>The command history; re-initialises the toolkit session</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code-block"><pre><code>yggdrasim-scp80 --cmd &quot;show; build; exit&quot;
+</code></pre></div>
+<p><code>build</code> is the dry run: check the counter and the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> it prints before the
+first <code>send</code>.</p>
+<h3 id="43-esim-management-console">4.3 eSIM Management console</h3>
+<p><code>yggdrasim-scp11-live [--reader "&lt;reader name&gt;"]</code> (or <code>yggdrasim-scp11</code>),
+or launcher key <code>3A</code>. The console works on an <abbr title="Embedded UICC">eUICC</abbr> as the <abbr title="Local Profile Assistant">LPA</abbr> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22) or
+the IPA (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32) would. Each card command opens the card, runs and
+releases it again.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Group</th>
+<th>Verbs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Utilities</td>
+<td><code>SCAN</code>, <code>RESET</code>, <code>STATUS</code>, <code>LIST</code>, <code>METADATA &lt;id, AID or alias&gt;</code>, <code>HELP [EXPERT]</code></td>
+</tr>
+<tr>
+<td><abbr title="Local Profile Assistant, device-side">LPAd</abbr></td>
+<td><code>DOWNLOAD-PROFILE &lt;activation code&gt;</code>, <code>ENABLE-PROFILE &lt;ICCID or AID&gt;</code>, <code>DISABLE-PROFILE &lt;ICCID or AID&gt;</code>, <code>DELETE-PROFILE &lt;ICCID or AID&gt;</code></td>
+</tr>
+<tr>
+<td><abbr title="IoT Profile Assistant, device-side">IPAd</abbr></td>
+<td><code>DISCOVER</code>, <code>DOWNLOAD [matchingId]</code>, <code>ADD-INITIAL-EIM</code>, <code>EIM-CERT-STORE</code>, <code>EIM-LISTEN</code>, <code>EIM-LISTEN-CERT</code></td>
+</tr>
+<tr>
+<td>Expert (<code>HELP EXPERT</code>)</td>
+<td><code>GET-EID</code>, <code>GET-NOTIFICATIONS</code>, <code>REMOVE-NOTIFICATION &lt;seq&gt;</code>, <code>CLEAR-NOTIFICATIONS</code>, <code>GET-EUICC-INFO1</code>, <code>GET-EUICC-INFO2</code>, <code>GET-RAT</code>, <code>GET-CERTS</code>, <code>GET-EIM-CONFIG</code>, <code>GET-ALL-DATA</code>, <code>GET-SMDP</code>, <code>SET-SMDP &lt;address&gt;</code>, <code>GET-ES9</code>, <code>SET-ES9</code>, <code>SET-ES9-TLS</code>, <code>SET-ES9-CA</code>, <code>ES9-CERT-INFO</code>, <code>READ-METADATA</code>, <code>GET-POL</code>, <code>SET-POL</code>, <code>STORE-METADATA</code>, <code>AIDS</code>, <code>FLOW</code>, <code>VERIFY-SCP11</code>, <code>EIM-AUTHENTICATE</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Read the card first:</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-live --cmd &quot;GET-EID; LIST; GET-NOTIFICATIONS; EXIT&quot;
+</code></pre></div>
+<div class="code-block"><pre><code>[*] EID: 89049032123451234512345678901235
+
+Profiles on Card:
+State     Class  FB  FBA ICCID                 Nickname                  AID / Alias
+ENABLED   OPER   -   no  89881111111111111112 Lab (EU 01)              A0000005591010FFFFFFFF8900001100 (ISDP1)
+DISABLED  TEST   -   yes 89881111111111111129 Lab (EU 02)              A0000005591010FFFFFFFF8900001200 (ISDP2)
+
+[+] RetrieveNotificationsList
+    | Notification Entries : 0
+</code></pre></div>
+<p>A profile is named by its <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> or its <abbr title="Application Identifier">AID</abbr>. The name in brackets is an
+alias from <code>Workspace/SCP03/aid.txt</code> (<code>AIDS</code> lists them, <code>SET-AID-ALIAS</code>
+in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell adds one) and works as well: <code>ENABLE-PROFILE ISDP2</code>.
+The file is written the first time the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell runs; until then the
+list shows <code>(ISD-P)</code> and an alias is refused ("Could not resolve
+profile").</p>
+<p>Enabling a profile disables the enabled one first. After a state change
+the console posts the card's Notifications to the SM-DP+ each one names
+and removes the delivered ones from the card (<code>USER_MANUAL.md</code> section
+4.1, item 4). A refused change prints the <abbr title="Embedded UICC">eUICC</abbr>'s result code by name:</p>
+<div class="code-block"><pre><code>[-] EnableProfile failed, code 0x01: iccidOrAidNotFound(1) [SGP.22 ES10b]
+</code></pre></div>
+<ul>
+<li><code>DOWNLOAD-PROFILE LPA:1$&lt;SM-DP+ address&gt;$&lt;matching ID&gt;</code> downloads and
+  installs a profile.</li>
+<li><code>GET-ES9</code> shows the active ES9+ base URL. <code>SET-ES9</code>, <code>SET-ES9-TLS</code> and
+  <code>SET-ES9-CA</code> change it, its TLS verification and its CA bundle, for the
+  session or, with <code>--persist</code>, for later sessions as well.</li>
+<li><code>ADD-INITIAL-EIM</code> is a wizard that builds an AddInitialEim step by step,
+  shows the run and sends it only when answered <code>y</code> (<code>s</code> shows the full
+  <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> script, Enter sends nothing). A run first resets the card's <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>
+  configuration, so every other <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> leaves the card. <code>EIM-CERT-STORE</code> keeps
+  the certificates and configurations the wizard reuses.</li>
+<li><code>EIM-LISTEN</code> answers <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> packages an <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> injects (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> Package
+  Injection) until it is stopped; <code>SCP11/eim_local/GUIDE.md</code> section 6.4.5
+  covers it with the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>.</li>
+<li><code>yggdrasim-scp11-live --flow</code> runs one <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> flow without the shell.</li>
+</ul>
+<h3 id="44-local-sm-dp-shell">4.4 Local SM-DP+ shell</h3>
+<p><code>yggdrasim-scp11-local-access [--reader "&lt;reader name&gt;"]</code>, or launcher key
+<code>3C</code>. The shell loads a profile package from disk onto an <abbr title="Embedded UICC">eUICC</abbr>, acting as
+the SM-DP+, and runs the profile and metadata commands of ES10. Every card
+command opens its own session and closes it again.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Group</th>
+<th>Verbs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Session and discovery</td>
+<td><code>STATUS</code>, <code>DISCOVER</code> (or <code>INFO</code>), <code>CERTS</code>, <code>LOAD-PROFILE [path]</code>, <code>EXPLAIN-LAST</code></td>
+</tr>
+<tr>
+<td>Profile state</td>
+<td><code>ENABLE-PROFILE &lt;id&gt;</code>, <code>DISABLE-PROFILE &lt;id&gt;</code>, <code>DELETE-PROFILE &lt;id&gt;</code></td>
+</tr>
+<tr>
+<td>Metadata</td>
+<td><code>STORE-METADATA [path]</code>, <code>UPDATE-METADATA [path]</code>, <code>STORE-METADATA-CUSTOM &lt;tag&gt; [path]</code>, <code>STORE-METADATA-CUSTOM-ALL [path]</code>, <code>METADATA [path]</code>, <code>METADATA-LINT [path]</code>, <code>METADATA-CLEAR</code></td>
+</tr>
+<tr>
+<td>Files</td>
+<td><code>PROFILE [path]</code>, <code>PROFILE-CLEAR</code></td>
+</tr>
+<tr>
+<td>Shell</td>
+<td><code>RECORD</code>, <code>HELP [verb]</code>, <code>EXIT</code>, <code>QA</code></td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>The profile loaded is the one file in <code>Workspace/LocalSMDPP/profile/</code>, or
+  the file <code>PROFILE &lt;path&gt;</code> names. With more than one file in that folder
+  and no <code>PROFILE</code>, the shell refuses ("Profile directory contains multiple
+  files").</li>
+<li>The metadata is <code>Workspace/LocalSMDPP/profile/metadata/default_profile_metadata.json</code>
+  unless <code>METADATA &lt;path&gt;</code> names another.</li>
+<li>The DPauth certificate and key are required, the DPpb pair optional.
+  They go in <code>Workspace/LocalSMDPP/certs/</code> with a sidecar file;
+  <code>SCP11/local_access/certs/README.md</code> has the format and <code>CERTS</code> shows
+  what was found.</li>
+</ul>
+<div class="code-block"><pre><code>yggdrasim-scp11-local-access --cmd &quot;STATUS; CERTS; DISCOVER; EXIT&quot;
+yggdrasim-scp11-local-access --cmd &quot;PROFILE &lt;profile package&gt;; LOAD-PROFILE; EXIT&quot;
+</code></pre></div>
+<p><code>LOAD-PROFILE</code> prints each ES10 step (GetEuiccInfo1,
+GetEuiccConfiguredData, GetEuiccChallenge, then the authentication and the
+download). The card accepts only a DPauth certificate under a <abbr title="Certificate Issuer">CI</abbr> it lists;
+without one the load stops before the authentication:</p>
+<div class="code-block"><pre><code>[-] No matching SGP.26 local credential set was found. Allowed CI PKIDs from card: F54172BDF98A95D65CBEB88A38A1C11D800A85C3
+</code></pre></div>
+<p><code>--dump-keybag &lt;path&gt;</code> writes the session keys of the batch to a keybag
+file for offline review of a <abbr title="Hardware-In-The-Loop">HIL</abbr> capture.</p>
+<h3 id="45-local-eim-shell">4.5 Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shell</h3>
+<p><code>yggdrasim-scp11-eim-local</code>, or launcher key <code>3D</code>. The Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> is an
+<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> run on this machine (<code>USER_MANUAL_GUI.md</code> section 4.6 describes
+the model). The shell has no reader option: its card verbs use the first
+reader. <code>SCP11/eim_local/GUIDE.md</code> is the full guide.</p>
+<p>First use, on the simulated card:</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-eim-local --cmd &quot;IDENTITY NEW; ASSOCIATE --yes; QUEUE LIST-PROFILES; OPS pending; DELIVER; OP 1; EXIT&quot;
+</code></pre></div>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>IDENTITY NEW</code></td>
+<td>Makes the identity: eimId <code>1.3.6.1.4.1.32473.999.10.124</code>, FQDN <code>eim.yggdrasim.local</code>, a P-256 signing key and its certificates</td>
+</tr>
+<tr>
+<td><code>ASSOCIATE --yes</code></td>
+<td>Resets the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> configuration of the card in the reader and adds this <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>; without <code>--yes</code> it asks for the last eight digits of the <abbr title="eUICC Identifier">EID</abbr></td>
+</tr>
+<tr>
+<td><code>QUEUE LIST-PROFILES</code></td>
+<td>Queues a list of the card's profiles; with no <abbr title="eUICC Identifier">EID</abbr> it reads the card in the reader for it</td>
+</tr>
+<tr>
+<td><code>OPS pending</code></td>
+<td>Lists the operations that wait</td>
+</tr>
+<tr>
+<td><code>DELIVER</code></td>
+<td>Acts as the IPA on the card in the reader until its queue is empty</td>
+</tr>
+<tr>
+<td><code>OP 1</code></td>
+<td>Shows operation 1: parameters, timeline, the package served and the card's answer</td>
+</tr>
+</tbody>
+</table></div>
+<p>The association and the operation read:</p>
+<div class="code-block"><pre><code>[+] AddInitialEim: associationToken 1
+[+] record 89049032123451234512345678901235: associationToken 1, counterValue 0
+[+] Queued 1 operation(s), task 1:
+      1  CREATED         78901235  2026-11-18T08:23:14  List profiles
+[+] operation 1: listProfileInfoResult: ok
+[*] Operation 1 (PROFILE_INFO_LIST) for 89049032123451234512345678901235: SUCCESS
+    result     :
+      BF2D  listProfileInfoResult          ok
+      E3    ProfileInfo                    ICCID 89881111111111111112 enabled operational ...
+</code></pre></div>
+<p>The verbs of daily work:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verb</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>QUEUE &lt;operation&gt; [eid] [value] [key=value ...]</code></td>
+<td>Queues an operation. <code>--plan</code> shows what would be queued and queues nothing; <code>--first</code> puts it ahead of the card's other operations, <code>--at &lt;UTC&gt;</code> holds it until then, <code>--retries &lt;n&gt;</code> sets how often it is tried again</td>
+</tr>
+<tr>
+<td><code>OPS</code>, <code>OP &lt;id&gt;</code></td>
+<td>Lists operations (<code>pending</code>, <code>completed</code>, <code>all</code>); shows one, and with <code>--decode</code> the Decoder's reading of its package and result</td>
+</tr>
+<tr>
+<td><code>EDIT</code>, <code>MOVE</code>, <code>CANCEL</code>, <code>COPY</code></td>
+<td>Changes, reorders, cancels or copies an operation</td>
+</tr>
+<tr>
+<td><code>EUICC</code></td>
+<td>The <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s record of each card: <code>EUICC &lt;eid&gt;</code>, <code>EUICC READ</code>, <code>EUICC ADD</code>, <code>EUICC SET</code>, <code>EUICC REMOVE</code></td>
+</tr>
+<tr>
+<td><code>DELIVER [--once]</code></td>
+<td>Serves the queue to the card in the reader</td>
+</tr>
+<tr>
+<td><code>SERVE start</code>, <code>SERVE status</code>, <code>SERVE stop</code></td>
+<td>The background service IPAs poll, with the local SM-DP+ and SM-DS</td>
+</tr>
+<tr>
+<td><code>INJECT</code>, <code>INJECT-CERT</code></td>
+<td>Sends a card's queue to a listening IPA (<code>EIM-LISTEN</code>, section 4.3)</td>
+</tr>
+<tr>
+<td><code>NOTIFICATIONS [&lt;eid&gt;]</code>, <code>NOTIFICATIONS SEND</code></td>
+<td>The Notifications IPAs handed over and where each stands; send the pending ones, or the ones named, now</td>
+</tr>
+<tr>
+<td><code>EIM-SETTINGS [key=value ...]</code></td>
+<td>The queue rules</td>
+</tr>
+<tr>
+<td><code>TLS-SETUP</code>, <code>TRAFFIC</code>, <code>SMDS</code>, <code>SMDP-PROFILE</code></td>
+<td>The listener's certificates, the exchanges the service answered, the local SM-DS, the profiles the local SM-DP+ serves</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>QUEUE</code> takes these operations: <code>ADD-EIM</code>, <code>DEFAULT-SMDP</code>, <code>DELETE</code>,
+<code>DELETE-EIM</code>, <code>DISABLE</code>, <code>DOWNLOAD</code>, <code>ENABLE</code>, <code>EXECUTE-FALLBACK</code>,
+<code>FALLBACK</code>, <code>GET-RAT</code>, <code>IMMEDIATE-ENABLE</code>, <code>IPA-DATA</code>, <code>LIST-EIM</code>,
+<code>LIST-PROFILES</code>, <code>RAW-ECO</code>, <code>RAW-PSMO</code>, <code>REFRESH</code>, <code>RETURN-FALLBACK</code>,
+<code>ROLLBACK</code>, <code>UNSET-FALLBACK</code>, <code>UPDATE-EIM</code>. For example:</p>
+<div class="code-block"><pre><code>yggdrasim-scp11-eim-local --cmd &quot;QUEUE ENABLE 89049032123451234512345678901235 89881111111111111129 --plan; EXIT&quot;
+</code></pre></div>
+<p><code>DELIVER</code> takes the card's pending Notifications as it goes: they are
+acknowledged, the card drops them, and the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> forwards each to the
+SM-DP+ it names; it holds none back (<code>USER_MANUAL.md</code> section 4.1). The
+shell also has the package-file verbs
+(<code>EIM-PACKAGE-*</code>, <code>HOTFOLDER-*</code>) and direct card commands
+(<code>ENABLE-PROFILE</code>, <code>LOAD-PROFILE</code>, <code>ADD-INITIAL-EIM</code>, ...); <code>HELP</code> lists
+them.</p>
+<h3 id="46-saip-tool-shell">4.6 <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool shell</h3>
+<p><code>yggdrasim-profile-package</code>, or launcher key <code>7</code>. The shell inspects, lints
+and edits profile packages and builds new ones from templates.</p>
+<ul>
+<li>The default input folder is <code>Workspace/SAIP/profile</code>; a sole file there
+  is selected at start. <code>USE &lt;file&gt;</code> selects another (absolute paths are
+  allowed for input; <code>.txt</code> and <code>.hex</code> files are read as hex).</li>
+<li>Every file the shell writes stays inside the workspace; <code>&gt;</code> after a
+  <code>DUMP</code> or <code>LINT</code> writes the output to a file there.</li>
+<li>A <code>USE</code> that fails leaves the previous selection in place, so in a batch
+  the commands after it read the file selected before. Check for its <code>[-]</code>
+  line.</li>
+</ul>
+<div class="code-block"><pre><code>yggdrasim-profile-package --cmd &quot;USE reference_test_profile.txt; INFO; LINT; EXIT&quot;
+</code></pre></div>
+<div class="code-block"><pre><code>SAIP profile version: 2.3
+ICCID: 89880811111111111112
+Mandatory services: usim, milenage, javacard, get-identity
+NAAs: mf[1], usim[1]
+=== PROFILE LINT REPORT ===
+WARN: 4
+FAIL: 1
+[WARN] YRL-ICC-004 | header.iccid | ITU-T E.118 (09/2025) §6 / ISO/IEC 7812-1 Annex B
+[FAIL] YRL-ICC-010 | mf.ef-iccid.fillFileContent | ETSI TS 102 221 §13.2
+</code></pre></div>
+<p>Each finding names its rule, the place in the package and the
+specification behind it.</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Verbs</th>
+<th>Do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>INFO</code>, <code>TREE</code>, <code>CHECK</code>, <code>DUMP [ALL, TYPE or NAA] [DECODED]</code></td>
+<td>Read the package</td>
+</tr>
+<tr>
+<td><code>LINT [STRICT]</code>, <code>LINT HELP</code>, <code>LINT PROFILES</code></td>
+<td>Lint it; the help lists the options and preset gates</td>
+</tr>
+<tr>
+<td><code>INSPECT</code> (or <code>TUI</code>)</td>
+<td>The full-screen editor; <code>yggdrasim-profile-package --inspect --profile &lt;file&gt;</code> opens it directly</td>
+</tr>
+<tr>
+<td><code>DIFF &lt;a&gt; &lt;b&gt;</code>, <code>DIFF-TUI &lt;a&gt; &lt;b&gt;</code></td>
+<td>Compare two packages</td>
+</tr>
+<tr>
+<td><code>NEW-PROFILE</code>, <code>NEW-TEMPLATE</code>, <code>NEW-PROFILE-WIZARD</code>, <code>PRESETS</code></td>
+<td>Start a package from a preset</td>
+</tr>
+<tr>
+<td><code>GENERATE-TEMPLATE</code>, <code>GENERATE-PROFILE</code>, <code>GENERATE-BATCH</code>, <code>VARIABLES</code></td>
+<td>Templates, placeholders and test values (<code>TEMPLATE_AND_TOKENS.md</code>)</td>
+</tr>
+<tr>
+<td><code>LIST-AKA</code>, <code>PROVISION-AKA</code>, <code>RFM</code>, <code>TRIM</code>, <code>SPLIT</code>, <code>EXTRACT-APPS</code>, <code>REMOVE-NAA</code></td>
+<td>Targeted reads and changes</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="47-offline-tools">4.7 Offline tools</h3>
+<p>The tools of the GUI's Offline Tools on the command line:</p>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Decoder</td>
+<td><code>yggdrasim-asn1 --context &lt;hex&gt;</code>; <code>--domain</code> forces the reading (<code>apdu</code>, <code>response</code>, <code>es10</code>, <code>gp</code>, <code>uicc</code>, <code>cat</code>, <code>tlv</code>, <code>sw</code>, <code>ef</code>), <code>--file &lt;file&gt;</code> reads a trace or script, stdin when no hex is given, <code>--format json</code> for JSON</td>
+</tr>
+<tr>
+<td>TERMINAL PROFILE</td>
+<td><code>python -m yggdrasim_common.terminal_profile &lt;hex&gt;</code>; <code>decode -s</code>, <code>diff &lt;a&gt; &lt;b&gt;</code>, <code>build</code>, <code>list</code></td>
+</tr>
+<tr>
+<td>AddInitialEim</td>
+<td><code>ADD-INITIAL-EIM</code> and <code>EIM-CERT-STORE</code> in the eSIM Management console (section 4.3); answer Enter at its last question to build without sending</td>
+</tr>
+<tr>
+<td><abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> package lint</td>
+<td><code>EIM-PACKAGE-LINT [path]</code> in the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shell</td>
+</tr>
+<tr>
+<td><abbr title="GSM Association">GSMA</abbr> error codes</td>
+<td><code>ERROR-CODES [spec]</code> in the Local <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> shell</td>
+</tr>
+<tr>
+<td><abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> keys</td>
+<td><code>yggdrasim-suci-tool</code>: <code>USE &lt;key file&gt;</code>, <code>GENERATE SECP256R1</code> or <code>CURVE25519</code>, <code>DUMP [COMPRESSED]</code>, <code>TOOL [command]</code></td>
+</tr>
+<tr>
+<td><abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> TOPc</td>
+<td><code>DERIVE-TOPC &lt;TOP&gt; &lt;K&gt; [Keccak iterations]</code> in the <abbr title="Secure Channel Protocol 03 (GP)">SCP03</abbr> shell (section 4.1), with the checks of the Offline Tools <abbr title="3GPP TUAK authentication algorithm set">TUAK</abbr> entry: TOP of 32 bytes, K of 16 or 32, 1 to 16 iterations</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code-block"><pre><code>yggdrasim-asn1 --context 80E2910003BF2D00
+</code></pre></div>
+<div class="code-block"><pre><code>#1 STORE DATA [80 E2 91 00] -- ES10 transport command: the data field is one ES10x request TLV
+  context: GSMA eUICC ES10 (SGP.22 / SGP.32) (SGP.22 v3.1 section 5.7.2 table 47)
+  P1 91: last block; ... BER-TLV format; ISO case 4 (response data may be returned)
+  ProfileInfoListRequest  [SGP.22-v3.1, SGP.32-v1.3]
+</code></pre></div>
+<p>The <abbr title="Subscription Concealed Identifier (3GPP)">SUCI</abbr> tool runs pySim's <code>suci-keytool</code>; name the command with the
+<code>YGGDRASIM_SUCI_TOOL</code> flag when it is not on the <code>PATH</code>.</p>
+<h3 id="48-apdu-streaming">4.8 <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> Streaming</h3>
+<p>A reader on one machine can serve commands on another.</p>
+<ul>
+<li><code>yggdrasim-card-bridge --reader-name "&lt;reader name&gt;"</code> publishes a local
+  reader on <code>127.0.0.1:8642</code> behind a token. On the other machine, forward
+  the port over SSH and point a command at it:
+  <code>yggdrasim --remote-card-url http://127.0.0.1:8642/apdu
+  --remote-card-token-file &lt;token file&gt;</code>, or set <code>YGGDRASIM_CARD_RELAY_URL</code>
+  and <code>YGGDRASIM_CARD_RELAY_TOKEN_FILE</code> for any command. Launcher key <code>CB</code>
+  holds the same steps as a menu.</li>
+<li><code>yggdrasim-lab-agent --config &lt;yaml&gt;</code> publishes the rigs of a lab;
+  <code>yggdrasim-lab --agent &lt;url&gt; --token-file &lt;file&gt;</code> lists them
+  (<code>rigs</code>, <code>status</code>) and takes and gives back a session (<code>reserve</code>,
+  <code>release</code>, <code>heartbeat</code>).</li>
+</ul>
+<p><code>CARD_BRIDGE_GUIDE.md</code> and <code>site-docs/how-to/run-a-remote-lab-agent.md</code>
+are the guides.</p>
+<h3 id="49-hil-bridge">4.9 <abbr title="Hardware-In-The-Loop">HIL</abbr> bridge</h3>
+<p>On Linux with the full install:</p>
+<ul>
+<li><code>yggdrasim-hil-supervisor</code> runs the bridge and keeps it running;
+  <code>yggdrasim-hil-bridge --reader-name "&lt;reader name&gt;"</code> runs one bridge
+  session; launcher key <code>B</code> holds the same as a menu.</li>
+<li><code>yggdrasim-hil-reset</code> reboots the SIMtrace2 board over USB;
+  <code>yggdrasim-hil-modem-diag</code> mirrors a modem's own <abbr title="Subscriber Identity Module">SIM</abbr> interface log.</li>
+<li><code>yggdrasim --open-pcap &lt;file&gt; [--keybag &lt;file&gt;]</code> reviews a saved capture
+  without a bridge.</li>
+</ul>
+<p><code>HIL_BRIDGE_GUIDE.md</code> and <code>SIMTRACE2_CARDEM_GUIDE.md</code> cover the hardware
+and the setup.</p>
+<h3 id="410-the-simulator">4.10 The simulator</h3>
+<p>Launcher key <code>C</code> saves the simulator as the card backend (<code>[2]</code>) and holds
+its settings: the <abbr title="Issuer Security Domain - Root">ISD-R</abbr> configuration, the quirks file (<code>[D]</code> switches it
+off), the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr> identity, the stores, a profile import and a reset to the
+baseline. <code>USER_MANUAL.md</code> section 2.3 compares the ways to select it.</p>
+<p>For one launcher run, <code>--card-backend sim --sim-quirks none</code> selects it,
+and <code>--sim-isdr-config</code>, <code>--sim-eim-identity</code>, <code>--sim-euicc-store</code> and
+<code>--sim-profile-store</code> change its settings. <code>--sim-import-profile &lt;file&gt;</code>
+puts a profile package on the simulated card before the launch, and
+<code>--sim-import-enable</code> enables it. <code>yggdrasim-gui</code> and <code>yggdrasim-web-server</code>
+take the same options. The module commands of section 1.2 take none of
+them; they follow the saved choice or the environment
+(<code>YGGDRASIM_CARD_BACKEND=sim</code>, <code>YGGDRASIM_SIM_QUIRKS=none</code>).</p>
+<h2 id="5-other-commands">5. Other commands</h2>
+<div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
+<thead>
+<tr>
+<th>Command</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yggdrasim-mcp</code></td>
+<td>The MCP server over stdio, for an MCP client; card tools stay off unless <code>YGGDRASIM_MCP_ALLOW_CARD=1</code> (<code>site-docs/how-to/run-the-mcp-server.md</code>)</td>
+</tr>
+<tr>
+<td><code>yggdrasim-apdu-dissect</code></td>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> decoding inside Wireshark and tshark: install, decode, sidecar</td>
+</tr>
+<tr>
+<td><code>yggdrasim-apdu-fuzzer</code></td>
+<td><abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> mutation fuzzing, for lab cards only, behind an <abbr title="Integrated Circuit Card Identifier">ICCID</abbr> or IMSI allow list</td>
+</tr>
+<tr>
+<td><code>yggdrasim-eum-diag</code></td>
+<td>EUM and SM-DP+ diagnostics: session keys for the dissector, bound profile package decode</td>
+</tr>
+<tr>
+<td><code>yggdrasim-card-clone</code></td>
+<td>Charts a card's behaviour, read-only, into a profile the simulator can replay</td>
+</tr>
+<tr>
+<td><code>yggdrasim-profile-autoload</code></td>
+<td>Watches the simulator's profile store and opens each new profile in the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> Tool</td>
+</tr>
+<tr>
+<td><code>yggdrasim-session-diff</code></td>
+<td>Compares the <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> traces of two recordings (section 2.4)</td>
+</tr>
+<tr>
+<td><code>yggdrasim-yggdracore</code></td>
+<td>The 5G core stub over HTTP, off unless <code>YGGDRASIM_5GCORE_MODE=stub</code></td>
+</tr>
+<tr>
+<td><code>yggdrasim-scp11-relay</code></td>
+<td>The eSIM Management console under its older name</td>
+</tr>
+</tbody>
+</table></div>
+<p>Each takes <code>--help</code>, and <code>site-docs/reference/command-suite.md</code> sections 10
+to 12 describe them.</p>
+        </div>
+      </div><!-- /ygg-toc-body -->
+      <aside class="ygg-toc-rail" aria-label="On this page">
+        <p class="ygg-toc-rail-label">On this page</p>
+        <nav>
+            <a href="#1-start" class="toc-link">1. Start</a>
+            <a href="#11-the-launcher" class="toc-link toc-link-sub">1.1 The launcher</a>
+            <a href="#12-the-commands" class="toc-link toc-link-sub">1.2 The commands</a>
+            <a href="#2-how-every-shell-works" class="toc-link">2. How every shell works</a>
+            <a href="#21-interactive-use" class="toc-link toc-link-sub">2.1 Interactive use</a>
+            <a href="#22-batch-runs" class="toc-link toc-link-sub">2.2 Batch runs</a>
+            <a href="#23-choosing-the-reader" class="toc-link toc-link-sub">2.3 Choosing the reader</a>
+            <a href="#24-more-detail-debug-log-trace-record" class="toc-link toc-link-sub">2.4 More detail: --debug, --log, TRACE, RECORD</a>
+            <a href="#25-failures-and-exit-codes" class="toc-link toc-link-sub">2.5 Failures and exit codes</a>
+            <a href="#3-automation" class="toc-link">3. Automation</a>
+            <a href="#4-modules" class="toc-link">4. Modules</a>
+            <a href="#41-scp03-admin-shell-file-system-and-applications" class="toc-link toc-link-sub">4.1 SCP03 admin shell: file system and applications</a>
+            <a href="#42-scp80-ota-shell" class="toc-link toc-link-sub">4.2 SCP80 OTA shell</a>
+            <a href="#43-esim-management-console" class="toc-link toc-link-sub">4.3 eSIM Management console</a>
+            <a href="#44-local-sm-dp-shell" class="toc-link toc-link-sub">4.4 Local SM-DP+ shell</a>
+            <a href="#45-local-eim-shell" class="toc-link toc-link-sub">4.5 Local eIM shell</a>
+            <a href="#46-saip-tool-shell" class="toc-link toc-link-sub">4.6 SAIP Tool shell</a>
+            <a href="#47-offline-tools" class="toc-link toc-link-sub">4.7 Offline tools</a>
+            <a href="#48-apdu-streaming" class="toc-link toc-link-sub">4.8 APDU Streaming</a>
+            <a href="#49-hil-bridge" class="toc-link toc-link-sub">4.9 HIL bridge</a>
+            <a href="#410-the-simulator" class="toc-link toc-link-sub">4.10 The simulator</a>
+            <a href="#5-other-commands" class="toc-link">5. Other commands</a>
+        </nav>
+      </aside>
+      </div><!-- /ygg-content-toc -->
+    </main>
+    <footer class="px-6 py-6 sm:px-10 lg:px-14 xl:px-16 border-t border-zinc-950/[0.06] dark:border-white/[0.05]">
+      <div class="ygg-content flex flex-col items-center gap-2 text-xs text-zinc-500">
+        <div class="flex items-center gap-1.5 text-sm">
+          <span class="font-sans font-semibold text-zinc-700 dark:text-zinc-300">YggdraSIM</span>
+          <span class="text-zinc-400 dark:text-zinc-500">by</span>
+          <a href="https://1ot.com" target="_blank" rel="noopener" class="font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">1oT</a>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
+          <span>Copyright © 2026 1oT OÜ</span>
+          <span aria-hidden="true">·</span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+<script src="ygg.js?v=4"></script>
+<!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
+</body>
+</html>

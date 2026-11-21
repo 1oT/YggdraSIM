@@ -10,15 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="../tailwind.css?v=3">
-  <link rel="stylesheet" href="../ygg.css?v=3">
+  <link rel="stylesheet" href="../tailwind.css?v=4">
+  <link rel="stylesheet" href="../ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="../" data-ygg-partial-path="../partials/sidebar.html" data-ygg-active-sub="subsystems/simcard-simulator.html" data-ygg-open-sections="subsystems">
 <a class="ygg-skip-link" href="#ygg-main">Skip to content</a>
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="../ygg-layout.js?v=3"></script>
+  <script src="../ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -65,7 +65,7 @@ shells can target it in place of a <abbr title="Personal Computer/Smart Card (Wo
             <a href="#terminal-profile-bring-up-strategy" class="toc-link toc-link-sub">TERMINAL PROFILE bring-up strategy</a>
             <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body -- BF4F GetEimPackageRequest</a>
             <a href="#esipa-response-dispatch-on-receive-data" class="toc-link toc-link-sub">ESipa response dispatch on RECEIVE DATA</a>
-            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 §5.7.13)</a>
+            <a href="#loadcrl-bf35-sgp22-v31-5712" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 v3.1 §5.7.12)</a>
             <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up -- BF50 ProvideEimPackageResult</a>
             <a href="#more-time-polling-off-declare-service" class="toc-link toc-link-sub">MORE TIME / POLLING OFF / DECLARE SERVICE</a>
             <a href="#service-discovery-0x45-0x46-0x47" class="toc-link toc-link-sub">Service discovery (0x45 / 0x46 / 0x47)</a>
@@ -75,7 +75,7 @@ shells can target it in place of a <abbr title="Personal Computer/Smart Card (Wo
             <a href="#legacy-gsm-claa0-cold-attach-compatibility" class="toc-link toc-link-sub">Legacy GSM (CLA=A0) cold-attach compatibility</a>
             <a href="#saip-835-explicit-fcplinkpath-aliases" class="toc-link toc-link-sub">SAIP §8.3.5 explicit Fcp.linkPath aliases</a>
             <a href="#ts-31102-annex-h-shared-efs-dfgsm-adfusim-mirror" class="toc-link toc-link-sub">TS 31.102 Annex H &quot;shared EFs&quot; (DF.GSM &lt;-&gt; ADF.USIM mirror)</a>
-            <a href="#tca-profile-interoperability-35-9-template-default-fill-in" class="toc-link toc-link-sub">TCA Profile Interoperability §3.5 / §9 template default fill-in</a>
+            <a href="#tca-saip-v341-9-template-default-fill-in" class="toc-link toc-link-sub">TCA SAIP v3.4.1 §9 template default fill-in</a>
             <a href="#pysim-integration-phases-a-e" class="toc-link toc-link-sub">pySim integration (Phases A-E)</a>
             <a href="#efpsismsc-ust-service-91-round-26" class="toc-link toc-link-sub">EF.PSISMSC + UST service 91 (round 26)</a>
             <a href="#dfgsm-access-efkc-efkcgprs-round-25" class="toc-link toc-link-sub">DF.GSM-ACCESS + EF.Kc / EF.KcGPRS (round 25)</a>
@@ -620,7 +620,7 @@ probed by management tools and modems:</p>
 <tr>
 <td><code>00 5A</code></td>
 <td><abbr title="eUICC Identifier">EID</abbr> (<code>5A</code>)</td>
-<td>Full <abbr title="eUICC Identifier">EID</abbr> OCTET STRING; <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 §5.6.2.1 anchor.</td>
+<td>Full <abbr title="eUICC Identifier">EID</abbr> OCTET STRING; <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.02 v4.2 §2.2.2 anchor.</td>
 </tr>
 <tr>
 <td><code>00 42</code></td>
@@ -713,7 +713,7 @@ relevant section of TS 102 223 / TS 31.111:</p>
 <tr>
 <td><code>D9</code></td>
 <td>USSD Download</td>
-<td><code>80 01 00</code> per TS 31.111 §7.3.3 (tag <code>D9</code> per §9.1; <code>D8</code> reserved).</td>
+<td><code>80 01 00</code> per TS 31.111 v19.4 §7.6.2 (tag <code>D9</code> per §9.1; <code>D8</code> reserved).</td>
 </tr>
 <tr>
 <td>other</td>
@@ -1096,7 +1096,7 @@ TR handlers drive a SEND/RECEIVE DATA loop:</p>
 restores the linear OPEN/SEND/RECEIVE/CLOSE queue from before
 the TLS engine was wired in.</p>
 <h3 id="esipa-request-body-bf4f-geteimpackagerequest">ESipa request body -- <code>BF4F</code> GetEimPackageRequest</h3>
-<p><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1 <code>GetEimPackageRequest</code> (BF4F) wrapped in
+<p><abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.3.2.6 <code>GetEimPackageRequest</code> (BF4F) wrapped in
 HTTP/1.1 framing:</p>
 <ul>
 <li><code>5A</code> 16-byte <abbr title="eUICC Identifier">EID</abbr> (mandatory).</li>
@@ -1111,7 +1111,7 @@ that escape hatch is the way an integration test injects a
 opener.</p>
 <h3 id="esipa-response-dispatch-on-receive-data">ESipa response dispatch on RECEIVE DATA</h3>
 <p>through the <strong>RECEIVE DATA</strong> terminal response are the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s
-ESipa payload (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 §6.5). The toolkit:</p>
+ESipa payload (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.3 §6.1.1). The toolkit:</p>
 <p>and cleared on the <strong>CLOSE CHANNEL</strong> TR (success <em>or</em> failure;
    the bearer is gone either way).
 2. Strips any leading HTTP envelope (<code>HTTP/1.1 ...\r\n\r\n</code>) the
@@ -1133,7 +1133,7 @@ tests can build a <code>ToolkitLogic</code> in isolation; the engine wiring
 is the only place that introduces the dependency. Failures from
 the dispatcher (raised exceptions, <code>6Axx</code> SW pairs) are isolated
 to their package and do not abort the rest of the chain.</p>
-<h3 id="loadcrl-bf35-sgp22-5713">LoadCRL -- <code>BF35</code> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 §5.7.13)</h3>
+<h3 id="loadcrl-bf35-sgp22-v31-5712">LoadCRL -- <code>BF35</code> (<abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.22 v3.1 §5.7.12)</h3>
 <p>The <abbr title="Embedded UICC">eUICC</abbr> accepts CRL <abbr title="Distinguished Encoding Rules">DER</abbr> blobs pushed by the <abbr title="Remote SIM Provisioning">RSP</abbr> server. Each
 non-empty <code>BF35</code> STORE DATA payload is appended to
 <code>state.loaded_crls</code>; the response is <code>BF35</code> with an inner
@@ -1148,7 +1148,7 @@ the <abbr title="SIM Group Permanent (GSMA permanent reference document series; 
 non-empty response bytes, the IPA injects a fresh <strong>SEND DATA</strong>
 (plus a follow-up RECEIVE DATA to drain the <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>'s
 acknowledgement) directly in front of the still-pending CLOSE
-CHANNEL. The injected SEND DATA carries an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1
+CHANNEL. The injected SEND DATA carries an <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.3.2.7
 <code>ProvideEimPackageResult</code> (BF50) body wrapping:</p>
 <ul>
 <li><code>5A</code> <abbr title="eUICC Identifier">EID</abbr>,</li>
@@ -1167,7 +1167,7 @@ result for cycle N".</p>
 <h4 id="error-choice-bf50-with-0-eimpackageresulterrorcode">Error CHOICE -- <code>BF50</code> with <code>[0]</code> EimPackageResultErrorCode</h4>
 <p>When <em>every</em> dispatched package failed (the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr> layer returned a
 non-9000 SW pair, or the dispatcher itself raised), the IPA
-emits the error branch of the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.5.2.1 EimPackageResult
+emits the error branch of the <abbr title="SIM Group Permanent (GSMA permanent reference document series; e.g. SGP.02, SGP.22, SGP.32)">SGP</abbr>.32 v1.2 §6.3.2.7 EimPackageResult
 CHOICE instead of <code>BF51</code>/<code>BF52</code>/<code>BF54</code>:</p>
 <div class="code-block"><pre><code>BF50 LL { 5A 10 &lt;EID&gt;  80 05 30 03 02 01 XX }
 </code></pre></div>
@@ -1349,11 +1349,10 @@ record. The pre-existing round-21 baseline test had inherited
 the wrong service-number list and was repaired in the same
 patch (<code>tests/test_simcard_gap21_coverage.py</code>).</p>
 <h3 id="legacy-gsm-claa0-cold-attach-compatibility">Legacy GSM (CLA=A0) cold-attach compatibility</h3>
-<p>Some basebands -- particularly older Quectel BG95 / BG96 / EC25
-families and Cinterion / Telit derivatives -- still issue 3GPP
-TS 11.11 / TS 51.011 <code>CLA=A0</code> commands during the <abbr title="Subscriber Identity Module">SIM</abbr> cold-attach
-sequence even when the card answers as a <abbr title="Universal Integrated Circuit Card">UICC</abbr>. Two compatibility
-hooks keep that boot path unblocked:</p>
+<p>Some basebands still issue 3GPP TS 11.11 / TS 51.011 <code>CLA=A0</code>
+commands during the <abbr title="Subscriber Identity Module">SIM</abbr> cold-attach sequence even when the card
+answers as a <abbr title="Universal Integrated Circuit Card">UICC</abbr>. Two compatibility hooks keep that boot path
+unblocked:</p>
 <ol>
 <li><code>SimulatedSimCardEngine._is_supported_cla</code> accepts the
    <code>0xA0..0xAF</code> family and routes those APDUs through the same
@@ -1448,8 +1447,8 @@ captured-style SFI READ BINARY (<code>00B0870009</code>) that returned
 must surface identical content irrespective of whether the modem
 is reading them under <abbr title="Dedicated File">DF</abbr>.GSM (legacy <abbr title="Subscriber Identity Module">SIM</abbr> context) or ADF.<abbr title="Universal Subscriber Identity Module">USIM</abbr>
 (modern <abbr title="Universal Integrated Circuit Card">UICC</abbr> context). <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> issuers can lean on this
-contract heavily: a typical TCA Profile Interoperability §3.5.5
-profile only ships the canonical bytes of <abbr title="Elementary File">EF</abbr>.IMSI (<code>6F07</code>),
+contract heavily: a typical TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> v3.4.1 §8.3 file system
+only ships the canonical bytes of <abbr title="Elementary File">EF</abbr>.IMSI (<code>6F07</code>),
 <abbr title="Elementary File">EF</abbr>.AD (<code>6FAD</code>), <abbr title="Elementary File">EF</abbr>.LOCI (<code>6F7E</code>), <abbr title="Elementary File">EF</abbr>.FPLMN (<code>6F7B</code>), <abbr title="Elementary File">EF</abbr>.SPN
 (<code>6F46</code>), <abbr title="Elementary File">EF</abbr>.LI (<code>6F05</code>), <abbr title="Elementary File">EF</abbr>.HPLMN-related EFs and a handful of
 others under <abbr title="Dedicated File">DF</abbr>.GSM, and registers an empty <abbr title="File Control Parameters">FCP</abbr>-only stub under
@@ -1483,17 +1482,18 @@ once the operator <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr> o
 coverage lives in <code>tests/test_simcard_shared_ef_mirror.py</code>,
 including an optional slot that replays SFI READ BINARY against a
 locally selected <abbr title="Bound Profile Package (GSMA SGP.22)">BPP</abbr>. The tracked suite contains no operator identity.</p>
-<h3 id="tca-profile-interoperability-35-9-template-default-fill-in">TCA Profile Interoperability §3.5 / §9 template default fill-in</h3>
+<h3 id="tca-saip-v341-9-template-default-fill-in">TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> v3.4.1 §9 template default fill-in</h3>
 <p>After the Annex H mirror has run, <code>rebuild_runtime_filesystem</code>
 calls <code>_apply_saip_template_defaults_to_runtime</code> to layer in the
-<strong><abbr title="SIMalliance Interoperable Profile">SAIP</abbr> / TS 31.102 §9 template default values</strong> for every <abbr title="Elementary File">EF</abbr> the
+<strong>TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> v3.4.1 §9 template default values</strong> for every <abbr title="Elementary File">EF</abbr> the
 issuer left as a skeleton <abbr title="File Control Parameters">FCP</abbr>. Operator BPPs routinely register a
 <code>createFCP</code> for files like <code>EF.AD</code>, <code>EF.HPPLMN</code>, <code>EF.PSLOCI</code>,
 <code>EF.LOCI</code>, <code>EF.EPSLOCI</code>, <code>EF.START-HFN</code>, <code>EF.THRESHOLD</code>,
 <code>EF.Keys</code>, <code>EF.KeysPS</code>, <code>EF.FPLMN</code>, <code>EF.NETPAR</code>, <code>EF.EPSNSC</code>,
 <code>EF.PL</code>, <code>EF.UMPC</code>, ... without any matching <code>fillFileContent</code>,
-because the TCA Profile Interoperability §3.5 contract says the
-card materialises the template default at runtime. Without this
+because TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> v3.4.1 §9.1 Templates rules and usage gives each
+template file a default value that applies to any content the
+Profile Package does not set. Without this
 pass the modem reads <code>9000</code> with an empty body, which historically
 caused <code>00B0830004</code> (SFI=0x03 -&gt; <abbr title="Elementary File">EF</abbr>.AD) to return <code>6A82</code> -- the <abbr title="Elementary File">EF</abbr>
 existed in the <abbr title="File Control Parameters">FCP</abbr> tree but had no SFI registered because the
@@ -2042,7 +2042,7 @@ intercept without parsing <code>envelope_history</code> by hand:</p>
 </tr>
 <tr>
 <td><code>D9</code> USSD Download</td>
-<td>TS 31.111 §7.3.3</td>
+<td>TS 31.111 v19.4 §7.6.2</td>
 <td><code>last_ussd_download_dcs</code>, <code>last_ussd_download_raw</code>, <code>last_ussd_download_text</code> (best-effort decoded via <code>_decode_text_string</code>)</td>
 <td><code>ussd_downloads_received</code></td>
 </tr>
@@ -2541,8 +2541,8 @@ IMS layer of a paired modem expects to read at registration time:</p>
 simulator boot already exposes them without requiring custom
 provisioning JSON.</p>
 <h3 id="call-lifecycle-event-downloads-round-12">Call-lifecycle event downloads (round 12)</h3>
-<p><code>_handle_event_download</code> now decodes the three TS 102 223 §7.4.0
-.. §7.4.2 call events:</p>
+<p><code>_handle_event_download</code> now decodes the three TS 102 223 v18.3 §7.5.1
+.. §7.5.3 call events:</p>
 <div class="-mx-6 sm:mx-0 doc-table-scroll"><table class="doc-table">
 <thead>
 <tr>
@@ -2872,9 +2872,9 @@ EOF
 <li>3GPP TS 31.111 §7.1.2 Cell Broadcast Download (envelope <code>D2</code>)</li>
 <li>3GPP TS 31.111 §7.3.1 Call Control by <abbr title="Universal Subscriber Identity Module">USIM</abbr> (envelope <code>D4</code>)</li>
 <li>3GPP TS 31.111 §7.3.2 MO Short Message Control (envelope <code>D5</code>)</li>
-<li>3GPP TS 102 223 §7.1.7 Timer Expiration (envelope <code>D7</code>)</li>
-<li>3GPP TS 31.111 §7.3.3 USSD Download (envelope <code>D9</code>; <code>D8</code> reserved for intra-<abbr title="Universal Integrated Circuit Card">UICC</abbr> communication)</li>
-<li>TCA Profile Interoperability §3.4.2 profileHeader.connectivityParameters</li>
+<li><abbr title="European Telecommunications Standards Institute">ETSI</abbr> TS 102 223 v18.3 §7.4 Timer Expiration (envelope <code>D7</code>)</li>
+<li>3GPP TS 31.111 v19.4 §7.6 USSD Download (envelope <code>D9</code>; <code>D8</code> reserved for intra-<abbr title="Universal Integrated Circuit Card">UICC</abbr> communication)</li>
+<li>TCA <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> v3.4.1 §8.2.1 Profile header definition, profileHeader.connectivityParameters</li>
 </ul>
         </div>
       </div><!-- /ygg-toc-body -->
@@ -2899,7 +2899,7 @@ EOF
             <a href="#terminal-profile-bring-up-strategy" class="toc-link toc-link-sub">TERMINAL PROFILE bring-up strategy</a>
             <a href="#esipa-request-body-bf4f-geteimpackagerequest" class="toc-link toc-link-sub">ESipa request body -- BF4F GetEimPackageRequest</a>
             <a href="#esipa-response-dispatch-on-receive-data" class="toc-link toc-link-sub">ESipa response dispatch on RECEIVE DATA</a>
-            <a href="#loadcrl-bf35-sgp22-5713" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 §5.7.13)</a>
+            <a href="#loadcrl-bf35-sgp22-v31-5712" class="toc-link toc-link-sub">LoadCRL -- BF35 (SGP.22 v3.1 §5.7.12)</a>
             <a href="#esipa-result-follow-up-bf50-provideeimpackageresult" class="toc-link toc-link-sub">ESipa result follow-up -- BF50 ProvideEimPackageResult</a>
             <a href="#more-time-polling-off-declare-service" class="toc-link toc-link-sub">MORE TIME / POLLING OFF / DECLARE SERVICE</a>
             <a href="#service-discovery-0x45-0x46-0x47" class="toc-link toc-link-sub">Service discovery (0x45 / 0x46 / 0x47)</a>
@@ -2909,7 +2909,7 @@ EOF
             <a href="#legacy-gsm-claa0-cold-attach-compatibility" class="toc-link toc-link-sub">Legacy GSM (CLA=A0) cold-attach compatibility</a>
             <a href="#saip-835-explicit-fcplinkpath-aliases" class="toc-link toc-link-sub">SAIP §8.3.5 explicit Fcp.linkPath aliases</a>
             <a href="#ts-31102-annex-h-shared-efs-dfgsm-adfusim-mirror" class="toc-link toc-link-sub">TS 31.102 Annex H &quot;shared EFs&quot; (DF.GSM &lt;-&gt; ADF.USIM mirror)</a>
-            <a href="#tca-profile-interoperability-35-9-template-default-fill-in" class="toc-link toc-link-sub">TCA Profile Interoperability §3.5 / §9 template default fill-in</a>
+            <a href="#tca-saip-v341-9-template-default-fill-in" class="toc-link toc-link-sub">TCA SAIP v3.4.1 §9 template default fill-in</a>
             <a href="#pysim-integration-phases-a-e" class="toc-link toc-link-sub">pySim integration (Phases A-E)</a>
             <a href="#efpsismsc-ust-service-91-round-26" class="toc-link toc-link-sub">EF.PSISMSC + UST service 91 (round 26)</a>
             <a href="#dfgsm-access-efkc-efkcgprs-round-25" class="toc-link toc-link-sub">DF.GSM-ACCESS + EF.Kc / EF.KcGPRS (round 25)</a>
@@ -2965,13 +2965,13 @@ EOF
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="../ygg.js?v=3"></script>
+<script src="../ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>

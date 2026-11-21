@@ -10,8 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>html{font-size:100%}</style>
   <script>(function(){var s=localStorage.getItem('ygg-theme');var p=window.matchMedia('(prefers-color-scheme: dark)').matches;if(s==='dark'||(!s&&p))document.documentElement.classList.add('dark');})();</script>
-  <link rel="stylesheet" href="tailwind.css?v=3">
-  <link rel="stylesheet" href="ygg.css?v=3">
+  <link rel="stylesheet" href="tailwind.css?v=4">
+  <link rel="stylesheet" href="ygg.css?v=4">
 </head>
 <body class="antialiased font-sans bg-zinc-50 dark:bg-[var(--bg-page)] text-zinc-900 dark:text-zinc-100"
       data-ygg-base="" data-ygg-partial-path="partials/sidebar.html" data-ygg-active-link="getting-started.html">
@@ -20,7 +20,7 @@
 
 <div id="ygg-shell" class="flex min-h-dvh isolate ygg-layout-pending">
   <div id="ygg-chrome-mount"></div>
-  <script src="ygg-layout.js?v=3"></script>
+  <script src="ygg-layout.js?v=4"></script>
   <div id="ygg-main-column" class="flex-1 lg:ml-64 flex flex-col min-h-dvh">
     <header class="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white/95 dark:bg-[var(--bg-page)]/95 backdrop-blur-sm border-b border-zinc-950/[0.07] dark:border-white/[0.05] shrink-0">
       <button type="button" onclick="openSidebar()" class="ygg-icon-btn flex items-center justify-center size-11 rounded-md text-zinc-500 transition-colors" aria-label="Open menu">
@@ -64,9 +64,10 @@
 <li>optional Wireshark, <code>osmo-remsim-client-st2</code>, and SIMtrace2 for <abbr title="Hardware-In-The-Loop">HIL</abbr> work</li>
 <li>optional <code>Tools.CardBridge</code> + SSH tunnel when the card reader is on a
   different host than the YggdraSIM process</li>
-<li>optional on-disk <code>pysim/</code> checkout when you need <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> ASN.1 compile or
-  the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> local / <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local flows (see the <em>Optional pySim checkout</em>
-  section below)</li>
+<li>optional on-disk <code>pysim/</code> checkout, only when you work on pySim itself;
+  the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> ASN.1 compile and the <abbr title="Secure Channel Protocol 11 (GP, elliptic curve)">SCP11</abbr> local / <abbr title="eSIM IoT Manager (GSMA SGP.32)">eIM</abbr>-local flows use the
+  installed pySim (see <em>Developer checkout (advanced)</em> under <em>pySim
+  provisioning</em> below)</li>
 </ul>
 <h2 id="install-the-runtime">Install the runtime</h2>
 <p>Install the Python dependencies:</p>
@@ -152,10 +153,12 @@ yggdrasim-suci-tool
 <li><code>Workspace/SIMCARD/eim_identity.json</code> remains the simulator-side default when no stronger card-side override is applied</li>
 </ul>
 <h2 id="pysim-provisioning">pySim provisioning</h2>
-<p>YggdraSIM treats <a href="https://github.com/osmocom/pysim"><code>pySim</code></a> as an
-<strong>upstream</strong> dependency rather than a vendored copy. The canonical
-distribution channel is the <code>[saip]</code> extra, which installs upstream
-pySim directly from its GitHub mirror:</p>
+<p>YggdraSIM treats <a href="https://github.com/osmocom/pysim"><code>pySim</code></a> as a
+dependency rather than a vendored copy, pinned to
+<a href="https://github.com/hampushellsberg-dev/pysim"><code>hampushellsberg-dev/pysim</code></a>:
+osmocom pySim master with the fixes in <code>upstream_patches/osmocom-pysim-*</code>
+on top, one commit each, until osmocom merges them. The install pulls that
+tree directly from GitHub:</p>
 <div class="code-block"><pre><code>python -m pip install -e &#39;.[saip]&#39;
 </code></pre></div>
 <p>That one command unlocks the <abbr title="SIMalliance Interoperable Profile">SAIP</abbr> ASN.1 compile path used by
@@ -166,9 +169,10 @@ do not touch <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>; <code>
 (non-fatal) and <abbr title="SIMalliance Interoperable Profile">SAIP</abbr>-dependent tests auto-skip via
 <code>tests/conftest.py</code>.</p>
 <h3 id="developer-checkout-advanced">Developer checkout (advanced)</h3>
-<p>If you want to iterate against an unreleased upstream branch, drop a
-checkout at <code>&lt;repo&gt;/pysim</code>:</p>
-<div class="code-block"><pre><code>git clone https://github.com/osmocom/pysim.git pysim
+<p>If you want to work on pySim itself, drop a checkout of the pinned fork
+at <code>&lt;repo&gt;/pysim</code>; it has to carry the same fixes as the pin, since the
+<abbr title="SIMalliance Interoperable Profile">SAIP</abbr> tools refuse a pySim without them:</p>
+<div class="code-block"><pre><code>git clone https://github.com/hampushellsberg-dev/pysim.git pysim
 </code></pre></div>
 <p>The <code>pysim/</code> directory is listed in <code>.gitignore</code> and is never
 redistributed with this project. When present, it takes priority over
@@ -178,6 +182,10 @@ dependency: installed from the normal packaging channels, not
 vendored.</p>
 <h2 id="read-next">Read next</h2>
 <ul>
+<li>Read the <a href="user-manual.html">User Manual</a> for the modules,
+  the concepts the GUI and the CLI share and work on a real card, then its
+  <a href="user-manual-gui.html">GUI</a> and
+  <a href="user-manual-cli.html">CLI</a> chapters.</li>
 <li>Use <a href="operator-surfaces.html">Operator Surfaces</a> to choose the right module.</li>
 <li>Use <a href="subsystems/gui-command-center.html">Universal GUI Command Center</a> when
   you want a browser/desktop workbench with live <abbr title="Application Protocol Data Unit (ISO 7816-4)">APDU</abbr> streaming.</li>
@@ -220,13 +228,13 @@ vendored.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 text-zinc-400 dark:text-zinc-500">
           <span>Copyright © 2026 1oT OÜ</span>
           <span aria-hidden="true">·</span>
-          <span>Last updated <span data-ygg-updated>October 19, 2026</span></span>
+          <span>Last updated <span data-ygg-updated>November 21, 2026</span></span>
         </div>
       </div>
     </footer>
   </div>
 </div>
-<script src="ygg.js?v=3"></script>
+<script src="ygg.js?v=4"></script>
 <!-- Mermaid: ygg.js loads ygg-mermaid.js when .doc-prose contains pre.mermaid -->
 </body>
 </html>
